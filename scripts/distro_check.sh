@@ -131,32 +131,40 @@ detect_de() {
     if [ "${XDG_CURRENT_DESKTOP:-}" = "" ]; then
         # Try to detect via installed packages or other env vars if not set
         case "$DISTRO_ID" in
-            "arch")
-                if pacman -Qq plasma-desktop >/dev/null 2>&1; then
-                    XDG_CURRENT_DESKTOP="KDE"
-                elif pacman -Qq gnome-shell >/dev/null 2>&1; then
-                    XDG_CURRENT_DESKTOP="GNOME"
-                fi
-                ;;
-            "fedora")
-                if rpm -q plasma-desktop >/dev/null 2>&1; then
-                    XDG_CURRENT_DESKTOP="KDE"
-                elif rpm -q gnome-shell >/dev/null 2>&1; then
-                    XDG_CURRENT_DESKTOP="GNOME"
-                fi
-                ;;
-            "debian")
-                if dpkg -l | grep -q plasma-desktop; then
-                    XDG_CURRENT_DESKTOP="KDE"
-                elif dpkg -l | grep -q gnome-shell; then
-                    XDG_CURRENT_DESKTOP="GNOME"
-                fi
-                ;;
+        "arch")
+            # KDE Plasma is most common on Arch, check for plasma processes
+            if pgrep -f "plasma" >/dev/null 2>&1; then
+                XDG_CURRENT_DESKTOP="KDE"
+            elif pgrep -f "gnome" >/dev/null 2>&1; then
+                XDG_CURRENT_DESKTOP="GNOME:GNOME"
+            else
+                XDG_CURRENT_DESKTOP="unknown"
+            fi
+            ;;
+        "fedora")
+            if rpm -q plasma-desktop >/dev/null 2>&1; then
+                XDG_CURRENT_DESKTOP="KDE"
+            elif rpm -q gnome-shell >/dev/null 2>&1; then
+                XDG_CURRENT_DESKTOP="GNOME"
+            else
+                XDG_CURRENT_DESKTOP="unknown"
+            fi
+            ;;
+        "debian")
+            if dpkg -l | grep -q plasma-desktop; then
+                XDG_CURRENT_DESKTOP="KDE"
+            elif dpkg -l | grep -q gnome-shell; then
+                XDG_CURRENT_DESKTOP="GNOME"
+            else
+                XDG_CURRENT_DESKTOP="unknown"
+            fi
+            ;;
         esac
     fi
 
     export XDG_CURRENT_DESKTOP
-    log_info "Desktop Environment: ${XDG_CURRENT_DESKTOP:-None}"
+    log_info "Desktop Environment: ${XDG_CURRENT_DESKTOP:-None detected}"
+    return 0
 }
 
 # Setup package providers respecting distribution defaults

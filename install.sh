@@ -835,10 +835,8 @@ if ! detect_distro; then
     exit 1
 fi
 
-if ! detect_de; then
-    log_warn "Could not detect desktop environment - some features may not work optimally."
-    log_info "You can continue, but desktop-specific configurations may be skipped."
-fi
+# Desktop environment detection (always succeeds now)
+detect_de || true
 
 # Detect if running in a virtual machine
 if detect_virtual_machine; then

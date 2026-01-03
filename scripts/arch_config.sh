@@ -76,7 +76,6 @@ ARCH_NATIVE_STANDARD=(
     btop
     chromium
     cmatrix
-    cpupower
     dosfstools
     duf
     firefox
@@ -130,7 +129,6 @@ ARCH_NATIVE_MINIMAL=(
     btop
     chromium
     cmatrix
-    cpupower
     dosfstools
     duf
     firefox
@@ -293,9 +291,12 @@ arch_system_preparation() {
     # Enable multilib repository
     check_and_enable_multilib
 
-    # Install essential packages early
+    # Install essential packages early with enhanced error handling
     log_info "Installing essential Arch Linux packages..."
-    install_packages_with_progress "${ARCH_ESSENTIALS[@]}"
+    if ! install_packages_with_progress "${ARCH_ESSENTIALS[@]}"; then
+        log_error "Failed to install essential packages"
+        return 1
+    fi
 
     # Setup AUR helper and mirror optimization
     if ! "$SCRIPT_DIR/arch_aur_setup.sh"; then
@@ -542,7 +543,9 @@ arch_install_kernel_headers() {
 
     if [ -n "$headers_to_install" ]; then
         log_info "Installing kernel headers..."
-        install_packages_with_progress $headers_to_install
+        if ! install_packages_with_progress $headers_to_install; then
+            log_warn "Failed to install some kernel headers"
+        fi
     else
         log_info "All kernel headers are already installed"
     fi
@@ -765,12 +768,15 @@ arch_setup_solaar() {
 
     if [ "$has_logitech" = true ]; then
         log_info "Installing solaar for Logitech hardware management..."
-        install_packages_with_progress "solaar"
-        # Enable solaar service if present
-        if systemctl enable --now solaar.service >/dev/null 2>&1; then
-            log_success "Solaar service enabled and started"
+        if install_packages_with_progress "solaar"; then
+            # Enable solaar service if present
+            if systemctl enable --now solaar.service >/dev/null 2>&1; then
+                log_success "Solaar service enabled and started"
+            else
+                log_warn "Failed to enable solaar service (may not exist on all systems)"
+            fi
         else
-            log_warn "Failed to enable solaar service (may not exist on all systems)"
+            log_warn "Failed to install solaar"
         fi
     else
         log_info "No Logitech hardware detected, skipping solaar installation"
@@ -790,9 +796,11 @@ arch_configure_plymouth() {
     fi
 
     # Ensure plymouth package is installed
-    if ! command -v plymouth >/dev/null 2>&1; then
+    if ! command -v plymouth >/dev/null; then
         log_info "Installing 'plymouth' package..."
-        install_packages_with_progress "plymouth"
+        if ! install_packages_with_progress "plymouth"; then
+            log_warn "Failed to install plymouth"
+        fi
     else
         log_info "Plymouth already installed"
     fi

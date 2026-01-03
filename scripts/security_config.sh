@@ -11,12 +11,11 @@ source "$SCRIPT_DIR/distro_check.sh"
 # Security-specific package lists
 SECURITY_ESSENTIALS=(
     fail2ban
-    ufw
 )
 
 SECURITY_ARCH=(
-    apparmor
     ufw
+    apparmor
 )
 
 SECURITY_FEDORA=(
@@ -25,193 +24,227 @@ SECURITY_FEDORA=(
 )
 
 SECURITY_DEBIAN=(
+    ufw
     apparmor
     apparmor-profiles
     apparmor-utils
 )
 
 # =============================================================================
-# SECURITY CONFIGURATION FUNCTIONS
+# FIREWALL CONFIGURATION SYSTEM
 # =============================================================================
 
-# Install security packages for all distributions
-security_install_packages() {
-    display_step "🔒" "Installing Security Packages"
-
-    # Install security essential packages
-    if [ ${#SECURITY_ESSENTIALS[@]} -gt 0 ]; then
-        install_packages_with_progress "${SECURITY_ESSENTIALS[@]}"
-    fi
-
-    # Install distribution-specific security packages
-    case "$DISTRO_ID" in
-        "arch")
-            if [ ${#SECURITY_ARCH[@]} -gt 0 ]; then
-                install_packages_with_progress "${SECURITY_ARCH[@]}"
-            fi
-            ;;
-        "fedora")
-            if [ ${#SECURITY_FEDORA[@]} -gt 0 ]; then
-                install_packages_with_progress "${SECURITY_FEDORA[@]}"
-            fi
-            ;;
-        "debian"|"ubuntu")
-            if [ ${#SECURITY_DEBIAN[@]} -gt 0 ]; then
-                install_packages_with_progress "${SECURITY_DEBIAN[@]}"
-            fi
-            ;;
-    esac
-}
-
-# Configure Fail2ban intrusion prevention system
-security_configure_fail2ban() {
-    display_step "🛡️" "Configuring Fail2ban"
-
-    # Configure fail2ban for all distributions
-    if [ ! -f /etc/fail2ban/jail.local ]; then
-        log_info "Creating fail2ban configuration..."
-
-        # Copy default config to local config
-        if [ -f /etc/fail2ban/jail.conf ]; then
-            cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
-        fi
-
-        # Configure fail2ban settings
-        sed -i 's/^backend = auto/backend = systemd/' /etc/fail2ban/jail.local 2>/dev/null || true
-        sed -i 's/^bantime  = 10m/bantime = 1h/' /etc/fail2ban/jail.local 2>/dev/null || true
-        sed -i 's/^findtime  = 10m/findtime = 10m/' /etc/fail2ban/jail.local 2>/dev/null || true
-        sed -i 's/^maxretry = 5/maxretry = 3/' /etc/fail2ban/jail.local 2>/dev/null || true
-
-        # Enable SSH jail
-        sed -i 's/^enabled = false/enabled = true/' /etc/fail2ban/jail.local 2>/dev/null || true
-    fi
-
-    # Enable and start fail2ban service
-    if systemctl enable --now fail2ban >/dev/null 2>&1; then
-        log_success "fail2ban enabled and started"
-    else
-        log_warn "Failed to enable fail2ban service"
-    fi
-}
-
-# Configure firewall (UFW for Arch/Debian/Ubuntu, firewalld for Fedora)
+# Install and configure appropriate firewall for the distribution
 security_configure_firewall() {
     display_step "🔥" "Configuring Firewall"
 
+    # Get the appropriate firewall package for this distribution
+    local firewall_pkg
+    firewall_pkg=$(get_firewall_package)
+
+    log_info "Installing $firewall_pkg for $DISTRO_ID..."
+
+    # Install firewall package
+    if ! install_packages_with_progress "$firewall_pkg"; then
+        log_error "Failed to install $firewall_pkg"
+        return 1
+    fi
+
+    # Configure firewall based on distribution
     case "$DISTRO_ID" in
-        "arch")
-            # Configure UFW for Arch
-            ufw default deny incoming >/dev/null 2>&1
-            ufw default allow outgoing >/dev/null 2>&1
-            ufw limit ssh >/dev/null 2>&1
-
-            # Allow KDE Connect if KDE is detected
-            if [ "${XDG_CURRENT_DESKTOP:-}" = "KDE" ]; then
-                ufw allow 1714:1764/udp >/dev/null 2>&1
-                ufw allow 1714:1764/tcp >/dev/null 2>&1
-                log_success "KDE Connect ports (1714-1764 UDP/TCP) allowed in UFW"
-            fi
-
-            # Force enable without prompt, and ensure the ufw systemd service is enabled so rules persist across reboot
-            echo "y" | ufw enable >/dev/null 2>&1 || true
-            if command -v systemctl >/dev/null 2>&1; then
-                if systemctl enable --now ufw >/dev/null 2>&1; then
-                    log_success "UFW enabled and will start on boot"
-                else
-                    log_warn "Failed to enable ufw.service; firewall may not persist across reboot"
-                fi
-            fi
-            log_success "UFW configured with SSH and KDE Connect (if applicable)"
+        "arch"|"debian"|"ubuntu")
+            configure_ufw_firewall
             ;;
         "fedora")
-            # Configure firewalld for Fedora
-            if command -v firewall-cmd >/dev/null 2>&1; then
-                if systemctl enable --now firewalld >/dev/null 2>&1; then
-                    firewall-cmd --set-default-zone=public >/dev/null 2>&1
-                    firewall-cmd --permanent --add-service=ssh >/dev/null 2>&1
-
-                    # Allow KDE Connect if KDE is detected
-                    if [ "${XDG_CURRENT_DESKTOP:-}" = "KDE" ]; then
-                        if firewall-cmd --permanent --add-service=kde-connect >/dev/null 2>&1; then
-                            log_success "KDE Connect service allowed in firewall"
-                        else
-                            # Fallback: manually allow KDE Connect ports
-                            firewall-cmd --permanent --add-port=1714-1764/udp >/dev/null 2>&1
-                            firewall-cmd --permanent --add-port=1714-1764/tcp >/dev/null 2>&1
-                            log_success "KDE Connect ports (1714-1764) allowed in firewall"
-                        fi
-                    fi
-
-                    firewall-cmd --reload >/dev/null 2>&1
-                    log_success "firewalld configured with SSH and KDE Connect (if applicable)"
-                else
-                    log_warn "Failed to enable firewalld"
-                fi
-            fi
-            ;;
-        "debian"|"ubuntu")
-            # Configure UFW for Debian/Ubuntu
-            ufw default deny incoming >/dev/null 2>&1
-            ufw default allow outgoing >/dev/null 2>&1
-            ufw limit ssh >/dev/null 2>&1
-
-            # Allow KDE Connect if KDE is detected
-            if [ "${XDG_CURRENT_DESKTOP:-}" = "KDE" ]; then
-                ufw allow 1714:1764/udp >/dev/null 2>&1
-                ufw allow 1714:1764/tcp >/dev/null 2>&1
-                log_success "KDE Connect ports (1714-1764 UDP/TCP) allowed in UFW"
-            fi
-
-            # Force enable without prompt, and ensure the ufw systemd service is enabled so rules persist across reboot
-            echo "y" | ufw enable >/dev/null 2>&1 || true
-            if command -v systemctl >/dev/null 2>&1; then
-                if systemctl enable --now ufw >/dev/null 2>&1; then
-                    log_success "UFW enabled and will start on boot"
-                else
-                    log_warn "Failed to enable ufw.service; firewall may not persist across reboot"
-                fi
-            fi
-            log_success "UFW configured with SSH and KDE Connect (if applicable)"
+            configure_firewalld_firewall
             ;;
     esac
+
+    log_success "Firewall configured successfully"
 }
 
-# Configure AppArmor security framework
-security_configure_apparmor() {
-    display_step "🛡️" "Configuring AppArmor"
+# Configure UFW (Ubuntu/Debian family)
+configure_ufw_firewall() {
+    log_info "Configuring UFW firewall..."
 
-    if [ "$DISTRO_ID" == "arch" ] || [ "$DISTRO_ID" == "debian" ] || [ "$DISTRO_ID" == "ubuntu" ]; then
-        if command -v apparmor_parser >/dev/null 2>&1; then
-            # Enable AppArmor
-            if systemctl enable --now apparmor >/dev/null 2>&1; then
-                log_success "AppArmor enabled and started"
+    # Reset UFW to defaults
+    ufw --force reset >/dev/null 2>&1 || true
 
-                # Load default profiles
-                apparmor_parser -q /etc/apparmor.d/* >/dev/null 2>&1 || true
-                log_success "AppArmor profiles loaded"
-            else
-                log_warn "Failed to enable AppArmor"
-            fi
+    # Set default policies
+    ufw default deny incoming >/dev/null 2>&1
+    ufw default allow outgoing >/dev/null 2>&1
+
+    # Allow SSH (if on server, might want to restrict this)
+    ufw allow ssh >/dev/null 2>&1
+
+    # Allow essential services
+    ufw allow 22/tcp    # SSH
+    ufw allow 80/tcp    # HTTP
+    ufw allow 443/tcp   # HTTPS
+
+    # Allow KDE Connect if KDE is detected
+    if [ "${XDG_CURRENT_DESKTOP:-}" = "KDE" ]; then
+        ufw allow 1714:1764/udp >/dev/null 2>&1
+        ufw allow 1714:1764/tcp >/dev/null 2>&1
+        log_success "KDE Connect ports (1714-1764 UDP/TCP) allowed in UFW"
+    fi
+
+    # Enable UFW
+    echo "y" | ufw enable >/dev/null 2>&1 || true
+
+    # Enable logging
+    ufw logging on >/dev/null 2>&1
+
+    # Force enable without prompt, and ensure the ufw systemd service is enabled so rules persist across reboot
+    if command -v systemctl >/dev/null 2>&1; then
+        if systemctl enable --now ufw >/dev/null 2>&1; then
+            log_success "UFW enabled and will start on boot"
+        else
+            log_warn "Failed to enable ufw.service; firewall may not persist across reboot"
         fi
+    fi
+
+    log_success "UFW firewall configured"
+    log_info "  - Default: deny incoming, allow outgoing"
+    log_info "  - Allowed: SSH (22), HTTP (80), HTTPS (443)"
+    if [ "${XDG_CURRENT_DESKTOP:-}" = "KDE" ]; then
+        log_info "  - KDE Connect: 1714-1764 UDP/TCP"
     fi
 }
 
-# Configure SELinux security framework (Fedora only)
-security_configure_selinux() {
-    display_step "🛡️" "Configuring SELinux"
+# Configure firewalld (Fedora family)
+configure_firewalld_firewall() {
+    log_info "Configuring firewalld..."
 
-    if [ "$DISTRO_ID" == "fedora" ]; then
-        if command -v sestatus >/dev/null 2>&1; then
-            # Check SELinux status
-            local selinux_status=$(sestatus | grep "SELinux status" | awk '{print $3}')
-            if [ "$selinux_status" == "enabled" ]; then
-                log_info "SELinux is already enabled"
-            else
-                log_info "SELinux is disabled, enabling..."
-                setenforce 1 >/dev/null 2>&1
-                log_success "SELinux enabled in permissive mode"
-            fi
+    # Start and enable firewalld
+    systemctl enable --now firewalld >/dev/null 2>&1
+
+    # Set default zone to public
+    firewall-cmd --set-default-zone=public --permanent >/dev/null 2>&1
+
+    # Add essential services
+    firewall-cmd --permanent --add-service=ssh >/dev/null 2>&1
+    firewall-cmd --permanent --add-service=http >/dev/null 2>&1
+    firewall-cmd --permanent --add-service=https >/dev/null 2>&1
+
+    # Allow KDE Connect if KDE is detected
+    if [ "${XDG_CURRENT_DESKTOP:-}" = "KDE" ]; then
+        if firewall-cmd --permanent --add-service=kde-connect >/dev/null 2>&1; then
+            log_success "KDE Connect service allowed in firewall"
+        else
+            # Fallback: manually allow KDE Connect ports
+            firewall-cmd --permanent --add-port=1714-1764/udp >/dev/null 2>&1
+            firewall-cmd --permanent --add-port=1714-1764/tcp >/dev/null 2>&1
+            log_success "KDE Connect ports (1714-1764) allowed in firewall"
         fi
+    fi
+
+    # Reload firewalld
+    firewall-cmd --reload >/dev/null 2>&1
+
+    log_success "firewalld configured"
+    log_info "  - Default zone: public"
+    log_info "  - Allowed services: SSH, HTTP, HTTPS"
+    if [ "${XDG_CURRENT_DESKTOP:-}" = "KDE" ]; then
+        log_info "  - KDE Connect: 1714-1764 UDP/TCP"
+    fi
+}
+
+# Configure fail2ban for all distributions
+security_configure_fail2ban() {
+    display_step "🔒" "Configuring Fail2ban"
+
+    # Install fail2ban
+    if ! install_packages_with_progress "fail2ban"; then
+        log_error "Failed to install fail2ban"
+        return 1
+    fi
+
+    # Create jail.local configuration
+    local jail_config="/etc/fail2ban/jail.local"
+    cat > "$jail_config" << EOF
+[DEFAULT]
+# Ban hosts for 1 hour
+bantime = 3600
+
+# A host is banned if it has generated "maxretry" during the last "findtime" seconds
+findtime = 600
+
+# Number of tries before a host gets banned
+maxretry = 3
+
+# Enable email notifications (if mail is configured)
+destemail = root@localhost
+sender = fail2ban@localhost
+action = %(action_mw)s
+
+[sshd]
+enabled = true
+port = ssh
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 3
+
+[sshd-ddos]
+enabled = true
+port = ssh
+filter = sshd-ddos
+logpath = /var/log/auth.log
+maxretry = 2
+EOF
+
+    # Enable and start fail2ban
+    systemctl enable --now fail2ban >/dev/null 2>&1
+
+    log_success "Fail2ban configured"
+    log_info "  - SSH brute force protection enabled"
+    log_info "  - Ban time: 1 hour"
+    log_info "  - Max retries: 3"
+}
+
+# Configure AppArmor (Debian/Ubuntu family)
+security_configure_apparmor() {
+    if [ "$DISTRO_ID" != "fedora" ]; then
+        display_step "🛡️" "Configuring AppArmor"
+
+        # Install AppArmor packages
+        if ! install_packages_with_progress "apparmor" "apparmor-utils"; then
+            log_warn "Failed to install AppArmor"
+            return 1
+        fi
+
+        # Enable AppArmor
+        if systemctl enable --now apparmor >/dev/null 2>&1; then
+            log_success "AppArmor enabled and started"
+
+            # Load default profiles
+            apparmor_parser -q /etc/apparmor.d/* >/dev/null 2>&1 || true
+            log_success "AppArmor profiles loaded"
+        else
+            log_warn "Failed to enable AppArmor"
+        fi
+
+        log_success "AppArmor configured"
+        log_info "  - Mandatory Access Control enabled"
+    fi
+}
+
+# Configure SELinux (Fedora family)
+security_configure_selinux() {
+    if [ "$DISTRO_ID" = "fedora" ]; then
+        display_step "🛡️" "Configuring SELinux"
+
+        # Install SELinux packages
+        if ! install_packages_with_progress "selinux-policy-targeted"; then
+            log_warn "Failed to install SELinux"
+            return 1
+        fi
+
+        # Set SELinux to enforcing mode
+        setenforce 1 2>/dev/null || true
+
+        log_success "SELinux configured"
+        log_info "  - Enforcing mode enabled"
     fi
 }
 
@@ -271,7 +304,34 @@ security_configure_user_groups() {
     done
 }
 
+# Install security packages for all distributions
+security_install_packages() {
+    display_step "🔒" "Installing Security Packages"
 
+    # Install security essential packages
+    if [ ${#SECURITY_ESSENTIALS[@]} -gt 0 ]; then
+        install_packages_with_progress "${SECURITY_ESSENTIALS[@]}"
+    fi
+
+    # Install distribution-specific security packages
+    case "$DISTRO_ID" in
+        "arch")
+            if [ ${#SECURITY_ARCH[@]} -gt 0 ]; then
+                install_packages_with_progress "${SECURITY_ARCH[@]}"
+            fi
+            ;;
+        "fedora")
+            if [ ${#SECURITY_FEDORA[@]} -gt 0 ]; then
+                install_packages_with_progress "${SECURITY_FEDORA[@]}"
+            fi
+            ;;
+        "debian"|"ubuntu")
+            if [ ${#SECURITY_DEBIAN[@]} -gt 0 ]; then
+                install_packages_with_progress "${SECURITY_DEBIAN[@]}"
+            fi
+            ;;
+    esac
+}
 
 # =============================================================================
 # MAIN SECURITY CONFIGURATION FUNCTION
@@ -279,6 +339,11 @@ security_configure_user_groups() {
 
 security_main_config() {
     log_info "Starting security configuration..."
+
+    if [ "$DRY_RUN" = true ]; then
+        log_info "[DRY-RUN] Would configure security features"
+        return
+    fi
 
     security_install_packages
 
@@ -306,3 +371,5 @@ export -f security_configure_apparmor
 export -f security_configure_selinux
 export -f security_configure_ssh
 export -f security_configure_user_groups
+export -f configure_ufw_firewall
+export -f configure_firewalld_firewall

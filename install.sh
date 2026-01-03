@@ -284,11 +284,11 @@ if [ -f "$SCRIPTS_DIR/power_config.sh" ]; then
 fi
 
 # --- Configuration Validation ---
-# Validate configuration files now that helpers are sourced
+# Validate configuration files now that helpers are sourced (silent)
 config_valid=true
 for config_file in "$SCRIPTS_DIR"/*.sh; do
     if [ -f "$config_file" ]; then
-        if ! validate_config "$config_file" "bash"; then
+        if ! validate_config "$config_file" "bash" >/dev/null 2>&1; then
             config_valid=false
             break
         fi
@@ -659,8 +659,8 @@ done
 
 # Phase 2: Environment Setup
 # We must detect distro first to know how to install prerequisites
-# Detect distribution and desktop environment with error handling
-if ! detect_distro; then
+# Detect distribution and desktop environment with error handling (silent)
+if ! detect_distro >/dev/null 2>&1; then
     log_error "Failed to detect your Linux distribution!"
     log_error "LinuxInstaller supports: Arch Linux, Fedora, Debian, and Ubuntu."
     log_error "Please check that you're running a supported distribution."
@@ -668,16 +668,14 @@ if ! detect_distro; then
     exit 1
 fi
 
-# Desktop environment detection (always succeeds now)
-detect_de || true
+# Desktop environment detection (always succeeds now, silent)
+detect_de >/dev/null 2>&1 || true
 
 # Detect if running in a virtual machine
 if detect_virtual_machine; then
     IS_VIRTUAL_MACHINE=true
-    log_info "Virtual machine detected - optimizing configuration for VM environment"
 else
     IS_VIRTUAL_MACHINE=false
-    log_info "Physical hardware detected - full configuration available"
 fi
 
 # Source distro module early so it can provide package lists via `distro_get_packages()`
@@ -719,14 +717,14 @@ esac
 
 # programs.yaml fallback removed; package lists are provided by distro modules (via distro_get_packages())
 
-# Update display theme based on detected distro
-update_distro_theme
+# Update display theme based on detected distro (silent)
+update_distro_theme >/dev/null 2>&1
 
-# Initialize state management
-state_init
+# Initialize state management (silent)
+state_init >/dev/null 2>&1
 
-# Bootstrap UI tools
-bootstrap_tools
+# Bootstrap UI tools (silent)
+bootstrap_tools >/dev/null 2>&1
 
 # Phase 3: Installation Mode Selection
 # Go directly to menu - skip all pre-installation checks

@@ -50,35 +50,36 @@ detect_system_hardware() {
 
     # Detect CPU with detailed information
     if command -v lscpu >/dev/null 2>&1; then
-        DETECTED_CPU="$(lscpu 2>/dev/null | awk -F: '/^Model name:/ {print $2; exit}' | xargs || true)"
-        DETECTED_CPU_MODEL="$(lscpu 2>/dev/null | awk -F: '/^Model:/ {print $2; exit}' | xargs || true)"
-        DETECTED_CPU_FAMILY="$(lscpu 2>/dev/null | awk -F: '/^CPU family:/ {print $2; exit}' | xargs || true)"
-        DETECTED_CPU_STEPPING="$(lscpu 2>/dev/null | awk -F: '/^Stepping:/ {print $2; exit}' | xargs || true)"
+        DETECTED_CPU=$(lscpu | grep "Model name:" | cut -d: -f2 | xargs)
+        DETECTED_CPU_MODEL=$(lscpu | grep "Model:" | cut -d: -f2 | xargs)
+        DETECTED_CPU_FAMILY=$(lscpu | grep "CPU family:" | cut -d: -f2 | xargs)
+        DETECTED_CPU_STEPPING=$(lscpu | grep "Stepping:" | cut -d: -f2 | xargs)
     else
-        DETECTED_CPU="$(awk -F: '/model name/{print $2; exit}' /proc/cpuinfo | xargs || true)"
+        DETECTED_CPU=$(awk -F: '/model name/{print $2; exit}' /proc/cpuinfo | xargs || true)
         DETECTED_CPU_MODEL=""
         DETECTED_CPU_FAMILY=""
         DETECTED_CPU_STEPPING=""
-        [ -z "$DETECTED_CPU" ] && DETECTED_CPU="$(uname -m)"
+        [ -z "$DETECTED_CPU" ] && DETECTED_CPU=$(uname -m)
     fi
 
     # Detect CPU vendor and specific models
     if command -v lscpu >/dev/null 2>&1; then
-        DETECTED_CPU_VENDOR="$(lscpu 2>/dev/null | awk -F: '/^Vendor ID:/ {print $2; exit}' | xargs || true)"
+        DETECTED_CPU_VENDOR=$(lscpu | grep "Vendor ID:" | cut -d: -f2 | xargs | tr '[:upper:]' '[:lower:]')
     else
-        DETECTED_CPU_VENDOR="$(awk -F: '/^vendor_id/ {print $2; exit}' /proc/cpuinfo | xargs || true)"
+        DETECTED_CPU_VENDOR=$(awk -F: '/^vendor_id/ {print $2; exit}' /proc/cpuinfo | xargs || true)
     fi
     DETECTED_CPU_VENDOR="${DETECTED_CPU_VENDOR:-Unknown}"
 
     # Detect GPU
     if command -v lspci >/dev/null 2>&1; then
-        DETECTED_GPU="$(lspci 2>/dev/null | grep -E 'VGA|3D' | head -n1 | sed -E 's/^.*: //; s/\\s*\\[.*\\]$//' | xargs || true)"
-        # Extract GPU vendor
-        if [[ "$DETECTED_GPU" =~ [Nn]VIDIA ]]; then
+        local gpu_info=$(lspci | grep -i vga | head -1)
+        DETECTED_GPU=$(echo "$gpu_info" | cut -d: -f3- | xargs)
+        
+        if echo "$gpu_info" | grep -iq nvidia; then
             DETECTED_GPU_VENDOR="nvidia"
-        elif [[ "$DETECTED_GPU" =~ [Aa]MD ]]; then
+        elif echo "$gpu_info" | grep -iq amd\|radeon; then
             DETECTED_GPU_VENDOR="amd"
-        elif [[ "$DETECTED_GPU" =~ [Ii]ntel ]]; then
+        elif echo "$gpu_info" | grep -iq intel; then
             DETECTED_GPU_VENDOR="intel"
         else
             DETECTED_GPU_VENDOR="unknown"
@@ -90,11 +91,11 @@ detect_system_hardware() {
 
     # Detect RAM
     if command -v free >/dev/null 2>&1; then
-        DETECTED_RAM="$(free -h | awk '/Mem:/ {print $2}' | xargs || true)"
+        DETECTED_RAM=$(free -h | awk '/Mem:/ {print $2}')
     else
-        memkb="$(awk '/MemTotal/ {print $2; exit}' /proc/meminfo || true)"
+        memkb=$(awk '/MemTotal/ {print $2; exit}' /proc/meminfo || true)
         if [ -n "$memkb" ]; then
-            DETECTED_RAM="$(awk -v kb="$memkb" 'BEGIN{ printf "%.0fM", kb/1024 }')"
+            DETECTED_RAM=$(awk -v kb="$memkb" 'BEGIN{ printf "%.0fM", kb/1024 }')
         else
             DETECTED_RAM="Unknown"
         fi

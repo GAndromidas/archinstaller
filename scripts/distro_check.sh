@@ -132,11 +132,17 @@ detect_de() {
         # Try to detect via installed packages or other env vars if not set
         case "$DISTRO_ID" in
         "arch")
-            # KDE Plasma is most common on Arch, check for plasma processes
+            # Check for various desktop environments
             if pgrep -f "plasma" >/dev/null 2>&1; then
                 XDG_CURRENT_DESKTOP="KDE"
             elif pgrep -f "gnome" >/dev/null 2>&1; then
                 XDG_CURRENT_DESKTOP="GNOME:GNOME"
+            elif pgrep -f "xfce" >/dev/null 2>&1; then
+                XDG_CURRENT_DESKTOP="XFCE"
+            elif pgrep -f "cinnamon" >/dev/null 2>&1; then
+                XDG_CURRENT_DESKTOP="X-Cinnamon"
+            elif pgrep -f "mate" >/dev/null 2>&1; then
+                XDG_CURRENT_DESKTOP="MATE"
             else
                 XDG_CURRENT_DESKTOP="unknown"
             fi
@@ -146,6 +152,12 @@ detect_de() {
                 XDG_CURRENT_DESKTOP="KDE"
             elif rpm -q gnome-shell >/dev/null 2>&1; then
                 XDG_CURRENT_DESKTOP="GNOME"
+            elif rpm -q xfce4-session >/dev/null 2>&1; then
+                XDG_CURRENT_DESKTOP="XFCE"
+            elif rpm -q cinnamon >/dev/null 2>&1; then
+                XDG_CURRENT_DESKTOP="X-Cinnamon"
+            elif rpm -q mate-desktop >/dev/null 2>&1; then
+                XDG_CURRENT_DESKTOP="MATE"
             else
                 XDG_CURRENT_DESKTOP="unknown"
             fi
@@ -155,6 +167,12 @@ detect_de() {
                 XDG_CURRENT_DESKTOP="KDE"
             elif dpkg -l | grep -q gnome-shell; then
                 XDG_CURRENT_DESKTOP="GNOME"
+            elif dpkg -l | grep -q xfce4-session; then
+                XDG_CURRENT_DESKTOP="XFCE"
+            elif dpkg -l | grep -q cinnamon-desktop; then
+                XDG_CURRENT_DESKTOP="X-Cinnamon"
+            elif dpkg -l | grep -q mate-desktop; then
+                XDG_CURRENT_DESKTOP="MATE"
             else
                 XDG_CURRENT_DESKTOP="unknown"
             fi

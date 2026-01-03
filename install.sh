@@ -1,7 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 IFS=$'\n\t'
-IFS=$'\n\t'
 
 # =============================================================================
 # TESTING & VALIDATION FRAMEWORK
@@ -89,69 +88,11 @@ run_pre_install_checks() {
 trap 'handle_error $LINENO' ERR
 trap 'cleanup_on_exit' EXIT
 
-# Enhanced error handling setup
-# Set up error handling
-trap 'handle_error $LINENO' ERR
-trap 'cleanup_on_exit' EXIT
-
 # Check if running as root, re-exec with sudo if not
 if [ "$(id -u)" -ne 0 ]; then
     exec sudo "$0" "$@"
 fi
 
-# Enhanced error handling functions
-handle_error() {
-    local line_no="$1"
-    local exit_code="$?"
-
-    log_error "Error occurred at line $line_no with exit code $exit_code"
-    log_error "Command: $BASH_COMMAND"
-
-    # Show installation state
-    if [ -f "$INSTALL_STATE_FILE" ]; then
-        log_info "Installation state:"
-        cat "$INSTALL_STATE_FILE"
-    fi
-
-    # Suggest rollback steps
-    suggest_rollback
-
-    return $exit_code
-}
-
-suggest_rollback() {
-    log_info "To rollback installation:"
-    log_info "1. Restore backed up configurations from ~/.linuxinstaller-backup-*"
-    log_info "2. Remove installed packages:"
-    log_info "   - For Arch: sudo pacman -Rns \$(pacman -Qq | grep -E 'package1|package2')"
-    log_info "   - For Debian/Ubuntu: sudo apt remove package1 package2"
-    log_info "3. Disable services: sudo systemctl disable service1 service2"
-}
-
-# Trap function for cleanup on exit
-cleanup_on_exit() {
-    local exit_code=$?
-    state_update "stage" "exiting"
-    state_update "exit_code" "$exit_code"
-
-    # Finalize state
-    state_finalize
-
-    # Show rollback information on failure
-    if [ $exit_code -ne 0 ]; then
-        echo ""
-        log_error "Installation failed with exit code $exit_code"
-        log_info "To attempt rollback:"
-        log_info "  • Packages: Run the suggested removal commands above"
-        log_info "  • Configs: Check $INSTALL_STATE_FILE for backup locations"
-        log_info "  • Logs: Check $LOG_FILE for detailed error information"
-    fi
-
-    # Clean up state file on success
-    if [ $exit_code -eq 0 ] && [ -f "$INSTALL_STATE_FILE" ]; then
-        rm -f "$INSTALL_STATE_FILE"
-    fi
-}
 
 # Enhanced error handling functions
 handle_error() {
@@ -366,31 +307,6 @@ detect_virtual_machine() {
     return 1
 }
 
-# Trap function for cleanup on exit
-cleanup_on_exit() {
-    local exit_code=$?
-    state_update "stage" "exiting"
-    state_update "exit_code" "$exit_code"
-
-    # Finalize state
-    state_finalize
-
-    # Show rollback information on failure
-    if [ $exit_code -ne 0 ]; then
-        echo ""
-        log_error "Installation failed with exit code $exit_code"
-        log_info "To attempt rollback:"
-        log_info "  • Packages: Run the suggested removal commands above"
-        log_info "  • Configs: Check $INSTALL_STATE_FILE for backup locations"
-        log_info "  • Logs: Check $LOG_FILE for detailed error information"
-    fi
-
-    # Clean up state file on success
-    if [ $exit_code -eq 0 ] && [ -f "$INSTALL_STATE_FILE" ]; then
-        rm -f "$INSTALL_STATE_FILE"
-    fi
-}
-
 # Detect if we're running as a one-liner (script content piped to bash)
 # Skip detection if NO_ONELINER env var is set (for downloaded instances)
 if [ "${NO_ONELINER:-}" != "true" ] && ([ ! -f "$SCRIPT_PATH" ] || [ ! -d "$SCRIPTS_DIR" ] || [ ! -d "$CONFIGS_DIR" ]); then
@@ -425,10 +341,6 @@ if [ "${NO_ONELINER:-}" != "true" ] && ([ ! -f "$SCRIPT_PATH" ] || [ ! -d "$SCRI
     exit 1
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"  # Directory containing this script
-CONFIGS_DIR="$SCRIPT_DIR/configs"    # Distribution-specific configuration files
-SCRIPTS_DIR="$SCRIPT_DIR/scripts"    # Modular script components
-
 # Verify we have the required directory structure
 if [ ! -d "$SCRIPTS_DIR" ]; then
     echo "FATAL ERROR: Scripts directory not found in $SCRIPT_DIR"
@@ -445,6 +357,16 @@ if [ -f "$SCRIPTS_DIR/common.sh" ]; then
     source "$SCRIPTS_DIR/common.sh"
 else
     echo "FATAL ERROR: Required file 'common.sh' not found in $SCRIPTS_DIR"
+    echo "This indicates a corrupted or incomplete installation."
+    echo "Please re-download LinuxInstaller from the official repository:"
+    echo "  git clone https://github.com/GAndromidas/linuxinstaller.git"
+    exit 1
+fi
+
+if [ -f "$SCRIPTS_DIR/package_manager.sh" ]; then
+    source "$SCRIPTS_DIR/package_manager.sh"
+else
+    echo "FATAL ERROR: Required file 'package_manager.sh' not found in $SCRIPTS_DIR"
     echo "This indicates a corrupted or incomplete installation."
     echo "Please re-download LinuxInstaller from the official repository:"
     echo "  git clone https://github.com/GAndromidas/linuxinstaller.git"
@@ -542,6 +464,22 @@ LinuxInstaller - Unified Post-Install Script
 USAGE:
     ./install.sh [OPTIONS]
 
+OPTIONS:
+    -h, --help      Show this help message
+    -v, --verbose   Enable verbose logging output
+    -d, --dry-run   Preview mode - show what would be done without making changes
+
+INSTALLATION MODES:
+    Standard    Complete setup with all recommended packages
+    Minimal     Essential tools only for lightweight installations  
+    Server      Headless server configuration
+
+EXAMPLES:
+    ./install.sh                    # Interactive mode with menu
+    ./install.sh --dry-run          # Preview what would be installed
+    ./install.sh --verbose          # Show detailed output
+
+For more information, visit: https://github.com/GAndromidas/linuxinstaller
 EOF
 }
 
@@ -963,7 +901,7 @@ progress_update "Password feedback setup"
 # Note: For Arch, this includes pacman configuration via configure_pacman_arch
 DSTR_PREP_FUNC="${DISTRO_ID}_system_preparation"
 DSTR_PREP_STEP="${DSTR_PREP_FUNC}"
-    step "Running system preparation for $DISTRO_ID"
+step "Running system preparation for $DISTRO_ID"
 if [ "$DRY_RUN" = false ]; then
     source "$SCRIPTS_DIR/distro_check.sh"
     if declare -f "$DSTR_PREP_FUNC" >/dev/null 2>&1; then
@@ -983,7 +921,7 @@ fi
 progress_update "System preparation"
 
 # Step: Install Packages based on Mode
-    display_step "📦" "Installing Packages ($INSTALL_MODE)"
+display_step "📦" "Installing Packages ($INSTALL_MODE)"
 
 # Setup Docker repo for server mode on Debian/Ubuntu
 if [ "$INSTALL_MODE" = "server" ] && [[ "$DISTRO_ID" = "debian" || "$DISTRO_ID" = "ubuntu" ]]; then
@@ -1076,7 +1014,7 @@ if [ "$INSTALL_MODE" != "server" ] && declare -f wakeonlan_main_config >/dev/nul
         log_info "[DRY-RUN] Would auto-configure Wake-on-LAN for wired interfaces"
 
         # Try to show what would be done by printing helper status output (if present)
-        WOL_HELPER="$(cd "$SCRIPT_DIR/.." && pwd)/Scripts/wakeonlan.sh"
+        WOL_HELPER="$(cd "$SCRIPT_DIR/../.." && pwd)/Scripts/wakeonlan.sh"
         if [ -x "$WOL_HELPER" ]; then
             bash "$WOL_HELPER" --status 2>&1 | sed 's/^/  /'
         else

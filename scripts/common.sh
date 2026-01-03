@@ -877,5 +877,143 @@ prompt_reboot() {
     fi
 }
 
+# Enable password feedback for sudo
+enable_password_feedback() {
+    display_step "🔐" "Enabling Password Feedback"
+    
+    # Enable pwfeedback in sudoers
+    if ! grep -q "pwfeedback" /etc/sudoers 2>/dev/null; then
+        echo "Defaults pwfeedback" >> /etc/sudoers.d/pwfeedback
+        chmod 440 /etc/sudoers.d/pwfeedback
+        log_success "Password feedback enabled for sudo"
+    else
+        log_info "Password feedback already enabled"
+    fi
+}
+
+# Configure user shell and configuration files
+configure_user_shell_and_configs() {
+    display_step "🐚" "Configuring User Shell and Configuration Files"
+    
+    # Get the primary user (not root)
+    local target_user=""
+    if [ -n "${SUDO_USER:-}" ]; then
+        target_user="$SUDO_USER"
+    else
+        # Find first non-system user
+        target_user=$(getent passwd 1000 2>/dev/null | cut -d: -f1 || echo "")
+    fi
+    
+    if [ -z "$target_user" ] || [ "$target_user" = "root" ]; then
+        log_warn "No valid target user found for shell configuration"
+        return 0
+    fi
+    
+    local user_home="/home/$target_user"
+    
+    # Change default shell to zsh if available
+    if command -v zsh >/dev/null 2>&1; then
+        if [ "$SHELL" != "$(command -v zsh)" ]; then
+            chsh -s "$(command -v zsh)" "$target_user"
+            log_success "Changed default shell to zsh for $target_user"
+        fi
+    fi
+    
+    # Create basic config files if they don't exist
+    if [ ! -f "$user_home/.zshrc" ]; then
+        cat > "$user_home/.zshrc" << 'EOF'
+# Basic Zsh configuration
+export EDITOR=nano
+export BROWSER=firefox
+HISTFILE=~/.histfile
+HISTSIZE=1000
+SAVEHIST=1000
+setopt autocd beep
+bindkey -e
+zstyle :compinstall filename '/home/$USER/.zshrc'
+autoload -Uz compinit
+compinit
+EOF
+        chown "$target_user:$target_user" "$user_home/.zshrc"
+        log_success "Created .zshrc for $target_user"
+    fi
+}
+
+# Enable installed services
+enable_installed_services() {
+    display_step "⚡" "Enabling Installed Services"
+    
+    # Common services to enable
+    local services=()
+    
+    # Enable services based on what's installed
+    if command -v ufw >/dev/null 2>&1; then
+        services+=("ufw")
+    fi
+    
+    if command -v fail2ban-client >/dev/null 2>&1; then
+        services+=("fail2ban")
+    fi
+    
+    if [ -d /etc/systemd/system/bluetooth.service ] || command -v bluetoothctl >/dev/null 2>&1; then
+        services+=("bluetooth")
+    fi
+    
+    # Enable services
+    for service in "${services[@]}"; do
+        if systemctl is-enabled "$service" >/dev/null 2>&1; then
+            log_info "$service is already enabled"
+        else
+            if systemctl enable --now "$service" >/dev/null 2>&1; then
+                log_success "Enabled $service service"
+            else
+                log_warn "Failed to enable $service service"
+            fi
+        fi
+    done
+}
+
+# Final cleanup
+final_cleanup() {
+    display_step "🧹" "Final Cleanup"
+    
+    # Clean package cache
+    case "$DISTRO_ID" in
+        "arch")
+            if command -v pacman >/dev/null 2>&1; then
+                pacman -Sc --noconfirm >/dev/null 2>&1 || true
+                log_success "Cleaned Arch package cache"
+            fi
+            ;;
+        "fedora")
+            if command -v dnf >/dev/null 2>&1; then
+                dnf clean all >/dev/null 2>&1 || true
+                log_success "Cleaned Fedora package cache"
+            fi
+            ;;
+        "debian"|"ubuntu")
+            if command -v apt-get >/dev/null 2>&1; then
+                apt-get clean >/dev/null 2>&1 || true
+                log_success "Cleaned Debian/Ubuntu package cache"
+            fi
+            ;;
+    esac
+    
+    # Remove gum if we installed it
+    if [ "$GUM_INSTALLED_BY_SCRIPT" = true ]; then
+        case "$DISTRO_ID" in
+            "arch")
+                pacman -R --noconfirm gum >/dev/null 2>&1 || true
+                ;;
+            *)
+                remove_pkg gum >/dev/null 2>&1 || true
+                ;;
+        esac
+        log_info "Removed temporary gum UI helper"
+    fi
+    
+    log_success "Cleanup completed"
+}
+
 # Export functions that may be called from subshells
 # Functions exported via display.sh

@@ -437,5 +437,4 @@ export -f install_aur_packages
 export -f install_flatpak_packages
 export -f install_snap_packages
 export -f deduplicate_packages
-```
-</tool_response>
+

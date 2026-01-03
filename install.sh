@@ -535,6 +535,9 @@ LinuxInstaller - Unified Post-Install Script
 USAGE:
     ./install.sh [OPTIONS]
 
+EOF
+}
+
 # Bootstrap essential tools required for the installer
 # Installs gum UI helper if not present, ensuring beautiful terminal output
 bootstrap_tools() {

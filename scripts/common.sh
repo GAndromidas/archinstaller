@@ -190,7 +190,8 @@ state_finalize() {
     local end_time=$(date +%s)
     local duration=$((end_time - ${INSTALL_STATE["start_time"]:-$end_time}))
 
-    cat >> "$INSTALL_STATE_FILE" << EOF
+    if [ -n "${INSTALL_STATE_FILE:-}" ]; then
+        cat >> "$INSTALL_STATE_FILE" << EOF
 
 # Installation Summary
 # Completed: $(date)
@@ -207,6 +208,7 @@ ${INSTALL_STATE["services_enabled"]}
 # Modified Configs:
 ${INSTALL_STATE["configs_modified"]}
 EOF
+    fi
 }
 
 # =============================================================================
@@ -226,7 +228,8 @@ declare -A INSTALL_STATE
 # Initialize installation state tracking
 state_init() {
     # Create state file with metadata
-    cat > "$INSTALL_STATE_FILE" << EOF
+    if [ -n "${INSTALL_STATE_FILE:-}" ]; then
+        cat > "$INSTALL_STATE_FILE" << EOF
 # LinuxInstaller State File
 # Generated: $(date)
 # PID: $$
@@ -234,6 +237,7 @@ state_init() {
 # Distribution: ${DISTRO_ID:-unknown}
 # Mode: ${INSTALL_MODE:-unknown}
 EOF
+    fi
 
     # Initialize state variables
     INSTALL_STATE["stage"]="initialized"
@@ -249,8 +253,12 @@ state_update() {
     local value="$2"
 
     INSTALL_STATE["$key"]="$value"
-    echo "$key=$value" >> "$INSTALL_STATE_FILE"
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [STATE] $key=$value" >> "$LOG_FILE"
+    if [ -n "${INSTALL_STATE_FILE:-}" ]; then
+        echo "$key=$value" >> "$INSTALL_STATE_FILE"
+    fi
+    if [ -n "${LOG_FILE:-}" ]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') [STATE] $key=$value" >> "$LOG_FILE"
+    fi
 }
 
 # Check if a component was already installed

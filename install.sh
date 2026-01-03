@@ -6,84 +6,6 @@ IFS=$'\n\t'
 # TESTING & VALIDATION FRAMEWORK
 # =============================================================================
 
-# Run comprehensive pre-installation tests
-run_pre_install_checks() {
-    log_info "Running pre-installation validation checks..."
-
-    local checks_passed=0
-    local total_checks=0
-
-    # Test 1: Distribution detection
-    ((total_checks++))
-    if [ -n "${DISTRO_ID:-}" ]; then
-        log_success "✓ Distribution detected: $DISTRO_ID"
-        ((checks_passed++))
-    else
-        log_error "✗ Failed to detect distribution"
-    fi
-
-    # Test 2: Internet connectivity (warning only - installation can proceed offline)
-    ((total_checks++))
-    if check_internet; then
-        log_success "✓ Internet connection confirmed"
-        ((checks_passed++))
-    else
-        log_warn "⚠️  No internet connection detected"
-        log_info "Installation can proceed but some features may be limited"
-        log_info "Package installation will fail without internet access"
-        ((checks_passed++))  # Don't fail the check, just warn
-    fi
-
-    # Test 3: Package manager availability
-    ((total_checks++))
-    # Extract just the command name from PKG_INSTALL (remove arguments)
-    pkg_command=$(echo "$PKG_INSTALL" | awk '{print $1}')
-    if command -v "$pkg_command" >/dev/null 2>&1; then
-        log_success "✓ Package manager available: $PKG_INSTALL"
-        ((checks_passed++))
-    else
-        log_error "✗ Package manager not found: $pkg_command"
-    fi
-
-    # Test 4: Root privileges
-    ((total_checks++))
-    if [ "$EUID" -eq 0 ]; then
-        log_success "✓ Running with root privileges"
-        ((checks_passed++))
-    else
-        log_error "✗ Root privileges required"
-    fi
-
-    # Test 5: Disk space check
-    ((total_checks++))
-    local available_space
-    available_space=$(df / | tail -1 | awk '{print $4}')
-    if [ "$available_space" -gt 1048576 ]; then  # 1GB in KB
-        log_success "✓ Sufficient disk space available"
-        ((checks_passed++))
-    else
-        log_error "✗ Insufficient disk space (need at least 1GB free)"
-    fi
-
-
-
-    # Summary
-    log_info "Pre-installation checks: $checks_passed/$total_checks passed"
-
-    if [ $checks_passed -ge 3 ]; then  # Require at least 3/5 checks to pass (exclude internet)
-        if check_internet; then
-            log_success "🎉 All pre-installation checks passed!"
-        else
-            log_success "🎉 Core pre-installation checks passed (internet connection optional)"
-        fi
-        return 0
-    else
-        log_error "❌ Critical pre-installation checks failed. Please resolve issues before continuing."
-        return 1
-    fi
-}
-
-# Enhanced error handling setup
 # Set up error handling
 trap 'handle_error $LINENO' ERR
 trap 'cleanup_on_exit' EXIT
@@ -840,18 +762,8 @@ state_init
 # Bootstrap UI tools
 bootstrap_tools
 
-# Phase 2.5: Pre-Installation Validation
-if [ "$DRY_RUN" = false ]; then
-    if ! run_pre_install_checks; then
-        if supports_gum; then
-            display_error "Pre-installation checks failed" "Please resolve the issues above and try again"
-        fi
-        exit 1
-    fi
-fi
-
 # Phase 3: Installation Mode Selection
-# Determine installation mode based on user interaction or defaults
+# Go directly to menu - skip all pre-installation checks
 clear
 if [ -t 1 ] && [ "$DRY_RUN" = false ]; then
     # Interactive terminal - always show menu for user selection

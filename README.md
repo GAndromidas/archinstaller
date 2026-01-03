@@ -27,12 +27,11 @@ LinuxInstaller is a comprehensive, cross-distribution post-installation script t
 - **Security Hardened** with firewall, fail2ban, and performance optimizations
 - **Gaming Ready** with Steam, Wine, and GPU driver detection
 - **Developer Friendly** with modern shell, editors, and tools
-- **One-Command Setup** - just run and choose your preferences
+- **Easy Setup** - clone locally and run
 
 ### 🚀 Get Started Now
-```bash
-curl -fsSL https://raw.githubusercontent.com/GAndromidas/linuxinstaller/main/install.sh | bash
-```
+
+See the [Manual Installation](#manual-installation) section below for the recommended installation method.
 
 ---
 
@@ -407,12 +406,9 @@ Special thanks to all beta testers, bug reporters, and feature contributors who 
 
 ### 🚀 Ready to transform your Linux installation?
 
-**Run the command below and choose your adventure!**
-*(Automatically downloads the full repository for you)*
+**Clone the repository and run the installer locally!**
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/GAndromidas/linuxinstaller/main/install.sh | bash
-```
+See the [Manual Installation](#manual-installation) section for detailed instructions.
 
 ---
 

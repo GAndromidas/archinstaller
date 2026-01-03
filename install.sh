@@ -229,40 +229,6 @@ detect_virtual_machine() {
     return 1
 }
 
-# Detect if we're running as a one-liner (script content piped to bash)
-# Skip detection if NO_ONELINER env var is set (for downloaded instances)
-if [ "${NO_ONELINER:-}" != "true" ] && ([ ! -f "$SCRIPT_PATH" ] || [ ! -d "$SCRIPTS_DIR" ] || [ ! -d "$CONFIGS_DIR" ]); then
-    echo "🔄 Detected one-liner installation. Downloading full LinuxInstaller repository..."
-
-    # Create temporary directory for download
-    TEMP_DIR=$(mktemp -d)
-    cd "$TEMP_DIR"
-
-    # Try git first
-    if command -v git >/dev/null 2>&1; then
-        if git clone --depth 1 https://github.com/GAndromidas/linuxinstaller.git . >/dev/null 2>&1; then
-            echo "✓ Repository downloaded successfully"
-            NO_ONELINER=true exec bash "$TEMP_DIR/install.sh" "$@"
-        fi
-    fi
-
-    # Fallback: download as tarball
-    echo "⚠️  Git not available or failed, trying tarball download..."
-    if command -v curl >/dev/null 2>&1; then
-        if curl -fsSL https://github.com/GAndromidas/linuxinstaller/archive/main.tar.gz -o "$TEMP_DIR/repo.tar.gz" 2>/dev/null; then
-            if tar -xzf "$TEMP_DIR/repo.tar.gz" --strip-components=1 -C "$TEMP_DIR" 2>/dev/null; then
-                rm "$TEMP_DIR/repo.tar.gz"
-                echo "✓ Repository downloaded successfully"
-                NO_ONELINER=true exec bash "$TEMP_DIR/install.sh" "$@"
-            fi
-        fi
-    fi
-
-    echo "❌ Failed to download LinuxInstaller repository"
-    echo "Please try: git clone https://github.com/GAndromidas/linuxinstaller.git"
-    exit 1
-fi
-
 # Verify we have the required directory structure
 if [ ! -d "$SCRIPTS_DIR" ]; then
     echo "FATAL ERROR: Scripts directory not found in $SCRIPT_DIR"

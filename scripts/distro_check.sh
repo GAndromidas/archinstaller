@@ -111,13 +111,18 @@ detect_distro() {
     esac
 
     # Export all variables
-    export DISTRO_ID PKG_MANAGER PKG_INSTALL PKG_REMOVE PKG_UPDATE PKG_NOCONFIRM PKG_CLEAN PRETTY_NAME
+    export DISTRO_ID PKG_MANAGER PKG_INSTALL PKG_REMOVE PKG_UPDATE PKG_NOCONFIRM PKG_CLEAN
+    # Export PRETTY_NAME only if it exists
+    if [ -n "${PRETTY_NAME:-}" ]; then
+        export PRETTY_NAME
+    fi
     export FIREWALL_DEFAULT PACKAGE_UNIVERSAL
 
-    log_info "Distribution detected: $DISTRO_ID ($PRETTY_NAME)"
+    log_info "Distribution detected: $DISTRO_ID (${PRETTY_NAME:-Unknown})"
     log_info "Package manager: $PKG_MANAGER"
     log_info "Default firewall: $FIREWALL_DEFAULT"
     log_info "Universal package manager: $PACKAGE_UNIVERSAL"
+    return 0
 }
 
 # Detect Desktop Environment with enhanced detection

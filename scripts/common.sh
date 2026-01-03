@@ -877,6 +877,60 @@ prompt_reboot() {
     fi
 }
 
+# Enhanced error handling functions
+handle_error() {
+    local line_no="$1"
+    local exit_code="$?"
+
+    log_error "Error occurred at line $line_no with exit code $exit_code"
+    log_error "Command: $BASH_COMMAND"
+
+    # Show installation state
+    if [ -f "$INSTALL_STATE_FILE" ]; then
+        log_info "Installation state:"
+        cat "$INSTALL_STATE_FILE"
+    fi
+
+    # Suggest rollback steps
+    suggest_rollback
+
+    return $exit_code
+}
+
+suggest_rollback() {
+    log_info "To rollback installation:"
+    log_info "1. Restore backed up configurations from ~/.linuxinstaller-backup-*"
+    log_info "2. Remove installed packages:"
+    log_info "   - For Arch: sudo pacman -Rns \$(pacman -Qq | grep -E 'package1|package2')"
+    log_info "   - For Debian/Ubuntu: sudo apt remove package1 package2"
+    log_info "3. Disable services: sudo systemctl disable service1 service2"
+}
+
+# Trap function for cleanup on exit
+cleanup_on_exit() {
+    local exit_code=$?
+    state_update "stage" "exiting"
+    state_update "exit_code" "$exit_code"
+
+    # Finalize state
+    state_finalize
+
+    # Show rollback information on failure
+    if [ $exit_code -ne 0 ]; then
+        echo ""
+        log_error "Installation failed with exit code $exit_code"
+        log_info "To attempt rollback:"
+        log_info "  • Packages: Run the suggested removal commands above"
+        log_info "  • Configs: Check $INSTALL_STATE_FILE for backup locations"
+        log_info "  • Logs: Check $LOG_FILE for detailed error information"
+    fi
+
+    # Clean up state file on success
+    if [ $exit_code -eq 0 ] && [ -f "$INSTALL_STATE_FILE" ]; then
+        rm -f "$INSTALL_STATE_FILE"
+    fi
+}
+
 # Enable password feedback for sudo
 enable_password_feedback() {
     display_step "🔐" "Enabling Password Feedback"

@@ -691,9 +691,6 @@ arch_setup_shell() {
     fi
 }
 
-# Shortcuts are now configured via kde_config.sh for all distros
-    log_info "KDE shortcuts will be configured via kde_config.sh"
-
 # Setup KDE global keyboard shortcuts for Arch Linux
 # Note: KDE shortcuts are now handled by kde_config.sh for all distributions
 arch_setup_kde_shortcuts() {

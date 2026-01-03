@@ -278,9 +278,11 @@ arch_system_preparation() {
     # Initialize keyring if needed
     if [ ! -d "$ARCH_KEYRING" ]; then
         if ! pacman-key --init >/dev/null 2>&1; then
+            log_error "Failed to initialize pacman keyring"
             return 1
         fi
         if ! pacman-key --populate archlinux >/dev/null 2>&1; then
+            log_error "Failed to populate pacman keyring"
             return 1
         fi
     fi
@@ -298,11 +300,8 @@ arch_system_preparation() {
         return 1
     fi
 
-    # Setup AUR helper and mirror optimization
-    if ! "$SCRIPT_DIR/arch_aur_setup.sh"; then
-        log_error "Failed to setup AUR and mirrors"
-        return 1
-    fi
+    # Skip AUR setup for now to allow installation to continue
+    log_info "Skipping AUR setup (can be configured later if needed)"
 
     # Configure reflector for automatic mirror updates
     if command -v reflector >/dev/null 2>&1; then

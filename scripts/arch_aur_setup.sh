@@ -24,12 +24,16 @@ arch_install_aur_helper() {
         return 0
     fi
 
+    log_info "Debug: yay not found, proceeding with installation..."
+
     # Install build dependencies first
     log_info "Installing build dependencies..."
     if ! install_packages_with_progress "base-devel" "git"; then
         log_error "Failed to install build dependencies"
         return 1
     fi
+
+    log_info "Debug: Build dependencies installed"
 
     # Create secure temporary directory
     local temp_dir
@@ -45,6 +49,14 @@ arch_install_aur_helper() {
             # Fallback to first real user if SUDO_USER not set
             build_user=$(getent passwd 1000 | cut -d: -f1)
         fi
+        if [ -z "${build_user:-}" ]; then
+            log_error "Cannot determine user for AUR build"
+            rm -rf "$temp_dir"
+            return 1
+        fi
+    fi
+
+    log_info "Debug: Building as user: $build_user"
         if [ -z "${build_user:-}" ]; then
             log_error "Cannot determine user for AUR build"
             rm -rf "$temp_dir"

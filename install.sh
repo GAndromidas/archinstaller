@@ -207,8 +207,8 @@ RESET='\033[0m'
 
 # --- Configuration & Paths ---
 # Determine script location and derive important directories
-SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"  # Absolute path to this script
-SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" 2>/dev/null && pwd || echo "/tmp")"  # Directory containing this script
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" 2>/dev/null && pwd || echo "/tmp")"
 CONFIGS_DIR="$SCRIPT_DIR/configs"    # Distribution-specific configuration files
 SCRIPTS_DIR="$SCRIPT_DIR/scripts"    # Modular script components
 

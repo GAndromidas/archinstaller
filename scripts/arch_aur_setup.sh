@@ -24,7 +24,7 @@ arch_install_aur_helper() {
         return 0
     fi
 
-    log_info "Debug: yay not found, proceeding with installation..."
+
 
     # Install build dependencies first
     log_info "Installing build dependencies..."
@@ -54,15 +54,7 @@ arch_install_aur_helper() {
             rm -rf "$temp_dir"
             return 1
         fi
-    fi
-
-    log_info "Debug: Building as user: $build_user"
-        if [ -z "${build_user:-}" ]; then
-            log_error "Cannot determine user for AUR build"
-            rm -rf "$temp_dir"
-            return 1
-        fi
-        # Change ownership to build user
+        # Set up temp directory ownership for root builds
         chown "$build_user:$build_user" "$temp_dir"
         chmod 755 "$temp_dir"
     else

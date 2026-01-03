@@ -143,6 +143,8 @@ detect_de() {
                 XDG_CURRENT_DESKTOP="X-Cinnamon"
             elif pgrep -f "mate" >/dev/null 2>&1; then
                 XDG_CURRENT_DESKTOP="MATE"
+            elif pgrep -f "cosmic" >/dev/null 2>&1; then
+                XDG_CURRENT_DESKTOP="pop:Cosmic"
             else
                 XDG_CURRENT_DESKTOP="unknown"
             fi
@@ -158,6 +160,8 @@ detect_de() {
                 XDG_CURRENT_DESKTOP="X-Cinnamon"
             elif rpm -q mate-desktop >/dev/null 2>&1; then
                 XDG_CURRENT_DESKTOP="MATE"
+            elif rpm -q cosmic-session >/dev/null 2>&1; then
+                XDG_CURRENT_DESKTOP="pop:Cosmic"
             else
                 XDG_CURRENT_DESKTOP="unknown"
             fi
@@ -173,6 +177,8 @@ detect_de() {
                 XDG_CURRENT_DESKTOP="X-Cinnamon"
             elif dpkg -l | grep -q mate-desktop; then
                 XDG_CURRENT_DESKTOP="MATE"
+            elif dpkg -l | grep -q cosmic-session; then
+                XDG_CURRENT_DESKTOP="pop:Cosmic"
             else
                 XDG_CURRENT_DESKTOP="unknown"
             fi

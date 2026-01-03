@@ -227,6 +227,13 @@ log_to_file() { :; }
 # Declare INSTALL_STATE as associative array
 declare -A INSTALL_STATE
 
+# Initialize state tracking with default values (optional when INSTALL_STATE_FILE not set)
+INSTALL_STATE["stage"]="unknown"
+INSTALL_STATE["start_time"]="$(date +%s)"
+INSTALL_STATE["packages_installed"]=""
+INSTALL_STATE["services_enabled"]=""
+INSTALL_STATE["configs_modified"]=""
+
 # Initialize installation state tracking
 state_init() {
     # Create state file with metadata

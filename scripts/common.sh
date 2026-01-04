@@ -592,49 +592,6 @@ is_btrfs_system() {
 # CONFIGURATION VALIDATION SYSTEM
 # =============================================================================
 
-# Validate configuration file syntax
-validate_config() {
-    local config_file="$1"
-    local config_type="${2:-bash}"
-
-    if [ ! -f "$config_file" ]; then
-        log_error "Configuration file not found: $config_file"
-        return 1
-    fi
-
-    case "$config_type" in
-        "bash")
-            if ! bash -n "$config_file" 2>/dev/null; then
-                log_error "Configuration file has syntax errors: $config_file"
-                return 1
-            fi
-            ;;
-        "json")
-            if command -v jq >/dev/null 2>&1; then
-                if ! jq empty "$config_file" 2>/dev/null; then
-                    log_error "Configuration file has invalid JSON: $config_file"
-                    return 1
-                fi
-            else
-                log_warn "jq not available, skipping JSON validation for $config_file"
-            fi
-            ;;
-        "yaml")
-            if command -v yamllint >/dev/null 2>&1; then
-                if ! yamllint "$config_file" >/dev/null 2>&1; then
-                    log_error "Configuration file has YAML issues: $config_file"
-                    return 1
-                fi
-            else
-                log_warn "yamllint not available, skipping YAML validation for $config_file"
-            fi
-            ;;
-    esac
-
-    log_success "Configuration file validated: $config_file"
-    return 0
-}
-
 # Backup configuration file before modification
 backup_config() {
     local config_file="$1"

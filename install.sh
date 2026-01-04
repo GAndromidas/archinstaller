@@ -283,23 +283,6 @@ if [ -f "$SCRIPTS_DIR/power_config.sh" ]; then
   source "$SCRIPTS_DIR/power_config.sh"
 fi
 
-# --- Configuration Validation ---
-# Validate configuration files now that helpers are sourced (silent)
-config_valid=true
-for config_file in "$SCRIPTS_DIR"/*.sh; do
-    if [ -f "$config_file" ]; then
-        if ! validate_config "$config_file" "bash" >/dev/null 2>&1; then
-            config_valid=false
-            break
-        fi
-    fi
-done
-
-if [ "${config_valid:-true}" = false ]; then
-    log_error "✗ Configuration file validation failed"
-    exit 1
-fi
-
 # --- Global Variables ---
 # Runtime flags and configuration
 VERBOSE=false           # Enable detailed logging output

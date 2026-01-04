@@ -326,23 +326,6 @@ PROGRESS_CURRENT=0
 # --- Helper Functions ---
 # Utility functions for script operation and user interaction
 
-# Enhanced Virtual Machine Detection
-detect_virtual_machine() {
-    if [ -f /proc/cpuinfo ]; then
-        grep -qi "hypervisor\|vmware\|virtualbox\|kvm\|qemu\|xen" /proc/cpuinfo && return 0
-    fi
-    if [ -f /sys/class/dmi/id/product_name ]; then
-        grep -qi "virtual\|vmware\|virtualbox\|kvm\|qemu\|xen" /sys/class/dmi/id/product_name && return 0
-    fi
-    if [ -f /sys/class/dmi/id/sys_vendor ]; then
-        grep -qi "vmware\|virtualbox\|kvm\|qemu\|xen\|innotek" /sys/class/dmi/id/sys_vendor && return 0
-    fi
-    if command -v systemd-detect-virt >/dev/null 2>&1; then
-        systemd-detect-virt --quiet && return 0
-    fi
-    return 1
-}
-
 # Display help message and usage information
 # Shows command-line options, installation modes, and examples
 show_help() {
@@ -740,7 +723,7 @@ else
     # Non-interactive mode (CI, scripts, pipes)
     # Only set a default mode if none exists to avoid overriding explicit settings
     if [ -z "${INSTALL_MODE:-}" ]; then
-        export INSTALL_MODE="${INSTALL_MODE:-standard}"
+        export INSTALL_MODE="standard"
         log_info "Non-interactive: defaulting to install mode: $INSTALL_MODE"
     fi
     if [ -z "${INSTALL_GAMING:-}" ]; then
@@ -821,12 +804,12 @@ if [[ -n "${XDG_CURRENT_DESKTOP:-}" && "$INSTALL_MODE" != "server" ]]; then
 fi
 
 # Install AUR packages for Arch Linux
- if [ "$DISTRO_ID" = "arch" ]; then
+if [ "$DISTRO_ID" = "arch" ]; then
     install_package_group "$INSTALL_MODE" "AUR Packages" "aur"
 fi
 
 # Install COPR/eza package for Fedora
- if [ "$DISTRO_ID" = "fedora" ]; then
+if [ "$DISTRO_ID" = "fedora" ]; then
     step "Installing COPR/eza Package"
     if [ "$DRY_RUN" = false ]; then
         if command -v dnf >/dev/null; then

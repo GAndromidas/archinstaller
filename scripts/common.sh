@@ -517,28 +517,7 @@ remove_pkg() {
     fi
 }
 
-# Update system packages silently
-update_system() {
-    log_info "Updating system packages..."
-    local update_status=0
-
-    if [ "$DISTRO_ID" = "debian" ] || [ "$DISTRO_ID" = "ubuntu" ]; then
-        # Run apt-get update and apt-get upgrade separately
-        DEBIAN_FRONTEND=noninteractive apt-get update -qq || update_status=$?
-        if [ $update_status -eq 0 ]; then
-            DEBIAN_FRONTEND=noninteractive apt-get upgrade -yq || update_status=$?
-        fi
-    else
-        $PKG_UPDATE $PKG_NOCONFIRM >/dev/null 2>&1
-        update_status=$?
-    fi
-
-    if [ $update_status -ne 0 ]; then
-        log_error "System update failed."
-    else
-        log_success "System updated successfully."
-    fi
-}
+# Performance analysis function
 
 
 # --- System & Hardware Checks ---

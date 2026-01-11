@@ -1,0 +1,715 @@
+#!/bin/bash
+set -uo pipefail
+
+# Installation log file
+INSTALL_LOG="$HOME/.archinstaller.log"
+
+# Function to show help
+show_help() {
+  cat << EOF
+Archinstaller - Comprehensive Arch Linux Post-Installation Script
+
+USAGE:
+    ./install.sh [OPTIONS]
+
+OPTIONS:
+    -h, --help      Show this help message and exit
+    -v, --verbose   Enable verbose output (show all package installation details)
+    -q, --quiet     Quiet mode (minimal output)
+    -d, --dry-run   Preview what will be installed without making changes
+
+DESCRIPTION:
+    Archinstaller transforms a fresh Arch Linux installation into a fully
+    configured, optimized system. It installs essential packages, configures
+    the desktop environment, sets up security features, and applies performance
+    optimizations.
+
+INSTALLATION MODES:
+    Standard        Complete setup with all recommended packages
+    Minimal         Essential tools only for lightweight installations
+    Custom          Interactive selection of packages to install
+
+FEATURES:
+    - Desktop environment detection and optimization (KDE, GNOME, Cosmic)
+    - Security hardening (Fail2ban, Firewall)
+    - Performance tuning (ZRAM, Plymouth boot screen)
+    - Optional gaming mode with performance optimizations
+    - Btrfs snapshot support with automatic configuration
+
+    - Automatic GPU driver detection and installation
+
+REQUIREMENTS:
+    - Fresh Arch Linux installation
+    - Active internet connection
+    - Regular user account with sudo privileges
+    - Minimum 2GB free disk space
+
+EXAMPLES:
+    ./install.sh                Run installer with interactive prompts
+    ./install.sh --verbose      Run with detailed package installation output
+    ./install.sh --help         Show this help message
+
+LOG FILE:
+    Installation log saved to: ~/.archinstaller.log
+
+MORE INFO:
+    https://github.com/gandromidas/archinstaller
+
+EOF
+  exit 0
+}
+
+# Clear terminal for clean interface
+clear
+
+# Get the directory where this script is located (archinstaller root)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPTS_DIR="$SCRIPT_DIR/scripts"
+CONFIGS_DIR="$SCRIPT_DIR/configs"
+
+# State tracking for error recovery
+STATE_FILE="$HOME/.archinstaller.state"
+mkdir -p "$(dirname "$STATE_FILE")"
+
+source "$SCRIPTS_DIR/common.sh"
+
+# Initialize log file
+{
+  echo "=========================================="
+  echo "Archinstaller Installation Log"
+  echo "Started: $(date)"
+  echo "=========================================="
+  echo ""
+} > "$INSTALL_LOG"
+
+# Function to log to both console and file
+log_both() {
+  echo "$1" | tee -a "$INSTALL_LOG"
+}
+
+START_TIME=$(date +%s)
+
+# Parse flags
+VERBOSE=false
+DRY_RUN=false
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help)
+      show_help
+      ;;
+    --verbose|-v)
+      VERBOSE=true
+      ;;
+    --quiet|-q)
+      VERBOSE=false
+      ;;
+    --dry-run|-d)
+      DRY_RUN=true
+      VERBOSE=true
+      ;;
+    *)
+      echo "Unknown option: $arg"
+      echo "Use --help for usage information"
+      exit 1
+      ;;
+  esac
+done
+export VERBOSE
+export DRY_RUN
+export INSTALL_LOG
+export START_TIME
+
+arch_ascii
+
+# Silently install gum for beautiful UI before menu
+if ! command -v gum >/dev/null 2>&1; then
+  sudo pacman -S --noconfirm gum >/dev/null 2>&1 || true
+fi
+
+# Check system requirements for new users
+check_system_requirements() {
+  local requirements_failed=false
+
+  # Check if running as root
+  if [[ $EUID -eq 0 ]]; then
+    echo -e "${RED}Error: This script should NOT be run as root!${RESET}"
+    echo -e "${YELLOW}   Please run as a regular user with sudo privileges.${RESET}"
+    echo -e "${YELLOW}   Example: ./install.sh (not sudo ./install.sh)${RESET}"
+    exit 1
+  fi
+
+  # Check if we're on Arch Linux
+  if [[ ! -f /etc/arch-release ]]; then
+    echo -e "${RED}Error: This script is designed for Arch Linux only!${RESET}"
+    echo -e "${YELLOW}   Please run this on a fresh Arch Linux installation.${RESET}"
+    exit 1
+  fi
+
+  # Check internet connection
+  if ! ping -c 1 archlinux.org &>/dev/null; then
+    echo -e "${RED}Error: No internet connection detected!${RESET}"
+    echo -e "${YELLOW}   Please check your network connection and try again.${RESET}"
+    exit 1
+  fi
+
+  # Check available disk space (at least 2GB)
+  local available_space=$(df / | awk 'NR==2 {print $4}')
+  if [[ $available_space -lt 2097152 ]]; then
+    echo -e "${RED}Error: Insufficient disk space!${RESET}"
+    echo -e "${YELLOW}   At least 2GB free space is required.${RESET}"
+    echo -e "${YELLOW}   Available: $((available_space / 1024 / 1024))GB${RESET}"
+    exit 1
+  fi
+
+  # Only show success message if we had to check something specific
+  # For now, we'll just silently continue if all requirements are met
+}
+
+check_system_requirements
+show_menu
+
+# Validate INSTALL_MODE after menu selection
+if ! validate_install_mode "$INSTALL_MODE"; then
+  log_error "Invalid installation mode selected. Please run the script again."
+  exit 1
+fi
+
+export INSTALL_MODE
+
+# Show resume menu if previous installation detected
+show_resume_menu
+
+# Dry-run mode banner
+if [ "$DRY_RUN" = true ]; then
+  echo ""
+  echo -e "${YELLOW}========================================${RESET}"
+  echo -e "${YELLOW}         DRY-RUN MODE ENABLED${RESET}"
+  echo -e "${YELLOW}========================================${RESET}"
+  echo -e "${CYAN}Preview mode: No changes will be made${RESET}"
+  echo -e "${CYAN}Package installations will be simulated${RESET}"
+  echo -e "${CYAN}System configurations will be previewed${RESET}"
+  echo ""
+  sleep 2
+fi
+
+# Prompt for sudo using UI helpers
+if [ "$DRY_RUN" = false ]; then
+  ui_info "Please enter your sudo password to begin the installation:"
+  sudo -v || { ui_error "Sudo required. Exiting."; exit 1; }
+else
+  ui_info "Dry-run mode: Skipping sudo authentication"
+fi
+
+# Keep sudo alive (skip in dry-run mode)
+if [ "$DRY_RUN" = false ]; then
+  while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
+  SUDO_KEEPALIVE_PID=$!
+  # Improved trap to ensure proper cleanup
+  trap 'if [ -n "${SUDO_KEEPALIVE_PID+x}" ]; then kill $SUDO_KEEPALIVE_PID 2>/dev/null; fi; save_log_on_exit' EXIT INT TERM
+else
+  trap 'save_log_on_exit' EXIT INT TERM
+fi
+
+# Function to mark step as completed
+mark_step_complete() {
+  echo "$1" >> "$STATE_FILE"
+}
+
+# Function to check if step was completed
+is_step_complete() {
+  [ -f "$STATE_FILE" ] && grep -q "^$1$" "$STATE_FILE"
+}
+
+# Enhanced resume functionality with partial failure handling and error recovery
+show_resume_menu() {
+  if [ -f "$STATE_FILE" ] && [ -s "$STATE_FILE" ]; then
+    echo ""
+    ui_info "Previous installation detected. Checking installation status..."
+
+    local completed_steps=()
+    local step_status=()
+    local has_failures=false
+    local last_completed_step=""
+
+    # Read and parse state file
+    while IFS= read -r step; do
+      completed_steps+=("$step")
+      # Check if step was marked as completed
+      if [[ "$step" =~ ^COMPLETED: ]]; then
+        step_status+=("completed")
+        last_completed_step="${step#*: }"
+      elif [[ "$step" =~ ^FAILED: ]]; then
+        step_status+=("failed")
+        has_failures=true
+      else
+        # Legacy format - assume completed
+        step_status+=("completed")
+        last_completed_step="$step"
+      fi
+    done < "$STATE_FILE"
+
+    # Validate state file integrity
+    if [ ${#completed_steps[@]} -eq 0 ]; then
+      log_warning "State file exists but is empty or corrupted. Starting fresh installation."
+      rm -f "$STATE_FILE" 2>/dev/null || true
+      ui_info "Starting fresh installation..."
+      return 0
+    fi
+
+    if supports_gum; then
+      echo ""
+      gum style --margin "0 2" --foreground 15 "Installation Status:"
+
+      for i in "${!completed_steps[@]}"; do
+        local step="${completed_steps[$i]}"
+        local status="${step_status[$i]}"
+        local display_step="${step#*: }"
+
+        if [ "$status" = "completed" ]; then
+          gum style --margin "0 4" --foreground 10 "✓ $display_step"
+        else
+          gum style --margin "0 4" --foreground 196 "✗ $display_step (FAILED)"
+        fi
+      done
+
+      echo ""
+      if [ "$has_failures" = true ]; then
+        if gum confirm --default=true "Found failed steps. Retry failed steps first?"; then
+          ui_info "Will retry failed steps during installation"
+          return 0
+        elif gum confirm --default=false "Resume from last completed step?"; then
+          ui_success "Resuming installation from last completed step..."
+          return 0
+        else
+          if gum confirm --default=false "Start fresh installation (this will clear previous progress)?"; then
+            rm -f "$STATE_FILE" 2>/dev/null || true
+            ui_info "Starting fresh installation..."
+            return 0
+          else
+            ui_info "Installation cancelled by user"
+            exit 0
+          fi
+        fi
+      else
+        if gum confirm --default=true "Resume installation from where you left off?"; then
+          ui_success "Resuming installation..."
+          return 0
+        else
+          if gum confirm --default=false "Start fresh installation (this will clear previous progress)?"; then
+            rm -f "$STATE_FILE" 2>/dev/null || true
+            ui_info "Starting fresh installation..."
+            return 0
+          else
+            ui_info "Installation cancelled by user"
+            exit 0
+          fi
+        fi
+      fi
+    else
+      # Fallback for systems without gum
+      echo ""
+      for i in "${!completed_steps[@]}"; do
+        local step="${completed_steps[$i]}"
+        local status="${step_status[$i]}"
+        local display_step="${step#*: }"
+
+        if [ "$status" = "completed" ]; then
+          echo -e "  ${GREEN}✓${RESET} $display_step"
+        else
+          echo -e "  ${RED}✗${RESET} $display_step (FAILED)"
+        fi
+      done
+
+      echo ""
+      if [ "$has_failures" = true ]; then
+        read -r -p "Found failed steps. Retry failed steps first? [Y/n]: " response
+        response=${response,,}
+        if [[ "$response" == "n" || "$response" == "no" ]]; then
+          read -r -p "Resume from last completed step? [y/N]: " response
+          response=${response,,}
+          if [[ "$response" == "y" || "$response" == "yes" ]]; then
+            ui_success "Resuming installation from last completed step..."
+            return 0
+          else
+            read -r -p "Start fresh installation? [y/N]: " response
+            response=${response,,}
+            if [[ "$response" == "y" || "$response" == "yes" ]]; then
+              rm -f "$STATE_FILE" 2>/dev/null || true
+              ui_info "Starting fresh installation..."
+              return 0
+            else
+              ui_info "Installation cancelled by user"
+              exit 0
+            fi
+          fi
+        else
+          ui_info "Will retry failed steps during installation"
+          return 0
+        fi
+      else
+        read -r -p "Resume installation? [Y/n]: " response
+        response=${response,,}
+        if [[ "$response" == "n" || "$response" == "no" ]]; then
+          read -r -p "Start fresh installation? [y/N]: " response
+          response=${response,,}
+          if [[ "$response" == "y" || "$response" == "yes" ]]; then
+            rm -f "$STATE_FILE" 2>/dev/null || true
+            ui_info "Starting fresh installation..."
+            return 0
+          else
+            ui_info "Installation cancelled by user"
+            exit 0
+          fi
+        else
+          ui_success "Resuming installation..."
+          return 0
+        fi
+      fi
+    fi
+  fi
+}
+
+# Enhanced step completion with status tracking and error recovery
+mark_step_complete_with_progress() {
+  local step_name="$1"
+  local status="${2:-completed}"
+
+  # Validate step name
+  if [ -z "$step_name" ]; then
+    log_error "mark_step_complete_with_progress: step_name cannot be empty"
+    return 1
+  fi
+
+  # Add timestamp for better debugging
+  local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+
+  if [ "$status" = "completed" ]; then
+    echo "COMPLETED: $step_name" >> "$STATE_FILE"
+  else
+    echo "FAILED: $step_name" >> "$STATE_FILE"
+  fi
+
+  # Show overall progress
+  local completed_count=$(grep -c "^COMPLETED:" "$STATE_FILE" 2>/dev/null || echo "0")
+  local failed_count=$(grep -c "^FAILED:" "$STATE_FILE" 2>/dev/null || echo "0")
+  local total_steps=$((completed_count + failed_count))
+  local progress_percentage=0
+
+  if [ $total_steps -gt 0 ]; then
+    progress_percentage=$((completed_count * 100 / total_steps))
+  fi
+
+  if supports_gum; then
+    echo ""
+    if [ "$status" = "completed" ]; then
+      gum style --margin "0 2" --foreground 10 "✓ Step completed! Overall progress: $progress_percentage% ($completed_count/$TOTAL_STEPS)"
+    else
+      gum style --margin "0 2" --foreground 196 "✗ Step failed! Overall progress: $progress_percentage% ($completed_count/$TOTAL_STEPS)"
+      gum style --margin "0 4" --foreground 196 "  Failed step: $step_name"
+    fi
+  else
+    if [ "$status" = "completed" ]; then
+      ui_success "Step completed! Overall progress: $progress_percentage% ($completed_count/$TOTAL_STEPS)"
+    else
+      ui_error "Step failed! Overall progress: $progress_percentage% ($completed_count/$TOTAL_STEPS)"
+      echo -e "${RED}  Failed step: $step_name${RESET}"
+    fi
+  fi
+}
+
+# Enhanced step completion with progress tracking
+mark_step_complete_with_progress() {
+  local step_name="$1"
+  echo "$step_name" >> "$STATE_FILE"
+
+  # Show overall progress
+  local completed_count=$(wc -l < "$STATE_FILE" 2>/dev/null || echo "0")
+  local progress_percentage=$((completed_count * 100 / TOTAL_STEPS))
+
+  if supports_gum; then
+    echo ""
+    gum style --margin "0 2" --foreground 10 "✓ Step completed! Overall progress: $progress_percentage% ($completed_count/$TOTAL_STEPS)"
+  else
+    ui_success "Step completed! Overall progress: $progress_percentage% ($completed_count/$TOTAL_STEPS)"
+  fi
+}
+
+# Function to save log on exit
+save_log_on_exit() {
+  {
+    echo ""
+    echo "=========================================="
+    echo "Installation ended: $(date)"
+    echo "=========================================="
+  } >> "$INSTALL_LOG"
+}
+
+# Installation start header
+print_header "Starting Arch Linux Installation" \
+  "This process will take approximately 10-20 minutes depending on your internet speed." \
+  "You can safely leave this running - it will handle everything automatically!"
+
+# Step 1: System Preparation
+# Check if step was previously completed successfully
+if is_step_complete "system_preparation"; then
+  ui_info "Step 1 (System Preparation) already completed - skipping"
+else
+  print_step_header_with_timing 1 "$TOTAL_STEPS" "System Preparation"
+  ui_info "Updating package lists and installing system utilities..."
+  if step "System Preparation" && source "$SCRIPTS_DIR/system_preparation.sh"; then
+    mark_step_complete_with_progress "system_preparation" "completed"
+  else
+    mark_step_complete_with_progress "system_preparation" "failed"
+    log_error "System preparation failed"
+    # For critical steps, ask user if they want to continue
+    if gum_confirm "System preparation failed. Continue with installation?" "This may cause issues with subsequent steps."; then
+      ui_warn "Continuing installation despite system preparation failure"
+    else
+      ui_error "Installation stopped due to system preparation failure"
+      exit 1
+    fi
+  fi
+fi
+
+# Step 2: Shell Setup
+# Check if step was previously completed successfully
+if is_step_complete "shell_setup"; then
+  ui_info "Step 2 (Shell Setup) already completed - skipping"
+else
+  print_step_header_with_timing 2 "$TOTAL_STEPS" "Shell Setup"
+  ui_info "Installing ZSH shell with autocompletion and syntax highlighting..."
+  if step "Shell Setup" && source "$SCRIPTS_DIR/shell_setup.sh"; then
+    mark_step_complete_with_progress "shell_setup" "completed"
+  else
+    mark_step_complete_with_progress "shell_setup" "failed"
+    log_error "Shell setup failed"
+    # Shell setup is important but not critical for system functionality
+    ui_warn "Shell setup failed but continuing installation"
+  fi
+fi
+
+# Step 3: Plymouth Setup
+if [[ "$INSTALL_MODE" == "server" ]]; then
+  ui_info "Server mode selected, skipping Plymouth (graphical boot) setup."
+else
+  # Check if step was previously completed successfully
+  if is_step_complete "plymouth_setup"; then
+    ui_info "Step 3 (Plymouth Setup) already completed - skipping"
+  else
+    print_step_header_with_timing 3 "$TOTAL_STEPS" "Plymouth Setup"
+    ui_info "Setting up boot screen..."
+    if step "Plymouth Setup" && source "$SCRIPTS_DIR/plymouth.sh"; then
+      mark_step_complete_with_progress "plymouth_setup" "completed"
+    else
+      mark_step_complete_with_progress "plymouth_setup" "failed"
+      log_error "Plymouth setup failed"
+      ui_warn "Plymouth setup failed but continuing installation"
+    fi
+  fi
+fi
+
+# Step 4: Yay Installation
+# Check if step was previously completed successfully
+if is_step_complete "yay_installation"; then
+  ui_info "Step 4 (Yay Installation) already completed - skipping"
+else
+  print_step_header_with_timing 4 "$TOTAL_STEPS" "Yay Installation"
+  ui_info "Installing AUR helper for additional software..."
+  if step "Yay Installation" && source "$SCRIPTS_DIR/yay.sh"; then
+    mark_step_complete_with_progress "yay_installation" "completed"
+  else
+    mark_step_complete_with_progress "yay_installation" "failed"
+    log_error "Yay installation failed"
+    # AUR helper is optional for basic functionality
+    ui_warn "Yay installation failed but continuing installation (AUR packages will not be available)"
+  fi
+fi
+
+# Step 5: Programs Installation
+# Check if step was previously completed successfully
+if is_step_complete "programs_installation"; then
+  ui_info "Step 5 (Programs Installation) already completed - skipping"
+else
+  print_step_header_with_timing 5 "$TOTAL_STEPS" "Programs Installation"
+  ui_info "Installing applications based on your desktop environment..."
+  if step "Programs Installation" && source "$SCRIPTS_DIR/programs.sh"; then
+    mark_step_complete_with_progress "programs_installation" "completed"
+  else
+    mark_step_complete_with_progress "programs_installation" "failed"
+    log_error "Programs installation failed"
+    # Programs are optional for system functionality
+    ui_warn "Programs installation failed but continuing installation"
+  fi
+fi
+
+# Step 6: Gaming Mode
+if [[ "$INSTALL_MODE" == "server" ]]; then
+  ui_info "Server mode selected, skipping Gaming Mode setup."
+else
+  # Check if step was previously completed successfully
+  if is_step_complete "gaming_mode"; then
+    ui_info "Step 6 (Gaming Mode) already completed - skipping"
+  else
+    print_step_header_with_timing 6 "$TOTAL_STEPS" "Gaming Mode"
+    ui_info "Setting up gaming tools (optional)..."
+    if step "Gaming Mode" && source "$SCRIPTS_DIR/gaming_mode.sh"; then
+      mark_step_complete_with_progress "gaming_mode" "completed"
+    else
+      mark_step_complete_with_progress "gaming_mode" "failed"
+      log_error "Gaming Mode failed"
+      ui_warn "Gaming Mode failed but continuing installation (gaming optimizations not applied)"
+    fi
+  fi
+fi
+
+# Step 7: Bootloader and Kernel Configuration
+# Check if step was previously completed successfully
+if is_step_complete "bootloader_config"; then
+  ui_info "Step 7 (Bootloader Configuration) already completed - skipping"
+else
+  print_step_header_with_timing 7 "$TOTAL_STEPS" "Bootloader and Kernel Configuration"
+  ui_info "Configuring bootloader..."
+  if step "Bootloader and Kernel Configuration" && source "$SCRIPTS_DIR/bootloader_config.sh"; then
+    mark_step_complete_with_progress "bootloader_config" "completed"
+  else
+    mark_step_complete_with_progress "bootloader_config" "failed"
+    log_error "Bootloader and kernel configuration failed"
+    # Bootloader is critical for system boot
+    if gum_confirm "Bootloader configuration failed. Continue with installation?" "This may prevent your system from booting properly."; then
+      ui_warn "Continuing installation despite bootloader configuration failure"
+    else
+      ui_error "Installation stopped due to bootloader configuration failure"
+      exit 1
+    fi
+  fi
+fi
+
+# Step 8: Fail2ban Setup
+# Check if step was previously completed successfully
+if is_step_complete "fail2ban_setup"; then
+  ui_info "Step 8 (Fail2ban Setup) already completed - skipping"
+else
+  print_step_header_with_timing 8 "$TOTAL_STEPS" "Fail2ban Setup"
+  ui_info "Setting up security protection for SSH..."
+  if step "Fail2ban Setup" && source "$SCRIPTS_DIR/fail2ban.sh"; then
+    mark_step_complete_with_progress "fail2ban_setup" "completed"
+  else
+    mark_step_complete_with_progress "fail2ban_setup" "failed"
+    log_error "Fail2ban setup failed"
+    ui_warn "Fail2ban setup failed but continuing installation (SSH security protection not applied)"
+  fi
+fi
+
+# Step 9: System Services
+# Check if step was previously completed successfully
+if is_step_complete "system_services"; then
+  ui_info "Step 9 (System Services) already completed - skipping"
+else
+  print_step_header_with_timing 9 "$TOTAL_STEPS" "System Services"
+  ui_info "Enabling and configuring system services..."
+  if step "System Services" && source "$SCRIPTS_DIR/system_services.sh"; then
+    mark_step_complete_with_progress "system_services" "completed"
+  else
+    mark_step_complete_with_progress "system_services" "failed"
+    log_error "System services failed"
+    # System services are important but not always critical
+    ui_warn "System services failed but continuing installation"
+  fi
+fi
+
+# Step 10: Maintenance
+# Check if step was previously completed successfully
+if is_step_complete "maintenance"; then
+  ui_info "Step 10 (Maintenance) already completed - skipping"
+else
+  print_step_header_with_timing 10 "$TOTAL_STEPS" "Maintenance"
+  ui_info "Final cleanup and system optimization..."
+  if step "Maintenance" && source "$SCRIPTS_DIR/maintenance.sh"; then
+    mark_step_complete_with_progress "maintenance" "completed"
+  else
+    mark_step_complete_with_progress "maintenance" "failed"
+    log_error "Maintenance failed"
+    ui_warn "Maintenance failed but installation completed"
+  fi
+fi
+if [ "$DRY_RUN" = true ]; then
+  print_header "Dry-Run Preview Completed"
+  echo ""
+  echo -e "${YELLOW}This was a preview run. No changes were made to your system.${RESET}"
+  echo ""
+  echo -e "${CYAN}To perform the actual installation, run:${RESET}"
+  echo -e "${GREEN}  ./install.sh${RESET}"
+  echo ""
+else
+  print_header "Installation Completed Successfully"
+fi
+echo ""
+if supports_gum; then
+  echo ""
+  gum style --margin "1 2" --border thick --padding "1 2" --foreground 15 "Installation Summary"
+  echo ""
+  gum style --margin "0 2" --foreground 10 "Desktop Environment: Configured"
+  gum style --margin "0 2" --foreground 10 "System Utilities: Installed"
+  gum style --margin "0 2" --foreground 10 "Security Features: Enabled"
+  gum style --margin "0 2" --foreground 10 "Performance Optimizations: Applied"
+  gum style --margin "0 2" --foreground 10 "Shell Configuration: Complete"
+  echo ""
+else
+  echo -e "${CYAN}Installation Summary${RESET}"
+  echo ""
+  echo -e "${GREEN}Desktop Environment:${RESET} Configured"
+  echo -e "${GREEN}System Utilities:${RESET} Installed"
+  echo -e "${GREEN}Security Features:${RESET} Enabled"
+  echo -e "${GREEN}Performance Optimizations:${RESET} Applied"
+  echo -e "${GREEN}Shell Configuration:${RESET} Complete"
+  echo ""
+fi
+if declare -f print_programs_summary >/dev/null 2>&1; then
+  print_programs_summary
+fi
+print_summary
+log_performance "Total installation time"
+
+# Save final log
+{
+  echo ""
+  echo "=========================================="
+  echo "Installation Summary"
+  echo "=========================================="
+  echo "Completed steps:"
+  [ -f "$STATE_FILE" ] && cat "$STATE_FILE" | sed 's/^/  - /'
+  echo ""
+  if [ ${#ERRORS[@]} -gt 0 ]; then
+    echo "Errors encountered:"
+    for error in "${ERRORS[@]}"; do
+      echo "  - $error"
+    done
+  fi
+  echo ""
+  echo "Installation log saved to: $INSTALL_LOG"
+} >> "$INSTALL_LOG"
+
+# Handle installation results with minimal styling
+if [ ${#ERRORS[@]} -eq 0 ]; then
+  if supports_gum; then
+    echo ""
+    gum style --margin "0 2" --foreground 10 "Installation completed successfully"
+    gum style --margin "0 2" --foreground 15 "Log: $INSTALL_LOG"
+  else
+    ui_success "Installation completed successfully"
+    ui_info "Log: $INSTALL_LOG"
+  fi
+
+
+else
+  if supports_gum; then
+    echo ""
+    gum style --margin "0 2" --foreground 196 "Installation completed with warnings"
+    gum style --margin "0 2" --foreground 15 "Log: $INSTALL_LOG"
+  else
+    ui_warn "Installation completed with warnings"
+    ui_info "Log: $INSTALL_LOG"
+  fi
+fi
+
+prompt_reboot

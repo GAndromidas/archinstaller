@@ -1,0 +1,20 @@
+# Gaming Mode packages for Archinstaller
+
+# Pacman packages for gaming setup
+pacman:
+  packages:
+    - discord
+    - gamemode
+    - lib32-gamemode
+    - goverlay
+    - mangohud
+    - lib32-mangohud
+    - steam
+    - wine
+
+# Flatpak applications for gaming
+flatpak:
+  apps:
+    - com.heroicgameslauncher.hgl
+    - io.github.Faugus.faugus-launcher
+    - com.vysp3r.ProtonPlus

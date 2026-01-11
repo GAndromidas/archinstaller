@@ -1,0 +1,179 @@
+# This file contains all package lists for different installation modes and desktop environments
+
+# Pacman packages (same for all installation modes)
+pacman:
+  packages:
+    - android-tools
+    - bat
+    - bleachbit
+    - btop
+    - chromium
+    - cmatrix
+    - cpupower
+    - dosfstools
+    - duf
+    - firefox
+    - fwupd
+    - gnome-disk-utility
+    - hwinfo
+    - inxi
+    - ncdu
+    - net-tools
+    - nmap
+    - noto-fonts-extra
+    - samba
+    - sl
+    - speedtest-cli
+    - sshfs
+    - ttf-hack-nerd
+    - ttf-liberation
+    - unrar
+    - wakeonlan
+    - xdg-desktop-portal-gtk
+
+# Essential packages for different installation modes
+essential:
+  default:
+    - filezilla
+    - kdenlive
+    - solaar
+    - zed
+  minimal:
+    - mpv
+  server:
+    - bat
+    - btop
+    - cmatrix
+    - cpupower
+    - docker
+    - docker-compose
+    - dosfstools
+    - duf
+    - fwupd
+    - hwinfo
+    - inxi
+    - nano
+    - ncdu
+    - net-tools
+    - nmap
+    - noto-fonts-extra
+    - samba
+    - sl
+    - speedtest-cli
+    - sshfs
+    - ttf-hack-nerd
+    - ttf-liberation
+    - unrar
+    - wakeonlan
+
+# AUR packages for different installation modes
+aur:
+  default:
+    - dropbox
+    - onlyoffice-bin
+    - rustdesk-bin
+    - spotify
+    - ventoy-bin
+    - via-bin
+  minimal:
+    - onlyoffice-bin
+    - rustdesk-bin
+
+# Desktop environment specific packages (used by all modes that detect a DE)
+desktop_environments:
+  kde:
+    install:
+      - gwenview
+      - kdeconnect
+      - kwalletmanager
+      - kvantum
+      - okular
+      - python-pyqt5
+      - python-pyqt6
+      - qbittorrent
+      - spectacle
+      - smplayer
+    remove:
+      - htop
+  gnome:
+    install:
+      - adw-gtk-theme
+      - celluloid
+      - dconf-editor
+      - gnome-tweaks
+      - gufw
+      - seahorse
+      - transmission-gtk
+    remove:
+      - epiphany
+      - gnome-contacts
+      - gnome-maps
+      - gnome-music
+      - gnome-tour
+      - htop
+      - snapshot
+      - totem
+  cosmic:
+    install:
+      - transmission-gtk
+    remove:
+      - htop
+
+# Flatpak packages for different desktop environments
+flatpak:
+  kde:
+    default:
+      - io.github.shiftey.Desktop
+      - it.mijorus.gearlever
+    minimal:
+      - it.mijorus.gearlever
+  gnome:
+    default:
+      - com.mattjakeman.ExtensionManager
+      - io.github.shiftey.Desktop
+      - it.mijorus.gearlever
+    minimal:
+      - com.mattjakeman.ExtensionManager
+      - it.mijorus.gearlever
+  cosmic:
+    default:
+      - io.github.shiftey.Desktop
+      - dev.edfloreshz.CosmicTweaks
+      - it.mijorus.gearlever
+    minimal:
+      - dev.edfloreshz.CosmicTweaks
+      - it.mijorus.gearlever
+  generic: # Fallback for unsupported DEs/WMs
+    default:
+      - it.mijorus.gearlever
+    minimal:
+      - it.mijorus.gearlever
+
+# Custom packages (user-selectable additions beyond the base installation)
+# Add any packages here that you want to be optional choices for the 'Custom' mode.
+# These lists are for additional packages, not replacements.
+custom:
+  essential:
+    - filezilla
+    - kdenlive
+    - solaar
+    - zed
+  aur:
+    - dropbox
+    - onlyoffice-bin
+    - rustdesk-bin
+    - spotify
+    - ventoy-bin
+    - via-bin
+  flatpak:
+    kde:
+      - io.github.shiftey.Desktop
+      - it.mijorus.gearlever
+    gnome:
+      - com.mattjakeman.ExtensionManager
+      - io.github.shiftey.Desktop
+      - it.mijorus.gearlever
+    cosmic:
+      - dev.edfloreshz.CosmicTweaks
+      - io.github.shiftey.Desktop
+      - it.mijorus.gearlever

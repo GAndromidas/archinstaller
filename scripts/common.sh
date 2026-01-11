@@ -383,7 +383,44 @@ show_resume_menu() {
   fi
 }
 
+# Function to check if system is headless (no display manager or X server)
+is_headless_system() {
+  # Check for display manager
+  if systemctl is-active --quiet gdm 2>/dev/null || \
+     systemctl is-active --quiet sddm 2>/dev/null || \
+     systemctl is-active --quiet lightdm 2>/dev/null || \
+     systemctl is-active --quiet lxdm 2>/dev/null || \
+     systemctl is-active --quiet slim 2>/dev/null; then
+    return 1  # Not headless
+  fi
+
+  # Check for X server
+  if pgrep -x X >/dev/null 2>&1 || pgrep -x Xorg >/dev/null 2>&1; then
+    return 1  # Not headless
+  fi
+
+  # Check for Wayland
+  if pgrep -x weston >/dev/null 2>&1 || pgrep -x gnome-shell >/dev/null 2>&1; then
+    return 1  # Not headless
+  fi
+
+  # Check if XDG_CURRENT_DESKTOP is set
+  if [[ -n "${XDG_CURRENT_DESKTOP:-}" ]]; then
+    return 1  # Not headless
+  fi
+
+  return 0  # Headless
+}
+
 show_menu() {
+  # Check if system is headless and only offer server mode
+  if is_headless_system; then
+    ui_warn "Headless system detected. Only Server mode is available."
+    INSTALL_MODE="server"
+    print_header "Installation Mode" "Server - Headless server setup"
+    return
+  fi
+
   # Check if gum is available, fallback to traditional menu if not
   if command -v gum >/dev/null 2>&1; then
     show_gum_menu

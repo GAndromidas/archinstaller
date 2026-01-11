@@ -315,7 +315,7 @@ handle_de_packages() {
 }
 
 handle_flatpak_packages() {
-	if [[ "$INSTALL_MODE" == "server" || "$INSTALL_MODE" == "custom" ]]; then
+	if [[ "$INSTALL_MODE" == "server" ]]; then
 		return
 	fi
 
@@ -499,13 +499,35 @@ main() {
 	determine_package_lists
 	handle_de_packages
 	handle_flatpak_packages
+	remove_pacman_packages "${specific_remove_programs[@]}"
 	install_pacman_packages "${essential_programs[@]}"
 	install_aur_packages "${yay_programs[@]}"
 	install_flatpak_packages "${flatpak_programs[@]}"
-	remove_pacman_packages "${specific_remove_programs[@]}"
 
 	if [[ "$INSTALL_MODE" == "server" ]]; then
 		configure_server_applications
+	fi
+
+	# Report results
+	if [[ ${#PROGRAMS_ERRORS[@]} -gt 0 ]]; then
+		ui_warn "Some packages failed to install or remove:"
+		for err in "${PROGRAMS_ERRORS[@]}"; do
+			printf "${RED}  - $err${RESET}\n"
+		done
+	fi
+
+	if [[ ${#PROGRAMS_INSTALLED[@]} -gt 0 ]]; then
+		ui_info "Successfully installed ${#PROGRAMS_INSTALLED[@]} packages:"
+		for pkg in "${PROGRAMS_INSTALLED[@]}"; do
+			printf "${GREEN}  + $pkg${RESET}\n"
+		done
+	fi
+
+	if [[ ${#PROGRAMS_REMOVED[@]} -gt 0 ]]; then
+		ui_info "Successfully removed ${#PROGRAMS_REMOVED[@]} packages:"
+		for pkg in "${PROGRAMS_REMOVED[@]}"; do
+			printf "${YELLOW}  - $pkg${RESET}\n"
+		done
 	fi
 
 	ui_success "Program installation phase completed."

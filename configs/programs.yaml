@@ -112,7 +112,6 @@ desktop_environments:
       - gnome-tour
       - htop
       - snapshot
-      - totem
   cosmic:
     install:
       - transmission-gtk

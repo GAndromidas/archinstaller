@@ -2,20 +2,14 @@
 
 # Archinstaller
 
-</div>
-
 [![Last Commit](https://img.shields.io/github/last-commit/GAndromidas/archinstaller.svg?style=for-the-badge)](https://github.com/GAndromidas/archinstaller/commits/main)
 [![Latest Release](https://img.shields.io/github/v/release/GAndromidas/archinstaller.svg?style=for-the-badge)](https://github.com/GAndromidas/archinstaller/releases)
 
+</div>
 
 **Archinstaller** is an advanced post-installation script for Arch Linux that automates the transition from a base system to a fully configured, highly optimized, and ready-to-use desktop environment. It leverages intelligent detection systems to tailor the installation to your specific hardware, ensuring optimal performance and stability.
 
 Built with the Arch Linux philosophy of simplicity and minimalism, Archinstaller provides a clean, professional installation experience with enhanced user interface features including real-time progress tracking, time estimation, and intelligent resume functionality.
-
-## Demo
-<div align="center">
-<img width="666" height="369" alt="archinstaller" src="https://github.com/user-attachments/assets/f00f6518-2f10-42f5-b312-d098b3e0f913" />
-</div>
 
 ## Core Philosophy
 

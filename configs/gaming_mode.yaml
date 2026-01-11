@@ -3,18 +3,29 @@
 # Pacman packages for gaming setup
 pacman:
   packages:
-    - discord
-    - gamemode
-    - lib32-gamemode
-    - goverlay
-    - mangohud
-    - lib32-mangohud
-    - steam
-    - wine
+    - name: discord
+      description: "Voice and text chat for gamers"
+    - name: gamemode
+      description: "GameMode daemon for performance optimization"
+    - name: lib32-gamemode
+      description: "32-bit GameMode libraries"
+    - name: goverlay
+      description: "Gaming overlay for performance monitoring"
+    - name: mangohud
+      description: "Vulkan/OpenGL overlay for monitoring FPS and more"
+    - name: lib32-mangohud
+      description: "32-bit MangoHud libraries"
+    - name: steam
+      description: "Digital distribution platform for games"
+    - name: wine
+      description: "Compatibility layer for running Windows applications"
 
 # Flatpak applications for gaming
 flatpak:
   apps:
-    - com.heroicgameslauncher.hgl
-    - io.github.Faugus.faugus-launcher
-    - com.vysp3r.ProtonPlus
+    - name: com.heroicgameslauncher.hgl
+      description: "Heroic Games Launcher for Epic Games Store"
+    - name: io.github.Faugus.faugus-launcher
+      description: "Faugus Launcher for game management"
+    - name: com.vysp3r.ProtonPlus
+      description: "ProtonPlus for installing Proton-GE"

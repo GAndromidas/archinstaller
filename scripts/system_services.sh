@@ -424,7 +424,6 @@ select_zram_algorithm() {
 
   # Interactive selection if gum is available
   if command -v gum >/dev/null 2>&1; then
-    log_info "Available ZRAM compression algorithms: ${filtered_algorithms[*]}"
     local selected_option
     selected_option=$(gum choose --header="Choose ZRAM compression algorithm:" \
       --cursor="-> " --selected.foreground=51 --cursor.foreground=51 \
@@ -517,7 +516,7 @@ setup_zram_swap() {
   # Select compression algorithm
   local selected_algorithm
   selected_algorithm=$(select_zram_algorithm)
-  log_success "Selected compression algorithm: $selected_algorithm"
+  log_success "Selected ZRAM compression algorithm: $selected_algorithm"
 
   # Manage traditional swap based on smart configuration
   if [ "$keep_traditional_swap" = false ]; then

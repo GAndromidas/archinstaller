@@ -317,6 +317,79 @@ check_traditional_swap() {
   return 0
 }
 
+# Function to select ZRAM compression algorithm
+select_zram_algorithm() {
+  local available_algorithms=()
+  local default_algorithm="zstd"
+
+  # Detect available algorithms by temporarily enabling zram
+  log_info "Detecting available ZRAM compression algorithms..."
+  if ! lsmod | grep -q zram; then
+    sudo modprobe zram 2>/dev/null || true
+  fi
+
+  # Create temporary zram device to read algorithms
+  if [ ! -b /dev/zram0 ]; then
+    echo 1 | sudo tee /sys/class/zram-control/hot_add >/dev/null 2>&1 || true
+  fi
+
+  if [ -f /sys/block/zram0/comp_algorithm ]; then
+    # Parse available algorithms (format: "[lzo] lz4 lzo-rle zstd deflate")
+    local algos_raw
+    algos_raw=$(cat /sys/block/zram0/comp_algorithm 2>/dev/null)
+    # Remove brackets and split
+    available_algorithms=($(echo "$algos_raw" | sed 's/\[//g; s/\]//g' | tr ' ' '\n'))
+  fi
+
+  # Clean up temporary zram device
+  if [ -b /dev/zram0 ]; then
+    echo 0 | sudo tee /sys/class/zram-control/hot_remove >/dev/null 2>&1 || true
+  fi
+
+  # Filter out empty entries and ensure we have algorithms
+  local filtered_algorithms=()
+  for algo in "${available_algorithms[@]}"; do
+    if [ -n "$algo" ] && [ "$algo" != "lzo" ]; then  # Prefer modern algorithms
+      filtered_algorithms+=("$algo")
+    fi
+  done
+
+  # Fallback if detection failed
+  if [ ${#filtered_algorithms[@]} -eq 0 ]; then
+    filtered_algorithms=("zstd" "lz4" "lzo")
+    log_warning "Could not detect algorithms, using defaults"
+  fi
+
+  # Check if preferred algorithms are available
+  local chosen_algorithm=""
+  if [[ " ${filtered_algorithms[*]} " =~ " zstd " ]]; then
+    chosen_algorithm="zstd"
+  elif [[ " ${filtered_algorithms[*]} " =~ " lz4 " ]]; then
+    chosen_algorithm="lz4"
+  else
+    chosen_algorithm="${filtered_algorithms[0]}"
+  fi
+
+  # Interactive selection if gum is available
+  if command -v gum >/dev/null 2>&1; then
+    log_info "Available ZRAM compression algorithms: ${filtered_algorithms[*]}"
+    chosen_algorithm=$(gum choose --header="Choose ZRAM compression algorithm (zstd recommended for best compression):" \
+      --cursor="-> " --selected.foreground=51 --cursor.foreground=51 \
+      "${filtered_algorithms[@]}")
+  else
+    echo -e "${CYAN}Available ZRAM compression algorithms: ${filtered_algorithms[*]}${RESET}"
+    echo -e "${YELLOW}Choose ZRAM compression algorithm (zstd recommended for best compression):${RESET}"
+    select algo in "${filtered_algorithms[@]}"; do
+      if [ -n "$algo" ]; then
+        chosen_algorithm="$algo"
+        break
+      fi
+    done
+  fi
+
+  echo "$chosen_algorithm"
+}
+
 setup_zram_swap() {
   step "Setting up ZRAM swap"
 
@@ -324,143 +397,136 @@ setup_zram_swap() {
   local ram_gb=$(get_ram_gb)
 
   # Handle ZRAM on very high memory systems (32GB+)
-  # Note: get_ram_gb() now intelligently rounds to nearest common RAM size
   if [ $ram_gb -ge 32 ]; then
-    log_info "High memory system detected (${ram_gb}GB RAM)"
+    log_info "High memory system detected (${ram_gb}GB RAM) - ZRAM not needed"
+    log_info "Disabling/removing ZRAM if present..."
 
-    # Check if ZRAM is already configured
+    # Remove ZRAM if configured
     if systemctl is-active --quiet systemd-zram-setup@zram0 || systemctl is-enabled systemd-zram-setup@zram0 2>/dev/null; then
-      log_warning "ZRAM is currently enabled but not needed with ${ram_gb}GB RAM"
-      log_info "Automatically removing ZRAM configuration..."
-
-      # Stop and disable ZRAM service
       sudo systemctl stop systemd-zram-setup@zram0 2>/dev/null || true
       sudo systemctl disable systemd-zram-setup@zram0 2>/dev/null || true
-
-      # Remove ZRAM configuration file
       if [ -f /etc/systemd/zram-generator.conf ]; then
         sudo rm /etc/systemd/zram-generator.conf
-        log_success "ZRAM configuration removed"
       fi
-
-      # Reload systemd
       sudo systemctl daemon-reexec
-
-      log_success "ZRAM disabled - system has sufficient RAM"
-    else
-      log_success "ZRAM not configured - system has sufficient RAM"
+      log_success "ZRAM disabled - sufficient RAM available"
     fi
 
-    # Remove zram-generator package and dependencies if installed
+    # Remove zram-generator package
     if pacman -Q zram-generator &>/dev/null; then
-      log_info "Removing zram-generator package and dependencies..."
       if sudo pacman -Rns --noconfirm zram-generator >/dev/null 2>&1; then
-        log_success "zram-generator package removed"
         REMOVED_PACKAGES+=("zram-generator")
-      else
-        log_warning "Failed to remove zram-generator package (may have dependent packages)"
+        log_success "zram-generator package removed"
       fi
     fi
 
-    log_info "Swap usage will be minimal with this amount of memory"
     return
   fi
 
-  # Check for hibernation configuration
+  # Check for hibernation
   local hibernation_enabled=false
   if grep -q "resume=" /proc/cmdline 2>/dev/null; then
     hibernation_enabled=true
-    log_warning "Hibernation detected in kernel parameters"
   fi
 
-  # Check if ZRAM is already enabled
-  if ! systemctl is-active --quiet systemd-zram-setup@zram0; then
-    # Automatic ZRAM for low memory systems (≤4GB)
+  # Skip if hibernation is enabled
+  if [ "$hibernation_enabled" = true ]; then
+    log_warning "Hibernation detected - ZRAM conflicts with suspend-to-disk"
+    log_info "Keeping disk swap for hibernation support"
+    return
+  fi
+
+  # Interactive ZRAM setup (like snapper/gaming_mode)
+  local setup_zram=false
+  local default_choice="yes"
+
+  if [ $ram_gb -le 4 ]; then
+    default_choice="yes"  # Recommended for low memory
+  else
+    default_choice="no"   # Optional for medium memory
+  fi
+
+  if command -v gum >/dev/null 2>&1; then
+    echo ""
+    gum style --foreground 226 "ZRAM compressed swap setup:"
+    gum style --margin "0 2" --foreground 15 "• Compresses unused RAM into high-speed swap space"
+    gum style --margin "0 2" --foreground 15 "• Improves memory management and system responsiveness"
+    gum style --margin "0 2" --foreground 15 "• Uses ${ram_gb}GB RAM → $(echo "$ram_gb * $(get_zram_multiplier $ram_gb)" | bc | cut -d. -f1)GB effective memory"
     if [ $ram_gb -le 4 ]; then
-      log_info "Low memory system detected (${ram_gb}GB RAM)"
-
-      # Warn about hibernation conflict
-      if [ "$hibernation_enabled" = true ]; then
-        log_warning "ZRAM conflicts with hibernation (suspend-to-disk)"
-        log_info "Hibernation requires disk swap, ZRAM is swap in RAM"
-        log_info "Options:"
-        log_info "  1. Use ZRAM (better performance, no hibernation)"
-        log_info "  2. Keep disk swap (hibernation works, slower swap)"
-
-        if command -v gum >/dev/null 2>&1; then
-          if ! gum confirm --default=false "Enable ZRAM anyway (disables hibernation)?"; then
-            log_info "Keeping disk swap for hibernation support"
-            return
-          fi
-        else
-          read -r -p "Enable ZRAM anyway (disables hibernation)? [y/N]: " response
-          response=${response,,}
-          if [[ "$response" != "y" && "$response" != "yes" ]]; then
-            log_info "Keeping disk swap for hibernation support"
-            return
-          fi
-        fi
-      fi
-
-      log_info "Automatically enabling ZRAM (compressed swap in RAM)"
-      log_success "ZRAM will provide $(echo "$ram_gb * $(get_zram_multiplier $ram_gb)" | bc | cut -d. -f1)GB effective memory"
-
-      # Check and manage traditional swap
-      check_traditional_swap
-
-      # Enable ZRAM service
-      sudo systemctl enable systemd-zram-setup@zram0
-      sudo systemctl start systemd-zram-setup@zram0
+      gum style --margin "0 2" --foreground 11 "• Recommended for systems with ≤4GB RAM"
     else
-      # Optional ZRAM for medium memory systems (>4GB and <32GB)
-      log_info "System has ${ram_gb}GB RAM - ZRAM is optional"
+      gum style --margin "0 2" --foreground 11 "• Optional performance boost for >4GB RAM systems"
+    fi
+    echo ""
 
-      # Don't offer ZRAM if hibernation is enabled
-      if [ "$hibernation_enabled" = true ]; then
-        log_warning "Hibernation detected - ZRAM not recommended"
-        log_info "ZRAM conflicts with hibernation (suspend-to-disk)"
-        log_info "Keeping disk swap for hibernation support"
-        return
+    if [ "$default_choice" = "yes" ]; then
+      setup_zram=true
+      if ! gum confirm --default=true "Set up ZRAM compressed swap?"; then
+        setup_zram=false
       fi
-
-      if command -v gum >/dev/null 2>&1; then
-        if gum confirm --default=false "Enable ZRAM swap for additional performance?"; then
-          check_traditional_swap
-          sudo systemctl enable systemd-zram-setup@zram0
-          sudo systemctl start systemd-zram-setup@zram0
-        else
-          log_info "ZRAM configuration skipped"
-          return
-        fi
-      else
-        read -r -p "Enable ZRAM swap for additional performance? [y/N]: " response
-        response=${response,,}
-        if [[ "$response" == "y" || "$response" == "yes" ]]; then
-          check_traditional_swap
-          sudo systemctl enable systemd-zram-setup@zram0
-          sudo systemctl start systemd-zram-setup@zram0
-        else
-          log_info "ZRAM configuration skipped"
-          return
-        fi
+    else
+      if gum confirm --default=false "Set up ZRAM compressed swap?"; then
+        setup_zram=true
       fi
     fi
   else
-    log_info "ZRAM is already active"
+    echo ""
+    echo -e "${YELLOW}ZRAM compressed swap setup:${RESET}"
+    echo -e "  • Compresses unused RAM into high-speed swap space"
+    echo -e "  • Improves memory management and system responsiveness"
+    echo -e "  • Uses ${ram_gb}GB RAM → $(echo "$ram_gb * $(get_zram_multiplier $ram_gb)" | bc | cut -d. -f1)GB effective memory"
+    if [ $ram_gb -le 4 ]; then
+      echo -e "  • ${GREEN}Recommended for systems with ≤4GB RAM${RESET}"
+    else
+      echo -e "  • ${CYAN}Optional performance boost for >4GB RAM systems${RESET}"
+    fi
+    echo ""
+
+    local prompt_suffix=""
+    if [ "$default_choice" = "yes" ]; then
+      prompt_suffix="[Y/n]"
+    else
+      prompt_suffix="[y/N]"
+    fi
+
+    read -r -p "Set up ZRAM compressed swap? $prompt_suffix: " response
+    response=${response,,}
+    if [ "$default_choice" = "yes" ]; then
+      if [[ -z "$response" || "$response" == "y" || "$response" == "yes" ]]; then
+        setup_zram=true
+      fi
+    else
+      if [[ "$response" == "y" || "$response" == "yes" ]]; then
+        setup_zram=true
+      fi
+    fi
   fi
 
-  # Get optimal multiplier (ram_gb already fetched above)
+  if [ "$setup_zram" = false ]; then
+    log_info "ZRAM setup skipped by user"
+    return
+  fi
+
+  # Get optimal multiplier
   local multiplier=$(get_zram_multiplier $ram_gb)
   local zram_size_gb=$(echo "$ram_gb * $multiplier" | bc -l | cut -d. -f1)
 
   echo -e "${CYAN}System RAM: ${ram_gb}GB${RESET}"
   echo -e "${CYAN}ZRAM multiplier: ${multiplier} (${zram_size_gb}GB effective)${RESET}"
 
+  # Select compression algorithm
+  local selected_algorithm
+  selected_algorithm=$(select_zram_algorithm)
+  log_success "Selected compression algorithm: $selected_algorithm"
+
+  # Check and manage traditional swap
+  check_traditional_swap
+
   # Create ZRAM config with optimal settings
   sudo tee /etc/systemd/zram-generator.conf > /dev/null << EOF
 [zram0]
 zram-size = ram * ${multiplier}
-compression-algorithm = zstd
+compression-algorithm = ${selected_algorithm}
 swap-priority = 100
 EOF
 

@@ -323,7 +323,6 @@ select_zram_algorithm() {
   local default_algorithm="zstd"
 
   # Detect available algorithms by temporarily enabling zram
-  log_info "Detecting available ZRAM compression algorithms..."
   if ! lsmod | grep -q zram; then
     sudo modprobe zram 2>/dev/null || true
   fi
@@ -360,7 +359,20 @@ select_zram_algorithm() {
     log_warning "Could not detect algorithms, using defaults"
   fi
 
-  # Check if preferred algorithms are available
+  # Reorder algorithms to put zstd first if available
+  local ordered_algorithms=()
+  if [[ " ${filtered_algorithms[*]} " =~ " zstd " ]]; then
+    ordered_algorithms+=("zstd (Default)")
+    for algo in "${filtered_algorithms[@]}"; do
+      if [ "$algo" != "zstd" ]; then
+        ordered_algorithms+=("$algo")
+      fi
+    done
+  else
+    ordered_algorithms=("${filtered_algorithms[@]}")
+  fi
+
+  # Set default choice
   local chosen_algorithm=""
   if [[ " ${filtered_algorithms[*]} " =~ " zstd " ]]; then
     chosen_algorithm="zstd"
@@ -373,15 +385,19 @@ select_zram_algorithm() {
   # Interactive selection if gum is available
   if command -v gum >/dev/null 2>&1; then
     log_info "Available ZRAM compression algorithms: ${filtered_algorithms[*]}"
-    chosen_algorithm=$(gum choose --header="Choose ZRAM compression algorithm (zstd recommended for best compression):" \
+    local selected_option
+    selected_option=$(gum choose --header="Choose ZRAM compression algorithm:" \
       --cursor="-> " --selected.foreground=51 --cursor.foreground=51 \
-      "${filtered_algorithms[@]}")
+      "${ordered_algorithms[@]}")
+    # Extract algorithm name from selection (remove " (Default)" if present)
+    chosen_algorithm=$(echo "$selected_option" | sed 's/ (Default)//')
   else
     echo -e "${CYAN}Available ZRAM compression algorithms: ${filtered_algorithms[*]}${RESET}"
     echo -e "${YELLOW}Choose ZRAM compression algorithm (zstd recommended for best compression):${RESET}"
-    select algo in "${filtered_algorithms[@]}"; do
-      if [ -n "$algo" ]; then
-        chosen_algorithm="$algo"
+    local options=("${ordered_algorithms[@]}")
+    select selected_option in "${options[@]}"; do
+      if [ -n "$selected_option" ]; then
+        chosen_algorithm=$(echo "$selected_option" | sed 's/ (Default)//')
         break
       fi
     done

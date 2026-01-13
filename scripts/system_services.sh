@@ -317,6 +317,46 @@ check_traditional_swap() {
   return 0
 }
 
+# Function to detect if system is a laptop
+is_laptop() {
+    # Check for battery presence (most reliable)
+    if [ -d /sys/class/power_supply/BAT* ]; then
+        return 0
+    fi
+
+    # Fallback: check chassis type via dmidecode
+    if command -v dmidecode >/dev/null 2>&1; then
+        if sudo dmidecode -s chassis-type 2>/dev/null | grep -qiE "(laptop|notebook|portable|handheld)"; then
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+# Function to detect if hibernation is possible/configured
+hibernation_capable() {
+    # Check kernel cmdline for resume parameter
+    if grep -q "resume=" /proc/cmdline 2>/dev/null; then
+        return 0
+    fi
+
+    # Check if swap partition exists (hibernation requires disk swap)
+    if swapon --show 2>/dev/null | grep -q partition; then
+        return 0
+    fi
+
+    return 1
+}
+
+# Function to get rounded RAM size in GB
+get_rounded_ram_gb() {
+    local ram_kb
+    ram_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+    # Convert to GB and round to nearest integer
+    echo $(( (ram_kb + 524288) / 1048576 ))  # +512MB for rounding
+}
+
 # Function to select ZRAM compression algorithm
 select_zram_algorithm() {
   local available_algorithms=()
@@ -409,8 +449,28 @@ select_zram_algorithm() {
 setup_zram_swap() {
   step "Setting up ZRAM swap"
 
-  # Get system RAM
-  local ram_gb=$(get_ram_gb)
+  # Get system RAM (rounded to nearest GB)
+  local ram_gb=$(get_rounded_ram_gb)
+
+  # Smart swap configuration based on hardware detection
+  local keep_traditional_swap=false
+  local config_reason=""
+
+  if is_laptop; then
+    keep_traditional_swap=true
+    config_reason="Laptop detected - keeping traditional swap for suspend-to-disk support"
+  elif hibernation_capable; then
+    keep_traditional_swap=true
+    config_reason="Hibernation capable system - keeping traditional swap for suspend-to-disk"
+  elif [ $ram_gb -ge 15 ]; then
+    keep_traditional_swap=false
+    config_reason="Large RAM system (${ram_gb}GB) - using ZRAM only for optimal performance"
+  else
+    keep_traditional_swap=true
+    config_reason="Small RAM system (${ram_gb}GB) - keeping traditional swap as emergency fallback"
+  fi
+
+  log_info "Smart swap configuration: $config_reason"
 
   # Handle ZRAM on very high memory systems (32GB+)
   if [ $ram_gb -ge 32 ]; then
@@ -439,89 +499,13 @@ setup_zram_swap() {
     return
   fi
 
-  # Check for hibernation
-  local hibernation_enabled=false
-  if grep -q "resume=" /proc/cmdline 2>/dev/null; then
-    hibernation_enabled=true
+  # Enable ZRAM for systems that benefit from it (<32GB)
+  if [ $ram_gb -ge 32 ]; then
+    return  # Already handled above
   fi
 
-  # Skip if hibernation is enabled
-  if [ "$hibernation_enabled" = true ]; then
-    log_warning "Hibernation detected - ZRAM conflicts with suspend-to-disk"
-    log_info "Keeping disk swap for hibernation support"
-    return
-  fi
-
-  # Interactive ZRAM setup (like snapper/gaming_mode)
-  local setup_zram=false
-  local default_choice="yes"
-
-  if [ $ram_gb -le 4 ]; then
-    default_choice="yes"  # Recommended for low memory
-  else
-    default_choice="no"   # Optional for medium memory
-  fi
-
-  if command -v gum >/dev/null 2>&1; then
-    echo ""
-    gum style --foreground 226 "ZRAM compressed swap setup:"
-    gum style --margin "0 2" --foreground 15 "• Compresses unused RAM into high-speed swap space"
-    gum style --margin "0 2" --foreground 15 "• Improves memory management and system responsiveness"
-    gum style --margin "0 2" --foreground 15 "• Uses ${ram_gb}GB RAM → $(echo "$ram_gb * $(get_zram_multiplier $ram_gb)" | bc | cut -d. -f1)GB effective memory"
-    if [ $ram_gb -le 4 ]; then
-      gum style --margin "0 2" --foreground 11 "• Recommended for systems with ≤4GB RAM"
-    else
-      gum style --margin "0 2" --foreground 11 "• Optional performance boost for >4GB RAM systems"
-    fi
-    echo ""
-
-    if [ "$default_choice" = "yes" ]; then
-      setup_zram=true
-      if ! gum confirm --default=true "Set up ZRAM compressed swap?"; then
-        setup_zram=false
-      fi
-    else
-      if gum confirm --default=false "Set up ZRAM compressed swap?"; then
-        setup_zram=true
-      fi
-    fi
-  else
-    echo ""
-    echo -e "${YELLOW}ZRAM compressed swap setup:${RESET}"
-    echo -e "  • Compresses unused RAM into high-speed swap space"
-    echo -e "  • Improves memory management and system responsiveness"
-    echo -e "  • Uses ${ram_gb}GB RAM → $(echo "$ram_gb * $(get_zram_multiplier $ram_gb)" | bc | cut -d. -f1)GB effective memory"
-    if [ $ram_gb -le 4 ]; then
-      echo -e "  • ${GREEN}Recommended for systems with ≤4GB RAM${RESET}"
-    else
-      echo -e "  • ${CYAN}Optional performance boost for >4GB RAM systems${RESET}"
-    fi
-    echo ""
-
-    local prompt_suffix=""
-    if [ "$default_choice" = "yes" ]; then
-      prompt_suffix="[Y/n]"
-    else
-      prompt_suffix="[y/N]"
-    fi
-
-    read -r -p "Set up ZRAM compressed swap? $prompt_suffix: " response
-    response=${response,,}
-    if [ "$default_choice" = "yes" ]; then
-      if [[ -z "$response" || "$response" == "y" || "$response" == "yes" ]]; then
-        setup_zram=true
-      fi
-    else
-      if [[ "$response" == "y" || "$response" == "yes" ]]; then
-        setup_zram=true
-      fi
-    fi
-  fi
-
-  if [ "$setup_zram" = false ]; then
-    log_info "ZRAM setup skipped by user"
-    return
-  fi
+  # ZRAM is beneficial for all systems <32GB, but manage traditional swap smartly
+  log_info "Enabling ZRAM compressed swap for better memory management"
 
   # Get optimal multiplier
   local multiplier=$(get_zram_multiplier $ram_gb)
@@ -535,8 +519,12 @@ setup_zram_swap() {
   selected_algorithm=$(select_zram_algorithm)
   log_success "Selected compression algorithm: $selected_algorithm"
 
-  # Check and manage traditional swap
-  check_traditional_swap
+  # Manage traditional swap based on smart configuration
+  if [ "$keep_traditional_swap" = false ]; then
+    check_traditional_swap
+  else
+    log_info "Keeping traditional swap as configured for system safety"
+  fi
 
   # Create ZRAM config with optimal settings
   sudo tee /etc/systemd/zram-generator.conf > /dev/null << EOF

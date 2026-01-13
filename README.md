@@ -73,16 +73,7 @@ This installer is designed to be easily customized. The package lists for all in
 ## Contributing
 Contributions are welcome! Please feel free to submit a pull request for improvements or open an issue to report a bug or request a new feature.
 
-## Bug Fixes and Improvements
 
-### Recent Fixes
-- **Fixed missing function bodies** for `install_aur_quietly` and `install_flatpak_quietly` that were causing immediate script failures
-- **Improved error handling** with better context and troubleshooting suggestions for common issues
-- **Enhanced resume functionality** with support for partial failures and better state file parsing
-- **Fixed variable export order** to ensure proper accessibility across all scripts
-- **Improved network detection** with multiple fallback methods for more reliable speed testing
-- **Added INSTALL_MODE validation** to prevent invalid installation modes
-- **Enhanced sudo keepalive handling** with better trap cleanup to prevent race conditions
 
 ## License
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

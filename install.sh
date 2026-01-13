@@ -119,12 +119,12 @@ export DRY_RUN
 export INSTALL_LOG
 export START_TIME
 
-arch_ascii
-
 # Silently install gum for beautiful UI before menu
 if ! command -v gum >/dev/null 2>&1; then
   sudo pacman -S --noconfirm gum >/dev/null 2>&1 || true
 fi
+
+arch_ascii
 
 # Check system requirements for new users
 check_system_requirements() {

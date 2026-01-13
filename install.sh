@@ -62,6 +62,14 @@ EOF
 # Clear terminal for clean interface
 clear
 
+# Install gum for enhanced UI experience
+if ! command -v gum >/dev/null 2>&1; then
+  ui_info "Installing gum for enhanced UI experience..."
+  if ! sudo pacman -S --noconfirm gum 2>&1; then
+    ui_warn "Failed to install gum. Using basic menu interface."
+  fi
+fi
+
 # Get the directory where this script is located (archinstaller root)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$SCRIPT_DIR/scripts"
@@ -119,10 +127,7 @@ export DRY_RUN
 export INSTALL_LOG
 export START_TIME
 
-# Silently install gum for beautiful UI before menu
-if ! command -v gum >/dev/null 2>&1; then
-  sudo pacman -S --noconfirm gum >/dev/null 2>&1 || true
-fi
+
 
 arch_ascii
 

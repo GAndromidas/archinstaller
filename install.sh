@@ -375,6 +375,7 @@ show_resume_menu() {
 }
 
 # Enhanced step completion with status tracking and error recovery
+# Tracks both completed and failed steps with detailed progress reporting
 mark_step_complete_with_progress() {
   local step_name="$1"
   local status="${2:-completed}"
@@ -385,16 +386,14 @@ mark_step_complete_with_progress() {
     return 1
   fi
 
-  # Add timestamp for better debugging
-  local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-
+  # Write status to state file with consistent format for parsing
   if [ "$status" = "completed" ]; then
     echo "COMPLETED: $step_name" >> "$STATE_FILE"
   else
     echo "FAILED: $step_name" >> "$STATE_FILE"
   fi
 
-  # Show overall progress
+  # Calculate overall progress based on completed vs failed steps
   local completed_count=$(grep -c "^COMPLETED:" "$STATE_FILE" 2>/dev/null || echo "0")
   local failed_count=$(grep -c "^FAILED:" "$STATE_FILE" 2>/dev/null || echo "0")
   local total_steps=$((completed_count + failed_count))
@@ -404,6 +403,7 @@ mark_step_complete_with_progress() {
     progress_percentage=$((completed_count * 100 / total_steps))
   fi
 
+  # Display progress with visual feedback (gum if available, fallback to basic colors)
   if supports_gum; then
     echo ""
     if [ "$status" = "completed" ]; then
@@ -419,23 +419,6 @@ mark_step_complete_with_progress() {
       ui_error "Step failed! Overall progress: $progress_percentage% ($completed_count/$TOTAL_STEPS)"
       echo -e "${RED}  Failed step: $step_name${RESET}"
     fi
-  fi
-}
-
-# Enhanced step completion with progress tracking
-mark_step_complete_with_progress() {
-  local step_name="$1"
-  echo "$step_name" >> "$STATE_FILE"
-
-  # Show overall progress
-  local completed_count=$(wc -l < "$STATE_FILE" 2>/dev/null || echo "0")
-  local progress_percentage=$((completed_count * 100 / TOTAL_STEPS))
-
-  if supports_gum; then
-    echo ""
-    gum style --margin "0 2" --foreground 10 "✓ Step completed! Overall progress: $progress_percentage% ($completed_count/$TOTAL_STEPS)"
-  else
-    ui_success "Step completed! Overall progress: $progress_percentage% ($completed_count/$TOTAL_STEPS)"
   fi
 }
 

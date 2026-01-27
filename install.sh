@@ -391,12 +391,14 @@ mark_step_complete_with_progress() {
   fi
 
   # Calculate overall progress based on completed vs failed steps
-  local completed_count=$(grep -c "^COMPLETED:" "$STATE_FILE" 2>/dev/null || echo "0")
-  local failed_count=$(grep -c "^FAILED:" "$STATE_FILE" 2>/dev/null || echo "0")
+  local completed_count=$(grep -c "^COMPLETED:" "$STATE_FILE" 2>/dev/null | tr -d ' ' || echo "0")
+  local failed_count=$(grep -c "^FAILED:" "$STATE_FILE" 2>/dev/null | tr -d ' ' || echo "0")
+  completed_count=${completed_count:-0}
+  failed_count=${failed_count:-0}
   local total_steps=$((completed_count + failed_count))
   local progress_percentage=0
 
-  if [ $total_steps -gt 0 ]; then
+  if [ "$total_steps" -gt 0 ]; then
     progress_percentage=$((completed_count * 100 / total_steps))
   fi
 

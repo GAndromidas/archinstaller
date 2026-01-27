@@ -1163,12 +1163,15 @@ is_btrfs_system() {
 
 # Detect bootloader type
 detect_bootloader() {
+  # Check for GRUB first (most specific)
   if [ -d "/boot/grub" ] || [ -d "/boot/grub2" ] || [ -d "/boot/efi/EFI/grub" ] || command -v grub-mkconfig &>/dev/null || pacman -Q grub &>/dev/null 2>&1; then
     echo "grub"
-  elif [ -d "/boot/loader/entries" ] || [ -d "/efi/loader/entries" ] || command -v bootctl &>/dev/null; then
-    echo "systemd-boot"
-  elif [ -d "/boot/limine" ] || [ -d "/boot/EFI/limine" ] || command -v limine &>/dev/null || pacman -Q limine &>/dev/null 2>&1; then
+  # Check for Limine next (more specific than systemd-boot)
+  elif [ -d "/boot/limine" ] || [ -d "/boot/EFI/limine" ] || [ -f "/boot/limine.conf" ] || command -v limine &>/dev/null || pacman -Q limine &>/dev/null 2>&1; then
     echo "limine"
+  # Check for systemd-boot last (bootctl exists on most systemd systems)
+  elif [ -d "/boot/loader/entries" ] || [ -d "/efi/loader/entries" ] || [ -f "/boot/loader/loader.conf" ]; then
+    echo "systemd-boot"
   else
     echo "unknown"
   fi

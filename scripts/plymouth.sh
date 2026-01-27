@@ -76,58 +76,95 @@ set_plymouth_theme() {
 }
 
 add_kernel_parameters() {
-  # Detect bootloader
-  if [ -d /boot/loader ] || [ -d /boot/EFI/systemd ]; then
-    # systemd-boot logic (existing)
-    local boot_entries_dir="/boot/loader/entries"
-    if [ ! -d "$boot_entries_dir" ]; then
-      log_warning "Boot entries directory not found. Skipping kernel parameter addition."
-      return
-    fi
-    local boot_entries=()
-    while IFS= read -r -d '' entry; do
-      boot_entries+=("$entry")
-    done < <(find "$boot_entries_dir" -name "*.conf" -print0 2>/dev/null)
-    if [ ${#boot_entries[@]} -eq 0 ]; then
-      log_warning "No boot entries found. Skipping kernel parameter addition."
-      return
-    fi
-    echo -e "${CYAN}Found ${#boot_entries[@]} boot entries${RESET}"
-    local total=${#boot_entries[@]}
-    local current=0
-    local modified_count=0
-    for entry in "${boot_entries[@]}"; do
-      ((current++))
-      local entry_name=$(basename "$entry")
-      print_progress "$current" "$total" "Adding splash to $entry_name"
-      if ! grep -q "splash" "$entry"; then
-        if sudo sed -i '/^options / s/$/ splash/' "$entry"; then
-          print_status " [OK]" "$GREEN"
-          log_success "Added 'splash' to $entry_name"
-          ((modified_count++))
+  # Detect bootloader using the centralized function
+  local BOOTLOADER=$(detect_bootloader)
+  
+  case "$BOOTLOADER" in
+    "systemd-boot")
+      # systemd-boot logic (existing)
+      local boot_entries_dir="/boot/loader/entries"
+      if [ ! -d "$boot_entries_dir" ]; then
+        log_warning "Boot entries directory not found. Skipping kernel parameter addition."
+        return
+      fi
+      local boot_entries=()
+      while IFS= read -r -d '' entry; do
+        boot_entries+=("$entry")
+      done < <(find "$boot_entries_dir" -name "*.conf" -print0 2>/dev/null)
+      if [ ${#boot_entries[@]} -eq 0 ]; then
+        log_warning "No boot entries found. Skipping kernel parameter addition."
+        return
+      fi
+      echo -e "${CYAN}Found ${#boot_entries[@]} systemd-boot entries${RESET}"
+      local total=${#boot_entries[@]}
+      local current=0
+      local modified_count=0
+      for entry in "${boot_entries[@]}"; do
+        ((current++))
+        local entry_name=$(basename "$entry")
+        print_progress "$current" "$total" "Adding splash to $entry_name"
+        if ! grep -q "splash" "$entry"; then
+          if sudo sed -i '/^options / s/$/ splash/' "$entry"; then
+            print_status " [OK]" "$GREEN"
+            log_success "Added 'splash' to $entry_name"
+            ((modified_count++))
+          else
+            print_status " [FAIL]" "$RED"
+            log_error "Failed to add 'splash' to $entry_name"
+          fi
         else
-          print_status " [FAIL]" "$RED"
-          log_error "Failed to add 'splash' to $entry_name"
+          print_status " [SKIP] Already has splash" "$YELLOW"
+          log_warning "'splash' already set in $entry_name"
+        fi
+      done
+      echo -e "\\n${GREEN}Kernel parameters updated for all boot entries (${modified_count} modified)${RESET}\\n"
+      ;;
+    "grub")
+      # GRUB logic
+      if grep -q 'splash' /etc/default/grub; then
+        log_warning "'splash' already present in GRUB_CMDLINE_LINUX_DEFAULT."
+      else
+        sudo sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="/GRUB_CMDLINE_LINUX_DEFAULT="splash /' /etc/default/grub
+        log_success "Added 'splash' to GRUB_CMDLINE_LINUX_DEFAULT."
+        sudo grub-mkconfig -o /boot/grub/grub.cfg
+        log_success "Regenerated grub.cfg after adding 'splash'."
+      fi
+      ;;
+    "limine")
+      # Limine logic
+      local limine_config="/boot/limine.conf"
+      if [ ! -f "$limine_config" ]; then
+        log_warning "limine.conf not found. Skipping kernel parameter addition for Limine."
+        return
+      fi
+      
+      log_info "Adding 'splash' parameter to Limine bootloader..."
+      
+      # Backup existing config
+      sudo cp "$limine_config" "${limine_config}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
+      
+      # Add splash parameter to all kernel entries
+      local modified_count=0
+      if grep -q "^APPEND=" "$limine_config"; then
+        # Add splash to existing APPEND lines if not already present
+        if sudo sed -i '/^APPEND=/ s/"$/ splash"/' "$limine_config"; then
+          log_success "Added 'splash' to Limine APPEND parameters"
+          ((modified_count++))
         fi
       else
-        print_status " [SKIP] Already has splash" "$YELLOW"
-        log_warning "'splash' already set in $entry_name"
+        log_warning "No APPEND lines found in limine.conf"
       fi
-    done
-    echo -e "\\n${GREEN}Kernel parameters updated for all boot entries (${modified_count} modified)${RESET}\\n"
-  elif [ -d /boot/grub ] || [ -f /etc/default/grub ]; then
-    # GRUB logic
-    if grep -q 'splash' /etc/default/grub; then
-      log_warning "'splash' already present in GRUB_CMDLINE_LINUX_DEFAULT."
-    else
-      sudo sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="/GRUB_CMDLINE_LINUX_DEFAULT="splash /' /etc/default/grub
-      log_success "Added 'splash' to GRUB_CMDLINE_LINUX_DEFAULT."
-      sudo grub-mkconfig -o /boot/grub/grub.cfg
-      log_success "Regenerated grub.cfg after adding 'splash'."
-    fi
-  else
-    log_warning "No supported bootloader detected for kernel parameter addition."
-  fi
+      
+      if [ $modified_count -gt 0 ]; then
+        log_success "Limine bootloader configured with splash parameter"
+      else
+        log_warning "No changes made to Limine configuration"
+      fi
+      ;;
+    *)
+      log_warning "No supported bootloader detected for kernel parameter addition. Detected: $BOOTLOADER"
+      ;;
+  esac
 }
 
 print_summary() {
@@ -160,17 +197,24 @@ is_plymouth_configured() {
   fi
 
   # Check if splash parameter is set in bootloader config
-  if [ -d /boot/loader ] || [ -d /boot/EFI/systemd ]; then
-    # systemd-boot
-    if grep -q "splash" /boot/loader/entries/*.conf 2>/dev/null; then
-      splash_parameter_set=true
-    fi
-  elif [ -f /etc/default/grub ]; then
-    # GRUB
-    if grep -q 'splash' /etc/default/grub 2>/dev/null; then
-      splash_parameter_set=true
-    fi
-  fi
+  local BOOTLOADER=$(detect_bootloader)
+  case "$BOOTLOADER" in
+    "systemd-boot")
+      if [ -d /boot/loader/entries ] && grep -q "splash" /boot/loader/entries/*.conf 2>/dev/null; then
+        splash_parameter_set=true
+      fi
+      ;;
+    "grub")
+      if grep -q 'splash' /etc/default/grub 2>/dev/null; then
+        splash_parameter_set=true
+      fi
+      ;;
+    "limine")
+      if [ -f /boot/limine.conf ] && grep -q "splash" /boot/limine.conf 2>/dev/null; then
+        splash_parameter_set=true
+      fi
+      ;;
+  esac
 
   # Return true if all components are configured
   if [ "$plymouth_hook_present" = true ] && [ "$plymouth_theme_set" = true ] && [ "$splash_parameter_set" = true ]; then

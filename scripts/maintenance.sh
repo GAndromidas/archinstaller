@@ -378,6 +378,17 @@ setup_limine_bootloader() {
     echo "TIMEOUT=3" | sudo tee -a "$LIMINE_CONFIG" >/dev/null
   fi
 
+  # Ensure default entry exists
+  if ! grep -q "^DEFAULT_ENTRY=" "$LIMINE_CONFIG"; then
+    echo "DEFAULT_ENTRY=0" | sudo tee -a "$LIMINE_CONFIG" >/dev/null
+  fi
+
+  # Add Plymouth splash parameters if not already present
+  if grep -q "^APPEND=" "$LIMINE_CONFIG" && ! grep -q "splash" "$LIMINE_CONFIG"; then
+    sudo sed -i '/^APPEND=/ s/"$/ splash quiet"/' "$LIMINE_CONFIG"
+    log_info "Added splash parameters to Limine for Plymouth support"
+  fi
+
   log_success "Limine bootloader configured (LTS kernel support available)"
 }
 
@@ -505,6 +516,15 @@ setup_btrfs_snapshots() {
   # Detect bootloader
   local BOOTLOADER=$(detect_bootloader)
   log_info "Detected bootloader: $BOOTLOADER"
+  
+  # Debug: Show detection reasoning
+  if [ "$BOOTLOADER" = "limine" ]; then
+    log_info "Limine detection: Found /boot/limine.conf or /boot/limine directory or limine package"
+  elif [ "$BOOTLOADER" = "systemd-boot" ]; then
+    log_info "systemd-boot detection: Found /boot/loader/entries or /boot/loader/loader.conf"
+  elif [ "$BOOTLOADER" = "grub" ]; then
+    log_info "GRUB detection: Found /boot/grub or grub package"
+  fi
 
   step "Setting up Btrfs snapshots system"
 

@@ -17,19 +17,63 @@ configure_limine() {
   # Create backup
   sudo cp "$limine_config" "${limine_config}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
 
-  # Set timeout to 3 seconds
-  if grep -q "^TIMEOUT=" "$limine_config"; then
-    sudo sed -i 's/^TIMEOUT=.*/TIMEOUT=3/' "$limine_config"
+  # Set timeout to 3 seconds (Limine format uses 'timeout: 3' not 'TIMEOUT=3')
+  if grep -q "^timeout:" "$limine_config"; then
+    sudo sed -i 's/^timeout:.*/timeout: 3/' "$limine_config"
   else
-    echo "TIMEOUT=3" | sudo tee -a "$limine_config" >/dev/null
+    # Find the first line and insert timeout after it
+    sudo sed -i '1i timeout: 3' "$limine_config"
   fi
 
-  # Ensure default entry exists
-  if ! grep -q "^DEFAULT_ENTRY=" "$limine_config"; then
-    echo "DEFAULT_ENTRY=0" | sudo tee -a "$limine_config" >/dev/null
+  # Add machine-id comments for snapshot support
+  if ! grep -q "comment: machine-id=" "$limine_config"; then
+    # Add machine-id comment to each entry that doesn't have it
+    sudo sed -i '/^[^[:space:]]/{
+      /^[^[:space:]]*\/[^+]/{
+        /comment: machine-id=/!i\
+    comment: machine-id=
+      }
+    }' "$limine_config"
   fi
 
-  log_success "Limine bootloader configured"
+  # Fix subvolume path format (subvol=@ -> subvol=/@)
+  sudo sed -i 's/rootflags=subvol=@/rootflags=subvol=\/@/g' "$limine_config"
+
+  # Add Plymouth parameters (quiet splash) and nowatchdog to cmdline entries
+  local modified_count=0
+  if grep -q "^[[:space:]]*cmdline:" "$limine_config"; then
+    # Check if any cmdline lines lack splash
+    if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "splash"; then
+      sudo sed -i '/^[[:space:]]*cmdline:/ { /splash/! s/$/ quiet splash/ }' "$limine_config"
+      ((modified_count++))
+    fi
+    # Ensure quiet is present
+    if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "quiet"; then
+      sudo sed -i '/^[[:space:]]*cmdline:/ { /quiet/! s/splash/quiet splash/ }' "$limine_config"
+      ((modified_count++))
+    fi
+    # Add nowatchdog if missing
+    if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "nowatchdog"; then
+      sudo sed -i '/^[[:space:]]*cmdline:/ { /nowatchdog/! s/$/ nowatchdog/ }' "$limine_config"
+      ((modified_count++))
+    fi
+  fi
+
+  # Add //Snapshots at the end for snapshot support if not present
+  if ! grep -q "//Snapshots" "$limine_config"; then
+    echo "" | sudo tee -a "$limine_config" >/dev/null
+    echo "//Snapshots" | sudo tee -a "$limine_config" >/dev/null
+    ((modified_count++))
+  fi
+
+  # Remove old DEFAULT_ENTRY line (Limine doesn't use this format)
+  sudo sed -i '/^DEFAULT_ENTRY=/d' "$limine_config"
+
+  if [ $modified_count -gt 0 ]; then
+    log_success "Limine bootloader configured with Plymouth and snapshot support ($modified_count changes)"
+  else
+    log_info "Limine bootloader configuration unchanged (already optimal)"
+  fi
 }
 
 add_systemd_boot_kernel_params() {

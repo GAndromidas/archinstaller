@@ -385,44 +385,67 @@ setup_limine_bootloader() {
   # Backup existing config
   sudo cp "$LIMINE_CONFIG" "${LIMINE_CONFIG}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
 
-  # Set timeout to 3 seconds if not already set
-  if grep -q "^TIMEOUT=" "$LIMINE_CONFIG"; then
-    sudo sed -i 's/^TIMEOUT=.*/TIMEOUT=3/' "$LIMINE_CONFIG"
+  # Set timeout to 3 seconds if not already set (Limine format uses 'timeout: 3')
+  if grep -q "^timeout:" "$LIMINE_CONFIG"; then
+    sudo sed -i 's/^timeout:.*/timeout: 3/' "$LIMINE_CONFIG"
     log_success "Set Limine timeout to 3 seconds"
   else
-    echo "TIMEOUT=3" | sudo tee -a "$LIMINE_CONFIG" >/dev/null
+    # Find the first line and insert timeout after it
+    sudo sed -i '1i timeout: 3' "$LIMINE_CONFIG"
     log_success "Added Limine timeout of 3 seconds"
   fi
 
-  # Ensure default entry exists
-  if ! grep -q "^DEFAULT_ENTRY=" "$LIMINE_CONFIG"; then
-    echo "DEFAULT_ENTRY=0" | sudo tee -a "$LIMINE_CONFIG" >/dev/null
-    log_success "Added DEFAULT_ENTRY=0 to limine.conf"
-  fi
+  # Remove old DEFAULT_ENTRY line (Limine doesn't use this format)
+  sudo sed -i '/^DEFAULT_ENTRY=/d' "$LIMINE_CONFIG"
 
   # Configure Plymouth splash for all kernel entries
   local kernel_configs_modified=0
-  if grep -q "^APPEND=" "$LIMINE_CONFIG"; then
-    # Check if any APPEND lines lack splash
-    if grep "^APPEND=" "$LIMINE_CONFIG" | grep -qv "splash"; then
-      # Add splash to APPEND lines that don't have it
-      sudo sed -i '/^APPEND=/ { /splash/! s/"$/ splash"/ }' "$LIMINE_CONFIG"
+  if grep -q "^[[:space:]]*cmdline:" "$LIMINE_CONFIG"; then
+    # Check if any cmdline lines lack splash
+    if grep "^[[:space:]]*cmdline:" "$LIMINE_CONFIG" | grep -qv "splash"; then
+      # Add splash to cmdline lines that don't have it
+      sudo sed -i '/^[[:space:]]*cmdline:/ { /splash/! s/$/ splash/ }' "$LIMINE_CONFIG"
       kernel_configs_modified=$((kernel_configs_modified + 1))
       log_success "Added splash parameter to Limine kernel entries"
     else
       log_info "Splash parameter already present in all kernel entries"
     fi
-  else
-    log_warning "No APPEND lines found in limine.conf - cannot add Plymouth support"
-  fi
 
-  # Ensure all kernel entries have quiet mode for Plymouth
-  if grep -q "^APPEND=" "$LIMINE_CONFIG"; then
-    if grep "^APPEND=" "$LIMINE_CONFIG" | grep -qv "quiet"; then
-      sudo sed -i '/^APPEND=/ { /quiet/! s/splash/quiet splash/ }' "$LIMINE_CONFIG"
+    # Ensure all kernel entries have quiet mode for Plymouth
+    if grep "^[[:space:]]*cmdline:" "$LIMINE_CONFIG" | grep -qv "quiet"; then
+      sudo sed -i '/^[[:space:]]*cmdline:/ { /quiet/! s/splash/quiet splash/ }' "$LIMINE_CONFIG"
       kernel_configs_modified=$((kernel_configs_modified + 1))
       log_success "Added quiet parameter to Limine kernel entries"
     fi
+
+    # Add nowatchdog for better Plymouth compatibility
+    if grep "^[[:space:]]*cmdline:" "$LIMINE_CONFIG" | grep -qv "nowatchdog"; then
+      sudo sed -i '/^[[:space:]]*cmdline:/ { /nowatchdog/! s/$/ nowatchdog/ }' "$LIMINE_CONFIG"
+      kernel_configs_modified=$((kernel_configs_modified + 1))
+      log_success "Added nowatchdog parameter to Limine kernel entries"
+    fi
+  else
+    log_warning "No cmdline lines found in limine.conf - cannot add Plymouth support"
+  fi
+
+  # Fix subvolume path format (subvol=@ -> subvol=/@)
+  sudo sed -i 's/rootflags=subvol=@/rootflags=subvol=\/@/g' "$LIMINE_CONFIG"
+
+  # Add machine-id comments for snapshot support
+  if ! grep -q "comment: machine-id=" "$LIMINE_CONFIG"; then
+    sudo sed -i '/^[^[:space:]]/{
+      /^[^[:space:]]*\/[^+]/{
+        /comment: machine-id=/!i\
+    comment: machine-id=
+      }
+    }' "$LIMINE_CONFIG"
+  fi
+
+  # Add //Snapshots at the end for snapshot support if not present
+  if ! grep -q "//Snapshots" "$LIMINE_CONFIG"; then
+    echo "" | sudo tee -a "$LIMINE_CONFIG" >/dev/null
+    echo "//Snapshots" | sudo tee -a "$LIMINE_CONFIG" >/dev/null
+    kernel_configs_modified=$((kernel_configs_modified + 1))
   fi
 
   # Log final configuration status

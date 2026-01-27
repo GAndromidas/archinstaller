@@ -158,25 +158,33 @@ add_kernel_parameters() {
       # Add splash parameter to all kernel entries
       local modified_count=0
       
-      if grep -q "^APPEND=" "$limine_config"; then
-        # Add splash and quiet to existing APPEND lines if not already present
+      if grep -q "^[[:space:]]*cmdline:" "$limine_config"; then
+        # Add splash and quiet to existing cmdline lines if not already present
         # First add splash if missing
-        if grep "^APPEND=" "$limine_config" | grep -qv "splash"; then
-          if sudo sed -i '/^APPEND=/ { /splash/! s/"$/ splash"/ }' "$limine_config"; then
-            log_success "Added 'splash' to Limine APPEND parameters"
+        if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "splash"; then
+          if sudo sed -i '/^[[:space:]]*cmdline:/ { /splash/! s/$/ splash/ }' "$limine_config"; then
+            log_success "Added 'splash' to Limine cmdline parameters"
             ((modified_count++))
           fi
         fi
         
         # Then add quiet if missing
-        if grep "^APPEND=" "$limine_config" | grep -qv "quiet"; then
-          if sudo sed -i '/^APPEND=/ { /quiet/! s/splash/quiet splash/ }' "$limine_config"; then
-            log_success "Added 'quiet' to Limine APPEND parameters"
+        if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "quiet"; then
+          if sudo sed -i '/^[[:space:]]*cmdline:/ { /quiet/! s/splash/quiet splash/ }' "$limine_config"; then
+            log_success "Added 'quiet' to Limine cmdline parameters"
+            ((modified_count++))
+          fi
+        fi
+        
+        # Add nowatchdog if missing for better Plymouth compatibility
+        if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "nowatchdog"; then
+          if sudo sed -i '/^[[:space:]]*cmdline:/ { /nowatchdog/! s/$/ nowatchdog/ }' "$limine_config"; then
+            log_success "Added 'nowatchdog' to Limine cmdline parameters"
             ((modified_count++))
           fi
         fi
       else
-        log_warning "No APPEND lines found in limine.conf"
+        log_warning "No cmdline lines found in limine.conf - cannot add Plymouth support"
       fi
       
       if [ $modified_count -gt 0 ]; then

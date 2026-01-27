@@ -242,9 +242,9 @@ is_plymouth_configured() {
       fi
       ;;
     "limine")
-      # Check all possible limine.conf locations
-      local found_splash=false
-      for limine_loc in "/boot/limine.conf" "/boot/limine/limine.conf" "/boot/EFI/limine/limine.conf" "/efi/limine/limine.conf"; do
+      # Check all possible limine.conf locations (prefer /boot/limine/limine.conf)
+      local limine_config=""
+      for limine_loc in "/boot/limine/limine.conf" "/boot/limine.conf" "/boot/EFI/limine/limine.conf" "/efi/limine/limine.conf"; do
         if [ -f "$limine_loc" ] && grep -q "splash" "$limine_loc" 2>/dev/null; then
           found_splash=true
           break

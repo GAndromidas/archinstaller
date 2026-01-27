@@ -359,26 +359,21 @@ setup_grub_bootloader() {
 setup_limine_bootloader() {
   step "Configuring Limine bootloader for snapshot support"
 
-  local LIMINE_CONFIG="/boot/limine.conf"
-
-  if [ ! -f "$LIMINE_CONFIG" ]; then
-    log_warning "limine.conf not found at $LIMINE_CONFIG. Skipping Limine configuration."
-    log_info "Checking alternative locations..."
-    
-    # Check common locations
-    for alt_loc in "/boot/limine.conf" "/boot/limine/limine.conf" "/boot/EFI/limine/limine.conf" "/efi/limine/limine.conf"; do
-      if [ -f "$alt_loc" ]; then
-        LIMINE_CONFIG="$alt_loc"
-        log_info "Found limine.conf at: $LIMINE_CONFIG"
-        break
-      fi
-    done
-    
-    if [ ! -f "$LIMINE_CONFIG" ]; then
-      log_error "limine.conf not found in any standard location"
-      return 1
+  # Check for limine.conf in standard locations (prefer /boot/limine/limine.conf)
+  local LIMINE_CONFIG=""
+  for limine_loc in "/boot/limine/limine.conf" "/boot/limine.conf" "/boot/EFI/limine/limine.conf" "/efi/limine/limine.conf"; do
+    if [ -f "$limine_loc" ]; then
+      LIMINE_CONFIG="$limine_loc"
+      break
     fi
+  done
+
+  if [ -z "$LIMINE_CONFIG" ]; then
+    log_error "limine.conf not found in any standard location"
+    return 1
   fi
+
+  log_info "Found limine.conf at: $LIMINE_CONFIG"
 
   log_info "Configuring Limine for Btrfs snapshot support..."
 

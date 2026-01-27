@@ -366,7 +366,7 @@ setup_limine_bootloader() {
     log_info "Checking alternative locations..."
     
     # Check common locations
-    for alt_loc in "/boot/limine.conf" "/boot/EFI/limine/limine.conf" "/efi/limine/limine.conf"; do
+    for alt_loc in "/boot/limine.conf" "/boot/limine/limine.conf" "/boot/EFI/limine/limine.conf" "/efi/limine/limine.conf"; do
       if [ -f "$alt_loc" ]; then
         LIMINE_CONFIG="$alt_loc"
         log_info "Found limine.conf at: $LIMINE_CONFIG"

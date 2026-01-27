@@ -136,7 +136,7 @@ add_kernel_parameters() {
       if [ ! -f "$limine_config" ]; then
         log_warning "limine.conf not found. Checking alternative locations..."
         # Check common locations
-        for alt_loc in "/boot/limine.conf" "/boot/EFI/limine/limine.conf" "/efi/limine/limine.conf"; do
+        for alt_loc in "/boot/limine.conf" "/boot/limine/limine.conf" "/boot/EFI/limine/limine.conf" "/efi/limine/limine.conf"; do
           if [ -f "$alt_loc" ]; then
             limine_config="$alt_loc"
             log_info "Found limine.conf at: $limine_config"
@@ -236,7 +236,7 @@ is_plymouth_configured() {
     "limine")
       # Check all possible limine.conf locations
       local found_splash=false
-      for limine_loc in "/boot/limine.conf" "/boot/EFI/limine/limine.conf" "/efi/limine/limine.conf"; do
+      for limine_loc in "/boot/limine.conf" "/boot/limine/limine.conf" "/boot/EFI/limine/limine.conf" "/efi/limine/limine.conf"; do
         if [ -f "$limine_loc" ] && grep -q "splash" "$limine_loc" 2>/dev/null; then
           found_splash=true
           break

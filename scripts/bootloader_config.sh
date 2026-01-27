@@ -5,18 +5,29 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
 configure_limine() {
-  # Simple limine.conf detection (same as GRUB/systemd-boot pattern)
+  # REQUIRED PATH: /boot/limine/limine.conf is the standard location
   local limine_config=""
-  for limine_loc in "/boot/limine/limine.conf" "/boot/limine.conf" "/boot/EFI/limine/limine.conf" "/efi/limine/limine.conf"; do
-    if [ -f "$limine_loc" ]; then
-      limine_config="$limine_loc"
-      break
+  
+  # First check the required standard path
+  if [ -f "/boot/limine/limine.conf" ]; then
+    limine_config="/boot/limine/limine.conf"
+    log_info "Found limine.conf at standard location: $limine_config"
+  else
+    # Fallback to other locations if standard path doesn't exist
+    log_warning "Standard limine.conf not found at /boot/limine/limine.conf"
+    for limine_loc in "/boot/limine.conf" "/boot/EFI/limine/limine.conf" "/efi/limine/limine.conf"; do
+      if [ -f "$limine_loc" ]; then
+        limine_config="$limine_loc"
+        log_info "Found limine.conf at fallback location: $limine_loc"
+        break
+      fi
+    done
+    
+    if [ -z "$limine_config" ]; then
+      log_error "limine.conf not found in any location. Cannot continue."
+      log_error "Expected: /boot/limine/limine.conf (standard location)"
+      return 1
     fi
-  done
-
-  if [ -z "$limine_config" ]; then
-    log_warning "limine.conf not found. Skipping Limine configuration."
-    return 0
   fi
 
   log_info "Configuring Limine bootloader"

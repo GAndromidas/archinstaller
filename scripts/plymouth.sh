@@ -134,8 +134,20 @@ add_kernel_parameters() {
       # Limine logic
       local limine_config="/boot/limine.conf"
       if [ ! -f "$limine_config" ]; then
-        log_warning "limine.conf not found. Skipping kernel parameter addition for Limine."
-        return
+        log_warning "limine.conf not found. Checking alternative locations..."
+        # Check common locations
+        for alt_loc in "/boot/limine.conf" "/boot/EFI/limine/limine.conf" "/efi/limine/limine.conf"; do
+          if [ -f "$alt_loc" ]; then
+            limine_config="$alt_loc"
+            log_info "Found limine.conf at: $limine_config"
+            break
+          fi
+        done
+        
+        if [ ! -f "$limine_config" ]; then
+          log_warning "limine.conf not found in any location. Skipping kernel parameter addition for Limine."
+          return
+        fi
       fi
       
       log_info "Adding 'splash' parameter to Limine bootloader..."
@@ -145,20 +157,32 @@ add_kernel_parameters() {
       
       # Add splash parameter to all kernel entries
       local modified_count=0
+      
       if grep -q "^APPEND=" "$limine_config"; then
-        # Add splash to existing APPEND lines if not already present
-        if sudo sed -i '/^APPEND=/ s/"$/ splash"/' "$limine_config"; then
-          log_success "Added 'splash' to Limine APPEND parameters"
-          ((modified_count++))
+        # Add splash and quiet to existing APPEND lines if not already present
+        # First add splash if missing
+        if grep "^APPEND=" "$limine_config" | grep -qv "splash"; then
+          if sudo sed -i '/^APPEND=/ { /splash/! s/"$/ splash"/ }' "$limine_config"; then
+            log_success "Added 'splash' to Limine APPEND parameters"
+            ((modified_count++))
+          fi
+        fi
+        
+        # Then add quiet if missing
+        if grep "^APPEND=" "$limine_config" | grep -qv "quiet"; then
+          if sudo sed -i '/^APPEND=/ { /quiet/! s/splash/quiet splash/ }' "$limine_config"; then
+            log_success "Added 'quiet' to Limine APPEND parameters"
+            ((modified_count++))
+          fi
         fi
       else
         log_warning "No APPEND lines found in limine.conf"
       fi
       
       if [ $modified_count -gt 0 ]; then
-        log_success "Limine bootloader configured with splash parameter"
+        log_success "Limine bootloader configured with splash and quiet parameters ($modified_count changes)"
       else
-        log_warning "No changes made to Limine configuration"
+        log_info "Limine configuration already has Plymouth parameters"
       fi
       ;;
     *)
@@ -210,7 +234,15 @@ is_plymouth_configured() {
       fi
       ;;
     "limine")
-      if [ -f /boot/limine.conf ] && grep -q "splash" /boot/limine.conf 2>/dev/null; then
+      # Check all possible limine.conf locations
+      local found_splash=false
+      for limine_loc in "/boot/limine.conf" "/boot/EFI/limine/limine.conf" "/efi/limine/limine.conf"; do
+        if [ -f "$limine_loc" ] && grep -q "splash" "$limine_loc" 2>/dev/null; then
+          found_splash=true
+          break
+        fi
+      done
+      if [ "$found_splash" = true ]; then
         splash_parameter_set=true
       fi
       ;;

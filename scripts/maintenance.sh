@@ -362,8 +362,22 @@ setup_limine_bootloader() {
   local LIMINE_CONFIG="/boot/limine.conf"
 
   if [ ! -f "$LIMINE_CONFIG" ]; then
-    log_warning "limine.conf not found. Skipping Limine configuration."
-    return 0
+    log_warning "limine.conf not found at $LIMINE_CONFIG. Skipping Limine configuration."
+    log_info "Checking alternative locations..."
+    
+    # Check common locations
+    for alt_loc in "/boot/limine.conf" "/boot/EFI/limine/limine.conf" "/efi/limine/limine.conf"; do
+      if [ -f "$alt_loc" ]; then
+        LIMINE_CONFIG="$alt_loc"
+        log_info "Found limine.conf at: $LIMINE_CONFIG"
+        break
+      fi
+    done
+    
+    if [ ! -f "$LIMINE_CONFIG" ]; then
+      log_error "limine.conf not found in any standard location"
+      return 1
+    fi
   fi
 
   log_info "Configuring Limine for Btrfs snapshot support..."
@@ -374,22 +388,52 @@ setup_limine_bootloader() {
   # Set timeout to 3 seconds if not already set
   if grep -q "^TIMEOUT=" "$LIMINE_CONFIG"; then
     sudo sed -i 's/^TIMEOUT=.*/TIMEOUT=3/' "$LIMINE_CONFIG"
+    log_success "Set Limine timeout to 3 seconds"
   else
     echo "TIMEOUT=3" | sudo tee -a "$LIMINE_CONFIG" >/dev/null
+    log_success "Added Limine timeout of 3 seconds"
   fi
 
   # Ensure default entry exists
   if ! grep -q "^DEFAULT_ENTRY=" "$LIMINE_CONFIG"; then
     echo "DEFAULT_ENTRY=0" | sudo tee -a "$LIMINE_CONFIG" >/dev/null
+    log_success "Added DEFAULT_ENTRY=0 to limine.conf"
   fi
 
-  # Add Plymouth splash parameters if not already present
-  if grep -q "^APPEND=" "$LIMINE_CONFIG" && ! grep -q "splash" "$LIMINE_CONFIG"; then
-    sudo sed -i '/^APPEND=/ s/"$/ splash quiet"/' "$LIMINE_CONFIG"
-    log_info "Added splash parameters to Limine for Plymouth support"
+  # Configure Plymouth splash for all kernel entries
+  local kernel_configs_modified=0
+  if grep -q "^APPEND=" "$LIMINE_CONFIG"; then
+    # Check if any APPEND lines lack splash
+    if grep "^APPEND=" "$LIMINE_CONFIG" | grep -qv "splash"; then
+      # Add splash to APPEND lines that don't have it
+      sudo sed -i '/^APPEND=/ { /splash/! s/"$/ splash"/ }' "$LIMINE_CONFIG"
+      kernel_configs_modified=$((kernel_configs_modified + 1))
+      log_success "Added splash parameter to Limine kernel entries"
+    else
+      log_info "Splash parameter already present in all kernel entries"
+    fi
+  else
+    log_warning "No APPEND lines found in limine.conf - cannot add Plymouth support"
   fi
 
-  log_success "Limine bootloader configured (LTS kernel support available)"
+  # Ensure all kernel entries have quiet mode for Plymouth
+  if grep -q "^APPEND=" "$LIMINE_CONFIG"; then
+    if grep "^APPEND=" "$LIMINE_CONFIG" | grep -qv "quiet"; then
+      sudo sed -i '/^APPEND=/ { /quiet/! s/splash/quiet splash/ }' "$LIMINE_CONFIG"
+      kernel_configs_modified=$((kernel_configs_modified + 1))
+      log_success "Added quiet parameter to Limine kernel entries"
+    fi
+  fi
+
+  # Log final configuration status
+  if [ $kernel_configs_modified -gt 0 ]; then
+    log_success "Limine bootloader configured with Plymouth support"
+    log_info "Modified $kernel_configs_modified kernel configuration entries"
+  else
+    log_info "Limine bootloader configuration unchanged (already optimal)"
+  fi
+
+  log_success "Limine bootloader configuration completed"
 }
 
 # Setup systemd-boot bootloader for LTS kernel
@@ -557,9 +601,6 @@ setup_btrfs_snapshots() {
   if [ -n "$grub_btrfs_package_to_install" ]; then
     snapper_packages+=("$grub_btrfs_package_to_install")
   fi
-  if [ -n "$limine_snapper_package_to_install" ]; then
-    snapper_packages+=("$limine_snapper_package_to_install")
-  fi
 
   # Add btrfs-assistant GUI only for non-server modes
   if [[ "${INSTALL_MODE:-}" != "server" ]]; then
@@ -572,8 +613,14 @@ setup_btrfs_snapshots() {
   # Update package database first
   sudo pacman -Sy >/dev/null 2>&1 || log_warning "Failed to update package database"
 
-  # Install packages
+  # Install pacman packages first
   install_packages_quietly "${snapper_packages[@]}"
+  
+  # Install AUR packages separately
+  if [ -n "$limine_snapper_package_to_install" ]; then
+    log_info "Installing AUR package: $limine_snapper_package_to_install"
+    install_aur_quietly "$limine_snapper_package_to_install"
+  fi
 
   # Configure Snapper
   configure_snapper || { log_error "Snapper configuration failed"; return 1; }

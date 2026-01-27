@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
 configure_limine() {
-  # Smart limine.conf detection with fallback
+  # Simple limine.conf detection (same as GRUB/systemd-boot pattern)
   local limine_config=""
   for limine_loc in "/boot/limine/limine.conf" "/boot/limine.conf" "/boot/EFI/limine/limine.conf" "/efi/limine/limine.conf"; do
     if [ -f "$limine_loc" ]; then
@@ -20,12 +20,8 @@ configure_limine() {
   fi
 
   log_info "Configuring Limine bootloader"
-  log_info "Using limine.conf at: $limine_config"
 
-  # Create backup
-  sudo cp "$limine_config" "${limine_config}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
-
-  # Set timeout to 3 seconds (Limine format uses 'timeout: 3' not 'TIMEOUT=3')
+  # Set timeout to 3 seconds (Limine format uses 'timeout: 3')
   if grep -q "^timeout:" "$limine_config"; then
     sudo sed -i 's/^timeout:.*/timeout: 3/' "$limine_config"
   else

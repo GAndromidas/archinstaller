@@ -355,6 +355,32 @@ setup_grub_bootloader() {
   fi
 }
 
+# Setup Limine bootloader with LTS kernel support
+setup_limine_bootloader() {
+  step "Configuring Limine bootloader for snapshot support"
+
+  local LIMINE_CONFIG="/boot/limine.conf"
+
+  if [ ! -f "$LIMINE_CONFIG" ]; then
+    log_warning "limine.conf not found. Skipping Limine configuration."
+    return 0
+  fi
+
+  log_info "Configuring Limine for Btrfs snapshot support..."
+
+  # Backup existing config
+  sudo cp "$LIMINE_CONFIG" "${LIMINE_CONFIG}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
+
+  # Set timeout to 3 seconds if not already set
+  if grep -q "^TIMEOUT=" "$LIMINE_CONFIG"; then
+    sudo sed -i 's/^TIMEOUT=.*/TIMEOUT=3/' "$LIMINE_CONFIG"
+  else
+    echo "TIMEOUT=3" | sudo tee -a "$LIMINE_CONFIG" >/dev/null
+  fi
+
+  log_success "Limine bootloader configured (LTS kernel support available)"
+}
+
 # Setup systemd-boot bootloader for LTS kernel
 setup_systemd_boot() {
 
@@ -502,9 +528,17 @@ setup_btrfs_snapshots() {
     grub_btrfs_package_to_install="grub-btrfs"
   fi
 
+  local limine_snapper_package_to_install=""
+  if [ "$BOOTLOADER" = "limine" ] && is_btrfs_system; then
+    limine_snapper_package_to_install="limine-snapper-sync"
+  fi
+
   local snapper_packages=(snapper snap-pac btrfsmaintenance linux-lts linux-lts-headers)
   if [ -n "$grub_btrfs_package_to_install" ]; then
     snapper_packages+=("$grub_btrfs_package_to_install")
+  fi
+  if [ -n "$limine_snapper_package_to_install" ]; then
+    snapper_packages+=("$limine_snapper_package_to_install")
   fi
 
   # Add btrfs-assistant GUI only for non-server modes
@@ -548,6 +582,20 @@ setup_btrfs_snapshots() {
     log_info "Re-generating GRUB configuration to include Btrfs snapshot entries..."
     sudo grub-mkconfig -o /boot/grub/grub.cfg || log_error "Failed to re-generate GRUB configuration"
   fi
+
+  # Enable limine-snapper-sync service for Limine and Btrfs
+  if [ "$BOOTLOADER" = "limine" ] && is_btrfs_system; then
+    if command -v limine-snapper-sync &>/dev/null; then
+      log_info "Enabling limine-snapper-sync service for snapshot integration..."
+      if sudo systemctl enable --now limine-snapper-sync.service 2>/dev/null; then
+        log_success "limine-snapper-sync service enabled and started"
+      else
+        log_warning "Failed to enable limine-snapper-sync service (non-critical)"
+      fi
+    else
+      log_warning "limine-snapper-sync not found - snapshot boot entries will not be generated automatically"
+    fi
+  fi
   case "$BOOTLOADER" in
     grub)
       setup_grub_bootloader || log_warning "GRUB configuration had issues but continuing"
@@ -555,8 +603,11 @@ setup_btrfs_snapshots() {
     systemd-boot)
       setup_systemd_boot || log_warning "systemd-boot configuration had issues but continuing"
       ;;
+    limine)
+      setup_limine_bootloader || log_warning "Limine configuration had issues but continuing"
+      ;;
     *)
-      log_warning "Could not detect GRUB or systemd-boot. Bootloader configuration skipped."
+      log_warning "Could not detect GRUB, systemd-boot, or Limine. Bootloader configuration skipped."
       log_info "Snapper will still work, but you may need to manually configure boot entries."
       ;;
   esac
@@ -624,6 +675,10 @@ setup_btrfs_snapshots() {
     if [ "$BOOTLOADER" = "grub" ]; then
       echo -e "  • Boot snapshots: Select 'Arch Linux snapshots' in GRUB menu"
       echo -e "  • GRUB auto-updates when new snapshots are created"
+    elif [ "$BOOTLOADER" = "limine" ]; then
+      echo -e "  • Boot snapshots: Managed by limine-snapper-sync service"
+      echo -e "  • limine-snapper-sync: Auto-generates snapshot boot entries"
+      echo -e "  • LTS kernel: Select 'Arch Linux (LTS Kernel)' in Limine menu"
     fi
     echo -e "  • Restore via GUI: Launch 'btrfs-assistant'"
     echo -e "  • Check maintenance timers: ${YELLOW}systemctl list-timers 'btrfs-*'${RESET}"

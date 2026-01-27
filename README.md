@@ -46,6 +46,13 @@ Built on the Arch Linux philosophy of **simplicity and minimalism**, Archinstall
   - Optimizes I/O scheduling based on storage type (NVMe/SSD/HDD)
   - Recognizes laptop hardware and enables power-saving features
 
+- **Bootloader Detection & Configuration**
+  - Auto-detects installed bootloader (GRUB, systemd-boot, Limine)
+  - Applies tailored configuration for each bootloader type
+  - GRUB: Snapshot boot entries via grub-btrfs integration
+  - systemd-boot: LTS kernel fallback entry management
+  - Limine: Configuration support for modern UEFI systems
+
 - **Performance Optimization**
   - Dynamic ZRAM swap configuration based on available memory
   - Intelligent I/O scheduler selection per storage device type
@@ -68,8 +75,12 @@ Built on the Arch Linux philosophy of **simplicity and minimalism**, Archinstall
 
 - **Btrfs Snapshot System**
   - Full snapshot and recovery solution with Snapper
-  - Bootloader integration for easy rollbacks
-  - LTS kernel fallback option for system recovery
+  - Bootloader integration for easy rollbacks (GRUB, systemd-boot, Limine)
+  - GRUB: Automatic snapshot menu via grub-btrfs and grub-btrfsd
+  - Limine: Automatic snapshot boot entries via limine-snapper-sync
+  - systemd-boot: LTS kernel fallback option for system recovery
+  - Automatic snapshot creation before/after package operations
+  - GUI management with btrfs-assistant
 
 - **Data Integrity**
   - Automatic filesystem maintenance (fstrim)
@@ -123,13 +134,18 @@ Transform your system into a gaming powerhouse with one click:
 
 ---
 
-## 📊 Supported Platforms
+### 📊 Supported Platforms
 
 ### Hardware
 - ✅ **CPU**: Intel, AMD (with appropriate microcode)
 - ✅ **GPU**: NVIDIA (including legacy drivers), AMD, Intel
 - ✅ **Storage**: NVMe, SSD, HDD (with appropriate optimizations)
 - ✅ **Form Factors**: Desktop, Laptop, Virtual Machines (Virt-Manager, QEMU)
+
+### Bootloaders
+- ✅ **GRUB** 2.x with Btrfs snapshot support
+- ✅ **systemd-boot** with LTS kernel fallback
+- ✅ **Limine** (modern UEFI bootloader)
 
 ### Desktop Environments
 - ✅ **KDE Plasma** 5.x and 6.x
@@ -313,6 +329,11 @@ All packages are organized in `configs/programs.yaml` with logical groupings:
 - Proper permissions for hardware access
 - Sudo password feedback enabled
 
+✓ **Bootloader Hardening**
+- Bootloader-specific security configurations
+- GRUB: Password protection support (optional)
+- Secure boot configurations where applicable
+
 ✓ **Power Management**
 - Power profiles for laptops
 - Thermal management (Intel systems)
@@ -405,6 +426,20 @@ After installation, customize your system:
 ~/.config/starship.toml  # Terminal prompt theme
 ```
 
+### Bootloader Configuration
+```bash
+/boot/grub/grub.cfg           # GRUB configuration (auto-generated)
+/boot/loader/loader.conf      # systemd-boot configuration
+/boot/limine.conf             # Limine bootloader configuration
+```
+
+### Btrfs & Snapshots
+```bash
+/etc/snapper/configs/root                # Snapper snapshot configuration
+/etc/default/btrfsmaintenance            # Btrfs maintenance settings
+~/.config/btrfs-assistant.conf            # btrfs-assistant GUI settings
+```
+
 ### Desktop Environment
 ```bash
 ~/.config/kglobalshortcutsrc  # KDE shortcuts
@@ -431,6 +466,28 @@ Check logs if you need to:
 - Troubleshoot issues
 - See what was installed
 - Verify system changes
+
+## 🔧 Bootloader Integration Details
+
+### GRUB
+- **Auto-detection**: Checks `/boot/grub`, `/boot/grub2`, and pacman packages
+- **Btrfs Integration**: Uses `grub-btrfs` for automatic snapshot boot entries
+- **Daemon**: Runs `grub-btrfsd` for dynamic menu updates
+- **Configuration**: `/boot/grub/grub.cfg` (auto-regenerated)
+
+### systemd-boot
+- **Auto-detection**: Checks `/boot/loader/entries` and bootctl availability
+- **LTS Fallback**: Automatically creates LTS kernel boot entry
+- **Configuration**: `/boot/loader/loader.conf` and `/boot/loader/entries/`
+- **Kernel Parameters**: Applied to all boot entries automatically
+
+### Limine
+- **Auto-detection**: Checks `/boot/limine`, `/boot/EFI/limine`, and pacman packages
+- **Btrfs Integration**: Uses `limine-snapper-sync` for automatic snapshot boot entries
+- **Snapshot Service**: Runs `limine-snapper-sync.service` for dynamic snapshot menu updates
+- **Configuration**: `/boot/limine.conf` with timeout and default entry settings
+- **Modern UEFI**: Full support for modern UEFI-only systems
+- **Snapshot Boot Entries**: Auto-generated and synchronized with Snapper configuration
 
 ---
 

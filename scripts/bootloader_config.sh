@@ -4,6 +4,34 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
+configure_limine() {
+  local limine_config="/boot/limine.conf"
+
+  if [ ! -f "$limine_config" ]; then
+    log_warning "limine.conf not found. Skipping Limine configuration."
+    return 0
+  fi
+
+  log_info "Configuring Limine bootloader"
+
+  # Create backup
+  sudo cp "$limine_config" "${limine_config}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
+
+  # Set timeout to 3 seconds
+  if grep -q "^TIMEOUT=" "$limine_config"; then
+    sudo sed -i 's/^TIMEOUT=.*/TIMEOUT=3/' "$limine_config"
+  else
+    echo "TIMEOUT=3" | sudo tee -a "$limine_config" >/dev/null
+  fi
+
+  # Ensure default entry exists
+  if ! grep -q "^DEFAULT_ENTRY=" "$limine_config"; then
+    echo "DEFAULT_ENTRY=0" | sudo tee -a "$limine_config" >/dev/null
+  fi
+
+  log_success "Limine bootloader configured"
+}
+
 add_systemd_boot_kernel_params() {
   local boot_entries_dir="/boot/loader/entries"
   if [ ! -d "$boot_entries_dir" ]; then
@@ -123,6 +151,8 @@ if [ "$BOOTLOADER" = "grub" ]; then
     configure_grub
 elif [ "$BOOTLOADER" = "systemd-boot" ]; then
     configure_boot
+elif [ "$BOOTLOADER" = "limine" ]; then
+    configure_limine
 else
     log_warning "No bootloader detected or bootloader is unsupported. Defaulting to systemd-boot configuration."
     configure_boot

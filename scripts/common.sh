@@ -1167,6 +1167,8 @@ detect_bootloader() {
     echo "grub"
   elif [ -d "/boot/loader/entries" ] || [ -d "/efi/loader/entries" ] || command -v bootctl &>/dev/null; then
     echo "systemd-boot"
+  elif [ -d "/boot/limine" ] || [ -d "/boot/EFI/limine" ] || command -v limine &>/dev/null || pacman -Q limine &>/dev/null 2>&1; then
+    echo "limine"
   else
     echo "unknown"
   fi

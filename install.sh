@@ -62,13 +62,15 @@ EOF
 # Clear terminal for clean interface
 clear
 
-# Install gum for enhanced UI experience
-if ! command -v gum >/dev/null 2>&1; then
-  ui_info "Installing gum for enhanced UI experience..."
-  if ! sudo pacman -S --noconfirm gum 2>&1; then
-    ui_warn "Failed to install gum. Using basic menu interface."
-  fi
-fi
+# Display Arch ASCII art
+cat << 'EOF'
+      _             _     ___           _        _ _
+     / \   _ __ ___| |__ |_ _|_ __  ___| |_ __ _| | | ___ _ __
+    / _ \ | '__/ __| '_ \ | || '_ \/ __| __/ _` | | |/ _ \ '__|
+   / ___ \| | | (__| | | || || | | \__ \ || (_| | | |  __/ |
+  /_/   \_\_|  \___|_| |_|___|_| |_|___/\__\__,_|_|_|\___|_|
+
+EOF
 
 # Get the directory where this script is located (archinstaller root)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -80,6 +82,11 @@ STATE_FILE="$HOME/.archinstaller.state"
 mkdir -p "$(dirname "$STATE_FILE")"
 
 source "$SCRIPTS_DIR/common.sh"
+
+# Install gum silently for enhanced UI experience
+if ! command -v gum >/dev/null 2>&1; then
+  sudo pacman -S --noconfirm gum >/dev/null 2>&1 || true
+fi
 
 # Initialize log file
 {

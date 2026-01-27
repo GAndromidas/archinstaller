@@ -5,263 +5,38 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
 configure_limine() {
-  # Smart limine.conf detection with multiple fallback strategies
+  # Smart limine.conf detection with fallback
   local limine_config=""
-  local detection_methods=(
-    "/boot/limine/limine.conf"        # Most common location (CachyOS/Arch standard)
-    "/boot/limine.conf"               # Legacy location
-    "/boot/EFI/limine/limine.conf"     # UEFI ESP location
-    "/efi/limine/limine.conf"           # Alternative ESP location
-    "/boot/loader/limine.conf"          # Alternative bootloader location
-  )
-  
-  # Try each location in order of preference
-  for limine_loc in "${detection_methods[@]}"; do
+  for limine_loc in "/boot/limine/limine.conf" "/boot/limine.conf" "/boot/EFI/limine/limine.conf" "/efi/limine/limine.conf"; do
     if [ -f "$limine_loc" ]; then
       limine_config="$limine_loc"
-      log_info "Found limine.conf at: $limine_config"
       break
     fi
   done
 
-  # If not found, try to detect via bootctl or filesystem search
   if [ -z "$limine_config" ]; then
-    # Try bootctl detection
-    if command -v bootctl >/dev/null 2>&1; then
-      local esp_path=$(bootctl --print-esp-path 2>/dev/null)
-      if [ -n "$esp_path" ] && [ -f "$esp_path/limine/limine.conf" ]; then
-        limine_config="$esp_path/limine/limine.conf"
-        log_info "Detected limine.conf via bootctl: $limine_config"
-      fi
-    fi
-    
-    # Final fallback - search filesystem
-    if [ -z "$limine_config" ]; then
-      local found_config=$(find /boot /efi /boot/EFI -name "limine.conf" 2>/dev/null | head -n1)
-      if [ -n "$found_config" ]; then
-        limine_config="$found_config"
-        log_info "Found limine.conf via filesystem search: $limine_config"
-      fi
-    fi
-  fi
-
-  if [ -z "$limine_config" ]; then
-    log_warning "limine.conf not found in any location. Skipping Limine configuration."
-    log_info "Searched locations: $(printf '%s, ' "${detection_methods[@]}" | sed 's/, $//')"
-    return 0
-  fi
-
-  # Validate the configuration file format
-  if ! grep -q "^[[:space:]]*timeout:" "$limine_config" && ! grep -q "^[[:space:]]*cmdline:" "$limine_config"; then
-    log_warning "limine.conf appears to be in legacy format. Attempting conversion..."
-    create_modern_limine_config "$limine_config"
+    log_warning "limine.conf not found. Skipping Limine configuration."
     return 0
   fi
 
   log_info "Configuring Limine bootloader"
-  
-  # Create intelligent backup
-  create_smart_backup "$limine_config"
+  log_info "Using limine.conf at: $limine_config"
 
-  # Configure with smart parameter detection
-  configure_limine_intelligent "$limine_config"
-}
+  # Create backup
+  sudo cp "$limine_config" "${limine_config}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
 
-# Smart backup function that avoids unnecessary backups
-create_smart_backup() {
-  local config_file="$1"
-  local backup_dir="${config_file}.backups"
-  local max_backups=3
-  
-  # Create backup directory if it doesn't exist
-  sudo mkdir -p "$backup_dir"
-  
-  # Remove old backups if超过限制
-  find "$backup_dir" -name "*.backup.*" -type f | sort -r | tail -n +$((max_backups + 1)) | xargs -r sudo rm 2>/dev/null || true
-  
-  # Create new backup only if config changed
-  local latest_backup=$(find "$backup_dir" -name "*.backup.*" -type f -printf '%T@ %p\n' | sort -n | tail -n1 | cut -d' ' -f2-)
-  if [ -n "$latest_backup" ]; then
-    if ! cmp -s "$config_file" "$latest_backup"; then
-      sudo cp "$config_file" "${config_file}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
-      log_debug "Configuration changed - backup created"
-    else
-      log_debug "Configuration unchanged - backup skipped"
-    fi
-  else
-    sudo cp "$config_file" "${config_file}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
-  fi
-}
-
-# Convert legacy limine.conf to modern format
-create_modern_limine_config() {
-  local legacy_config="$1"
-  local modern_config="${legacy_config}.modern"
-  
-  log_info "Converting legacy limine.conf to modern format..."
-  
-  # Read and convert the configuration
-  {
-    echo "timeout: 3"
-    echo ""
-    
-    # Convert APPEND lines to modern entries
-    while IFS= read -r line; do
-      if [[ "$line" =~ ^APPEND=(.*) ]]; then
-        local append_content="${BASH_REMATCH[1]}"
-        echo "/Arch Linux"
-        echo "    protocol: linux"
-        echo "    path: boot():/vmlinuz-linux"
-        echo "    cmdline: $append_content"
-        echo "    module_path: boot():/initramfs-linux.img"
-      fi
-    done < "$legacy_config"
-    
-    echo ""
-    echo "//Snapshots"
-  } > "$modern_config"
-  
-  # Backup and replace
-  sudo cp "$legacy_config" "${legacy_config}.legacy.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
-  sudo mv "$modern_config" "$legacy_config"
-  
-  log_success "Converted limine.conf to modern format"
-}
-
-# Intelligent configuration with parameter detection
-configure_limine_intelligent() {
-  local limine_config="$1"
-  local modified_count=0
-  
-  # Detect system characteristics for smart configuration
-  local has_plymouth=false
-  local is_btrfs=false
-  local has_gpu=false
-  
-  # Detect Plymouth installation
-  if command -v plymouth-set-default-theme >/dev/null 2>&1 || [ -d "/usr/share/plymouth" ]; then
-    has_plymouth=true
-  fi
-  
-  # Detect Btrfs filesystem
-  if [ -f "/etc/fstab" ] && grep -q "btrfs" /etc/fstab; then
-    is_btrfs=true
-  fi
-  
-  # Detect GPU drivers (for optimization)
-  if lsmod | grep -q -E "(nvidia|amdgpu|i915)" 2>/dev/null; then
-    has_gpu=true
-  fi
-
-  # Configure timeout based on system type
+  # Set timeout to 3 seconds (Limine format uses 'timeout: 3' not 'TIMEOUT=3')
   if grep -q "^timeout:" "$limine_config"; then
-    if [ "$has_gpu" = true ]; then
-      sudo sed -i 's/^timeout:.*/timeout: 2/' "$limine_config"
-      log_debug "Set timeout to 2 seconds (GPU detected for faster boot)"
-    else
-      sudo sed -i 's/^timeout:.*/timeout: 3/' "$limine_config"
-    fi
-    ((modified_count++))
+    sudo sed -i 's/^timeout:.*/timeout: 3/' "$limine_config"
   else
-    if [ "$has_gpu" = true ]; then
-      sudo sed -i '1i timeout: 2' "$limine_config"
-    else
-      sudo sed -i '1i timeout: 3' "$limine_config"
-    fi
-    ((modified_count++))
+    # Find the first line and insert timeout after it
+    sudo sed -i '1i timeout: 3' "$limine_config"
   fi
 
-  # Smart Plymouth configuration
-  if [ "$has_plymouth" = true ] && grep -q "^[[:space:]]*cmdline:" "$limine_config"; then
-    # Add Plymouth parameters intelligently
-    local plymouth_params=""
-    
-    # Check for missing parameters and add them
-    if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "quiet"; then
-      plymouth_params="$plymouth_params quiet"
-    fi
-    
-    if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "splash"; then
-      plymouth_params="$plymouth_params splash"
-    fi
-    
-    if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "nowatchdog"; then
-      plymouth_params="$plymouth_params nowatchdog"
-    fi
-    
-    # Apply Plymouth parameters if any were added
-    if [ -n "$plymouth_params" ]; then
-      sudo sed -i "/^[[:space:]]*cmdline:/ s/$/$plymouth_params/" "$limine_config"
-      ((modified_count++))
-      log_success "Added Plymouth parameters: $plymouth_params"
-    fi
-  fi
-
-  # Smart Btrfs configuration
-  if [ "$is_btrfs" = true ]; then
-    # Fix subvolume path format
-    if grep -q "rootflags=subvol=@" "$limine_config"; then
-      sudo sed -i 's/rootflags=subvol=@/rootflags=subvol=\/@/g' "$limine_config"
-      ((modified_count++))
-      log_debug "Fixed Btrfs subvolume path format"
-    fi
-    
-    # Add machine-id comments for snapshot support
-    if ! grep -q "comment: machine-id=" "$limine_config"; then
-      if [ -f "/etc/machine-id" ]; then
-        local machine_id=$(cat /etc/machine-id)
-        sudo sed -i '/^[^[:space:]]/{
-          /^[^[:space:]]*\/[^+]/{
-            /comment: machine-id=/!i\
-    comment: machine-id='$machine_id'
-          }
-        }' "$limine_config"
-        ((modified_count++))
-        log_debug "Added machine-id for snapshot targeting"
-      else
-        # Add empty machine-id placeholder
-        sudo sed -i '/^[^[:space:]]/{
-          /^[^[:space:]]*\/[^+]/{
-            /comment: machine-id=/!i\
-    comment: machine-id=
-          }
-        }' "$limine_config"
-        ((modified_count++))
-      fi
-    fi
-    
-    # Add snapshots support if limine-snapper-sync is available
-    if command -v limine-snapper-sync >/dev/null 2>&1 && ! grep -q "//Snapshots" "$limine_config"; then
-      echo "" | sudo tee -a "$limine_config" >/dev/null
-      echo "//Snapshots" | sudo tee -a "$limine_config" >/dev/null
-      ((modified_count++))
-      log_success "Enabled Btrfs snapshot boot entries"
-    fi
-  fi
-
-  # Cleanup old configuration entries
-  if grep -q "^DEFAULT_ENTRY=" "$limine_config"; then
-    sudo sed -i '/^DEFAULT_ENTRY=/d' "$limine_config"
-    ((modified_count++))
-    log_debug "Removed legacy DEFAULT_ENTRY line"
-  fi
-
-  # Report results
-  if [ $modified_count -gt 0 ]; then
-    log_success "Limine intelligently configured ($modified_count optimizations applied)"
-    if [ "$has_plymouth" = true ]; then
-      log_info "✓ Plymouth support enabled"
-    fi
-    if [ "$is_btrfs" = true ]; then
-      log_info "✓ Btrfs optimization applied"
-    fi
-    if [ "$has_gpu" = true ]; then
-      log_info "✓ GPU-optimized timeout set"
-    fi
-  else
-    log_info "Limine configuration already optimal"
-  fi
+  log_success "Limine bootloader configured"
 }
+
+
 
 add_systemd_boot_kernel_params() {
   local boot_entries_dir="/boot/loader/entries"
@@ -384,13 +159,9 @@ elif [ "$BOOTLOADER" = "systemd-boot" ]; then
     configure_boot
 elif [ "$BOOTLOADER" = "limine" ]; then
     configure_limine
-    # Also configure Plymouth specifically for limine if Plymouth was installed
+    # Only configure Plymouth for Limine (snapshots handled in maintenance step)
     if command -v plymouth-set-default-theme >/dev/null 2>&1; then
         run_step "Adding Plymouth parameters to Limine entries" add_plymouth_to_limine
-    fi
-    # Configure snapshots if Btrfs is detected
-    if [ "$IS_BTRFS" = "true" ]; then
-        run_step "Configuring Limine for Btrfs snapshots" configure_limine_snapshots
     fi
 else
     log_warning "No bootloader detected or bootloader is unsupported. Defaulting to systemd-boot configuration."
@@ -399,14 +170,8 @@ fi
 
 setup_console_font
 
-# --- Smart Plymouth for Limine ---
+# --- Simple Plymouth for Limine ---
 add_plymouth_to_limine() {
-  # Verify Plymouth is actually installed
-  if ! command -v plymouth-set-default-theme >/dev/null 2>&1 && [ ! -d "/usr/share/plymouth" ]; then
-    log_warning "Plymouth not installed - skipping Plymouth configuration"
-    return 1
-  fi
-
   # Use smart detection
   local limine_config=""
   for limine_loc in "/boot/limine/limine.conf" "/boot/limine.conf" "/boot/EFI/limine/limine.conf" "/efi/limine/limine.conf"; do
@@ -429,49 +194,33 @@ add_plymouth_to_limine() {
 
   local modified_count=0
   
-  # Intelligent Plymouth parameter addition
-  local cmdline_lines=$(grep "^[[:space:]]*cmdline:" "$limine_config")
-  local has_splash=false
-  local has_quiet=false
-  local has_nowatchdog=false
-  
-  # Analyze current parameters
-  while IFS= read -r line; do
-    [[ "$line" =~ splash ]] && has_splash=true
-    [[ "$line" =~ quiet ]] && has_quiet=true
-    [[ "$line" =~ nowatchdog ]] && has_nowatchdog=true
-  done <<< "$cmdline_lines"
-  
-  # Add missing parameters intelligently
-  if [ "$has_splash" = false ] || [ "$has_quiet" = false ] || [ "$has_nowatchdog" = false ]; then
-    create_smart_backup "$limine_config"
-    
-    # Build parameter string
-    local plymouth_params=""
-    [ "$has_quiet" = false ] && plymouth_params="$plymouth_params quiet"
-    [ "$has_splash" = false ] && plymouth_params="$plymouth_params splash"
-    [ "$has_nowatchdog" = false ] && plymouth_params="$plymouth_params nowatchdog"
-    
-    # Apply parameters with smart placement
-    if [ -n "$plymouth_params" ]; then
-      sudo sed -i "/^[[:space:]]*cmdline:/ s/$/$plymouth_params/" "$limine_config"
-      ((modified_count++))
-      log_success "Added Plymouth parameters: $plymouth_params"
-    fi
+  # Add Plymouth parameters to cmdline entries
+  if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "splash"; then
+    sudo sed -i '/^[[:space:]]*cmdline:/ { /splash/! s/$/ splash/ }' "$limine_config"
+    ((modified_count++))
+    log_success "Added 'splash' to Limine cmdline parameters"
   else
-    log_info "Plymouth parameters already present in all Limine entries"
+    log_info "Splash parameter already present in Limine configuration"
   fi
   
-  # Verify Plymouth theme is set
-  local current_theme=$(plymouth-set-default-theme 2>/dev/null | grep -v "^$" | head -n1)
-  if [ -z "$current_theme" ]; then
-    log_info "Setting Plymouth theme to bgrt"
-    sudo plymouth-set-default-theme bgrt -R 2>/dev/null || true
+  # Add quiet parameter if missing
+  if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "quiet"; then
+    sudo sed -i '/^[[:space:]]*cmdline:/ { /quiet/! s/splash/quiet splash/ }' "$limine_config"
     ((modified_count++))
+    log_success "Added 'quiet' to Limine cmdline parameters"
+  fi
+  
+  # Add nowatchdog parameter if missing
+  if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "nowatchdog"; then
+    sudo sed -i '/^[[:space:]]*cmdline:/ { /nowatchdog/! s/$/ nowatchdog/ }' "$limine_config"
+    ((modified_count++))
+    log_success "Added 'nowatchdog' to Limine cmdline parameters"
   fi
   
   if [ $modified_count -gt 0 ]; then
-    log_success "Plymouth configuration optimized for Limine ($modified_count changes)"
+    log_success "Plymouth configuration added to Limine bootloader ($modified_count changes)"
+  else
+    log_info "Plymouth parameters already present in Limine configuration"
   fi
 }
 

@@ -615,8 +615,6 @@ log_warning() {
 }
 
 # Function: log_error
-# Description: Prints error message in red with context and adds to error array
-# Parameters: $1 - Error message, $2 - Optional troubleshooting hint
 log_error() {
   local message="$1"
   local hint="${2:-}"
@@ -626,6 +624,21 @@ log_error() {
   fi
   ERRORS+=("$message")
   log_to_file "ERROR: $message"
+}
+
+# Function: log_debug
+# Description: Prints debug message in dim gray (when DEBUG mode is enabled)
+# Parameters: $1 - Debug message, $2 - Optional context/details
+log_debug() {
+  if [ "${DEBUG:-0}" = "1" ]; then
+    local message="$1"
+    local context="${2:-}"
+    echo -e "${CYAN}[DEBUG] $message${RESET}"
+    if [ -n "$context" ]; then
+      echo -e "${CYAN}  Details: $context${RESET}"
+    fi
+    log_to_file "DEBUG: $message"
+  fi
 }
 
 # Check if a command exists

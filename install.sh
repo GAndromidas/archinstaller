@@ -390,35 +390,8 @@ mark_step_complete_with_progress() {
     echo "FAILED: $step_name" >> "$STATE_FILE"
   fi
 
-  # Calculate overall progress based on completed vs failed steps
-  local completed_count=$(grep -c "^COMPLETED:" "$STATE_FILE" 2>/dev/null | tr -d ' ' || echo "0")
-  local failed_count=$(grep -c "^FAILED:" "$STATE_FILE" 2>/dev/null | tr -d ' ' || echo "0")
-  completed_count=${completed_count:-0}
-  failed_count=${failed_count:-0}
-  local total_steps=$((completed_count + failed_count))
-  local progress_percentage=0
-
-  if [ "$total_steps" -gt 0 ]; then
-    progress_percentage=$((completed_count * 100 / total_steps))
-  fi
-
-  # Display progress with visual feedback (gum if available, fallback to basic colors)
-  if supports_gum; then
-    echo ""
-    if [ "$status" = "completed" ]; then
-      gum style --margin "0 2" --foreground 10 "✓ Step completed! Overall progress: $progress_percentage% ($completed_count/$TOTAL_STEPS)"
-    else
-      gum style --margin "0 2" --foreground 196 "✗ Step failed! Overall progress: $progress_percentage% ($completed_count/$TOTAL_STEPS)"
-      gum style --margin "0 4" --foreground 196 "  Failed step: $step_name"
-    fi
-  else
-    if [ "$status" = "completed" ]; then
-      ui_success "Step completed! Overall progress: $progress_percentage% ($completed_count/$TOTAL_STEPS)"
-    else
-      ui_error "Step failed! Overall progress: $progress_percentage% ($completed_count/$TOTAL_STEPS)"
-      echo -e "${RED}  Failed step: $step_name${RESET}"
-    fi
-  fi
+  # Progress tracking removed - was causing arithmetic syntax errors
+  # Step status is logged to STATE_FILE for resume functionality
 }
 
 # Function to save log on exit

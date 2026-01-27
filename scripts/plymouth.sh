@@ -152,68 +152,6 @@ add_kernel_parameters() {
       
       log_info "Adding 'splash' parameter to Limine bootloader..."
       
-      # Backup existing config
-      sudo cp "$limine_config" "${limine_config}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
-      
-      # Add splash parameter to all kernel entries
-      local modified_count=0
-      
-      if grep -q "^[[:space:]]*cmdline:" "$limine_config"; then
-        # Add splash and quiet to existing cmdline lines if not already present
-        # First add splash if missing
-        if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "splash"; then
-          if sudo sed -i '/^[[:space:]]*cmdline:/ { /splash/! s/$/ splash/ }' "$limine_config"; then
-            log_success "Added 'splash' to Limine cmdline parameters"
-            ((modified_count++))
-          fi
-        fi
-        
-        # Then add quiet if missing
-        if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "quiet"; then
-          if sudo sed -i '/^[[:space:]]*cmdline:/ { /quiet/! s/splash/quiet splash/ }' "$limine_config"; then
-            log_success "Added 'quiet' to Limine cmdline parameters"
-            ((modified_count++))
-          fi
-        fi
-        
-        # Add nowatchdog if missing for better Plymouth compatibility
-        if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "nowatchdog"; then
-          if sudo sed -i '/^[[:space:]]*cmdline:/ { /nowatchdog/! s/$/ nowatchdog/ }' "$limine_config"; then
-            log_success "Added 'nowatchdog' to Limine cmdline parameters"
-            ((modified_count++))
-          fi
-        fi
-      else
-        log_warning "No cmdline lines found in limine.conf - cannot add Plymouth support"
-      fi
-      
-      if [ $modified_count -gt 0 ]; then
-        log_success "Limine bootloader configured with splash and quiet parameters ($modified_count changes)"
-      else
-        log_info "Limine configuration already has Plymouth parameters"
-      fi
-      ;;
-    *)
-      log_warning "No supported bootloader detected for kernel parameter addition. Detected: $BOOTLOADER"
-      ;;
-  esac
-}
-
-print_summary() {
-  echo -e "\\n${CYAN}========= PLYMOUTH SUMMARY =========${RESET}"
-  if [ ${#PLYMOUTH_ERRORS[@]} -eq 0 ]; then
-    echo -e "${GREEN}Plymouth configured successfully!${RESET}"
-  else
-    echo -e "${RED}Some configuration steps failed:${RESET}"
-    for err in "${PLYMOUTH_ERRORS[@]}"; do
-      echo -e "  - ${YELLOW}$err${RESET}"
-    done
-  fi
-  echo -e "${CYAN}====================================${RESET}"
-}
-
-# ======= Check if Plymouth is already configured =======
-is_plymouth_configured() {
   local plymouth_hook_present=false
   local plymouth_theme_set=false
   local splash_parameter_set=false

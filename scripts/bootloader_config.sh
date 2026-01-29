@@ -169,17 +169,52 @@ configure_limine_basic() {
   
   # Configure limine-snapper-sync to use correct limine.conf path
   if [ "$limine_config" != "/boot/limine.conf" ]; then
-    log_info "Configuring limine-snapper-sync for correct limine.conf path..."
+    log_info "Creating copy of limine.conf for limine-snapper-sync compatibility..."
     
-    # Create config override in /etc/default/limine
+    # Create copy at /boot/limine.conf for limine-snapper-sync
+    sudo cp "$limine_config" "/boot/limine.conf"
+    log_success "Created copy: $limine_config -> /boot/limine.conf"
+    
+    # Configure limine-snapper-sync to use the standard location
     sudo mkdir -p /etc/default
     sudo tee /etc/default/limine > /dev/null << EOF
-# limine-snapper-sync configuration override
+# limine-snapper-sync configuration
 ESP_PATH="/boot"
-LIMINE_CONF_PATH="$limine_config"
+LIMINE_CONF_PATH="/boot/limine.conf"
 EOF
     
-    log_success "limine-snapper-sync configured to use: $limine_config"
+    log_success "limine-snapper-sync configured to use: /boot/limine.conf"
+  else
+    log_info "limine.conf already at standard location - no copy needed"
+  fi
+  
+  # Ensure Plymouth parameters are also in the copy (if different from original)
+  if [ "$limine_config" != "/boot/limine.conf" ] && [ -f "/boot/limine.conf" ]; then
+    log_info "Ensuring Plymouth parameters in copied limine.conf..."
+    
+    # Add Plymouth parameters to the copy if missing
+    local modified_count=0
+    
+    if grep -q "^[[:space:]]*cmdline:" "/boot/limine.conf"; then
+      if grep "^[[:space:]]*cmdline:" "/boot/limine.conf" | grep -qv "splash"; then
+        sudo sed -i '/^[[:space:]]*cmdline:/ { /splash/! s/$/ splash/ }' "/boot/limine.conf"
+        ((modified_count++))
+      fi
+      
+      if grep "^[[:space:]]*cmdline:" "/boot/limine.conf" | grep -qv "quiet"; then
+        sudo sed -i '/^[[:space:]]*cmdline:/ { /quiet/! s/$/ quiet/ }' "/boot/limine.conf"
+        ((modified_count++))
+      fi
+      
+      if grep "^[[:space:]]*cmdline:" "/boot/limine.conf" | grep -qv "nowatchdog"; then
+        sudo sed -i '/^[[:space:]]*cmdline:/ { /nowatchdog/! s/$/ nowatchdog/ }' "/boot/limine.conf"
+        ((modified_count++))
+      fi
+      
+      if [ $modified_count -gt 0 ]; then
+        log_success "Plymouth parameters added to copied limine.conf"
+      fi
+    fi
   fi
   
   log_success "Limine bootloader configured with Plymouth support"

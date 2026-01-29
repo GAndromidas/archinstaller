@@ -422,17 +422,23 @@ setup_limine_bootloader() {
 
   # Configure limine-snapper-sync to use correct limine.conf path
   if [ "$LIMINE_CONFIG" != "/boot/limine.conf" ]; then
-    log_info "Configuring limine-snapper-sync for correct limine.conf path..."
+    log_info "Creating copy of limine.conf for limine-snapper-sync compatibility..."
     
-    # Create config override in /etc/default/limine
+    # Create copy at /boot/limine.conf for limine-snapper-sync
+    sudo cp "$LIMINE_CONFIG" "/boot/limine.conf"
+    log_success "Created copy: $LIMINE_CONFIG -> /boot/limine.conf"
+    
+    # Configure limine-snapper-sync to use the standard location
     sudo mkdir -p /etc/default
     sudo tee /etc/default/limine > /dev/null << EOF
-# limine-snapper-sync configuration override
+# limine-snapper-sync configuration
 ESP_PATH="/boot"
-LIMINE_CONF_PATH="$LIMINE_CONFIG"
+LIMINE_CONF_PATH="/boot/limine.conf"
 EOF
     
-    log_success "limine-snapper-sync configured to use: $LIMINE_CONFIG"
+    log_success "limine-snapper-sync configured to use: /boot/limine.conf"
+  else
+    log_info "limine.conf already at standard location - no copy needed"
   fi
 
   # Enable limine-snapper-sync service for automatic snapshot boot entries
@@ -532,44 +538,21 @@ setup_btrfs_snapshots() {
     log_success "Sufficient disk space available: ${AVAILABLE_SPACE}GB"
   fi
 
-  # Ask user if they want to set up snapshots
-  local setup_snapshots=false
-  if command -v gum >/dev/null 2>&1; then
-    echo ""
-    gum style --foreground 226 "Btrfs snapshot setup available:"
-    gum style --margin "0 2" --foreground 15 "• Automatic snapshots before/after package operations"
-    gum style --margin "0 2" --foreground 15 "• Automatic snapshots on every system boot"
-    gum style --margin "0 2" --foreground 15 "• Retention: boot snapshots only (max 10 total)"
-
-    gum style --margin "0 2" --foreground 15 "• LTS kernel fallback for recovery"
-    gum style --margin "0 2" --foreground 15 "• Automated maintenance: scrub, balance, defrag"
-    gum style --margin "0 2" --foreground 15 "• GUI tool (btrfs-assistant) for snapshot management"
-    echo ""
-    if gum confirm --default=true "Would you like to set up automatic Btrfs snapshots?"; then
-      setup_snapshots=true
-    fi
-  else
-    echo ""
-    echo -e "${YELLOW}Btrfs snapshot setup available:${RESET}"
-    echo -e "  • Automatic snapshots before/after package operations"
-    echo -e "  • Automatic snapshots on every system boot"
-    echo -e "  • Retention: boot snapshots only (max 10 total)"
-
-    echo -e "  • LTS kernel fallback for recovery"
-    echo -e "  • Automated maintenance: scrub, balance, defrag"
-    echo -e "  • GUI tool (btrfs-assistant) for snapshot management"
-    echo ""
-    read -r -p "Would you like to set up automatic Btrfs snapshots? [y/N]: " response
-    response=${response,,}
-    if [[ "$response" == "y" || "$response" == "yes" ]]; then
-      setup_snapshots=true
-    fi
-  fi
-
-  if [ "$setup_snapshots" = false ]; then
-    log_info "Btrfs snapshot setup skipped by user"
-    return 0
-  fi
+  # Auto-configure Btrfs snapshots (no user interaction needed)
+  local setup_snapshots=true
+  
+  log_info "Btrfs filesystem detected - automatically configuring Btrfs snapshots and maintenance"
+  
+  # Show what's being configured
+  echo ""
+  echo -e "${CYAN}Automatically configuring Btrfs features:${RESET}"
+  echo -e "  • Automatic snapshots before/after package operations"
+  echo -e "  • Automatic snapshots on every system boot"
+  echo -e "  • Retention: boot snapshots only (max 10 total)"
+  echo -e "  • LTS kernel fallback for recovery"
+  echo -e "  • Automated maintenance: scrub, balance, defrag"
+  echo -e "  • GUI tool (btrfs-assistant) for snapshot management"
+  echo ""
 
   # Detect bootloader
   local BOOTLOADER=$(detect_bootloader)
@@ -670,17 +653,23 @@ setup_btrfs_snapshots() {
     local limine_config=""
     limine_config=$(find_limine_config)
     if [ "$limine_config" != "/boot/limine.conf" ]; then
-      log_info "Configuring limine-snapper-sync for correct limine.conf path..."
+      log_info "Creating copy of limine.conf for limine-snapper-sync compatibility..."
       
-      # Create config override in /etc/default/limine
+      # Create copy at /boot/limine.conf for limine-snapper-sync
+      sudo cp "$limine_config" "/boot/limine.conf"
+      log_success "Created copy: $limine_config -> /boot/limine.conf"
+      
+      # Configure limine-snapper-sync to use the standard location
       sudo mkdir -p /etc/default
       sudo tee /etc/default/limine > /dev/null << EOF
-# limine-snapper-sync configuration override
+# limine-snapper-sync configuration
 ESP_PATH="/boot"
-LIMINE_CONF_PATH="$limine_config"
+LIMINE_CONF_PATH="/boot/limine.conf"
 EOF
       
-      log_success "limine-snapper-sync configured to use: $limine_config"
+      log_success "limine-snapper-sync configured to use: /boot/limine.conf"
+    else
+      log_info "limine.conf already at standard location - no copy needed"
     fi
     
     if command -v limine-snapper-sync &>/dev/null; then

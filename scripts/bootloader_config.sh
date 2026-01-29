@@ -94,7 +94,7 @@ configure_grub() {
         return 1
     fi
 
-    # Determine main kernel and secondary kernels (logic kept for informational purposes, not used for default setting)
+    # Determine main kernel and secondary kernels
     MAIN_KERNEL=""
     SECONDARY_KERNELS=()
     for k in "${KERNELS[@]}"; do
@@ -133,44 +133,10 @@ configure_limine_basic() {
     sudo sed -i '1i timeout: 3' "$limine_config"
   fi
   
-  # Add Plymouth kernel parameters (splash, quiet, nowatchdog)
-  if grep -q "^[[:space:]]*cmdline:" "$limine_config"; then
-    local modified_count=0
-    
-    # Add splash parameter if missing
-    if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "splash"; then
-      sudo sed -i '/^[[:space:]]*cmdline:/ { /splash/! s/$/ splash/ }' "$limine_config"
-      ((modified_count++))
-      log_success "Added 'splash' to Limine cmdline parameters"
-    fi
-    
-    # Add quiet parameter if missing
-    if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "quiet"; then
-      sudo sed -i '/^[[:space:]]*cmdline:/ { /quiet/! s/$/ quiet/ }' "$limine_config"
-      ((modified_count++))
-      log_success "Added 'quiet' to Limine cmdline parameters"
-    fi
-    
-    # Add nowatchdog parameter if missing
-    if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "nowatchdog"; then
-      sudo sed -i '/^[[:space:]]*cmdline:/ { /nowatchdog/! s/$/ nowatchdog/ }' "$limine_config"
-      ((modified_count++))
-      log_success "Added 'nowatchdog' to Limine cmdline parameters"
-    fi
-    
-    if [ $modified_count -gt 0 ]; then
-      log_success "Plymouth parameters added to Limine configuration"
-    else
-      log_info "Plymouth parameters already present in Limine configuration"
-    fi
-  else
-    log_warning "limine.conf not in modern format - cannot add Plymouth support"
-  fi
-  
   # Configure limine.conf first (original location), then copy for limine-snapper-sync
   
   # Step 1: Configure Plymouth parameters in original limine.conf
-  log_info "Configuring Plymouth parameters in original limine.conf..."
+  log_info "Configuring Plymouth parameters in limine.conf at: $limine_config"
   local modified_count=0
   
   if grep -q "^[[:space:]]*cmdline:" "$limine_config"; then
@@ -178,34 +144,34 @@ configure_limine_basic() {
     if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "splash"; then
       sudo sed -i '/^[[:space:]]*cmdline:/ { /splash/! s/$/ splash/ }' "$limine_config"
       ((modified_count++))
-      log_success "Added 'splash' to original limine.conf"
+      log_success "Added 'splash' to limine.conf"
     fi
     
     # Add quiet parameter if missing
     if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "quiet"; then
       sudo sed -i '/^[[:space:]]*cmdline:/ { /quiet/! s/$/ quiet/ }' "$limine_config"
       ((modified_count++))
-      log_success "Added 'quiet' to original limine.conf"
+      log_success "Added 'quiet' to limine.conf"
     fi
     
     # Add nowatchdog parameter if missing
     if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "nowatchdog"; then
       sudo sed -i '/^[[:space:]]*cmdline:/ { /nowatchdog/! s/$/ nowatchdog/ }' "$limine_config"
       ((modified_count++))
-      log_success "Added 'nowatchdog' to original limine.conf"
+      log_success "Added 'nowatchdog' to limine.conf"
     fi
     
     if [ $modified_count -gt 0 ]; then
-      log_success "Plymouth parameters configured in original limine.conf"
+      log_success "Plymouth parameters configured in limine.conf"
     else
-      log_info "Plymouth parameters already present in original limine.conf"
+      log_info "Plymouth parameters already present in limine.conf"
     fi
   else
     log_warning "limine.conf not in modern format - cannot add Plymouth support"
   fi
   
-  # Step 2: Add machine-id comments for snapshot identification (ArchWiki recommended)
-  log_info "Adding machine-id comments to original limine.conf..."
+  # Step 2: Add machine-id comments for snapshot identification
+  log_info "Adding machine-id comments to limine.conf..."
   if [ -f "/etc/machine-id" ]; then
     local machine_id=$(cat /etc/machine-id | head -c 32)
     if [ -n "$machine_id" ]; then
@@ -219,9 +185,9 @@ configure_limine_basic() {
     comment: machine-id='"$machine_id"'
           }
         }' "$limine_config"
-        log_success "Added machine-id comments to original limine.conf"
+        log_success "Added machine-id comments to limine.conf"
       elif grep -q "comment: machine-id=" "$limine_config"; then
-        log_info "Machine-id comments already present in original limine.conf"
+        log_info "Machine-id comments already present in limine.conf"
       fi
     else
       log_warning "Could not read machine-id"
@@ -230,45 +196,63 @@ configure_limine_basic() {
     log_warning "Machine-id file not found"
   fi
   
-  # Step 3: Add //Snapshots keyword for automatic snapshot entries (ArchWiki method)
-  log_info "Adding //Snapshots keyword to original limine.conf..."
+  # Step 3: Add Windows MBR entry if detected
+  log_info "Checking for Windows MBR installations..."
+  local windows_disk=""
+  
+  # Smart Windows MBR detection
+  for disk in /dev/sd[a-z] /dev/hd[a-z] /dev/nvme[0-9]n[0-9]p[0-9]; do
+    if [ -b "$disk" ]; then
+      # Check for Windows boot signature and NTFS filesystem
+      if sudo file -s "$disk" 2>/dev/null | grep -q "NTFS" || \
+         sudo dd if="$disk" bs=512 count=1 2>/dev/null | strings | grep -qi "MSWIN"; then
+        windows_disk="$disk"
+        log_success "Found Windows installation on: $windows_disk"
+        break
+      fi
+    fi
+  done
+  
+  if [ -n "$windows_disk" ]; then
+    # Add Windows entry before Snapshots section
+    log_info "Adding Windows MBR entry to limine.conf..."
+    
+    # Remove existing //Snapshots if present (we'll add it back after Windows)
+    local temp_file=$(mktemp)
+    grep -v "//Snapshots" "$limine_config" > "$temp_file" 2>/dev/null || cp "$limine_config" "$temp_file"
+    
+    # Add Windows entry
+    cat << EOF | sudo tee -a "$temp_file" > /dev/null
+
+/+Windows
+protocol: chainloader
+path: chainloader():${windows_disk}
+EOF
+    
+    # Add back //Snapshots section
+    echo "" | sudo tee -a "$temp_file" > /dev/null
+    echo "//Snapshots" | sudo tee -a "$temp_file" > /dev/null
+    
+    # Replace original file
+    sudo mv "$temp_file" "$limine_config"
+    log_success "Added Windows MBR entry before Snapshots section"
+  else
+    log_info "No Windows MBR installation detected - skipping Windows entry"
+  fi
+  
+  # Step 4: Add //Snapshots keyword for automatic snapshot entries (if not already added)
   if ! grep -q "//Snapshots" "$limine_config" && ! grep -q "/Snapshots" "$limine_config"; then
+    log_info "Adding //Snapshots keyword to limine.conf..."
     # Add //Snapshots keyword at the end of the file
     echo "" | sudo tee -a "$limine_config" > /dev/null
     echo "//Snapshots" | sudo tee -a "$limine_config" > /dev/null
-    log_success "Added //Snapshots keyword to original limine.conf"
+    log_success "Added //Snapshots keyword to limine.conf"
   else
-    log_info "Snapshots keyword already present in original limine.conf"
+    log_info "Snapshots keyword already present in limine.conf"
   fi
   
-  # Step 4: Copy fully configured limine.conf to /boot/limine.conf for limine-snapper-sync
-  if [ "$limine_config" != "/boot/limine.conf" ]; then
-    log_info "Copying fully configured limine.conf to /boot/limine.conf for limine-snapper-sync..."
-    sudo cp "$limine_config" "/boot/limine.conf"
-    log_success "Copied configured limine.conf to /boot/limine.conf"
-    
-    # Configure limine-snapper-sync to use the standard location (ArchWiki recommended)
-    sudo mkdir -p /etc/default
-    sudo tee /etc/default/limine > /dev/null << EOF
-# limine-snapper-sync configuration (ArchWiki recommended)
-ESP_PATH="/boot"
-LIMINE_CONF_PATH="/boot/limine.conf"
-EOF
-    
-    log_success "limine-snapper-sync configured to use: /boot/limine.conf"
-  else
-    log_info "limine.conf already at standard location - no copy needed"
-    
-    # Still configure limine-snapper-sync even if limine.conf is already in place
-    sudo mkdir -p /etc/default
-    sudo tee /etc/default/limine > /dev/null << EOF
-# limine-snapper-sync configuration (ArchWiki recommended)
-ESP_PATH="/boot"
-LIMINE_CONF_PATH="/boot/limine.conf"
-EOF
-    
-    log_success "limine-snapper-sync configured to use: /boot/limine.conf"
-  fi
+  # Step 5: Copy will be done after limine-snapper-sync is installed
+  log_info "limine.conf configured - copy to /boot/limine.conf will be done after limine-snapper-sync installation"
   
   log_success "Limine bootloader configured with Plymouth support"
 }

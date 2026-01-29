@@ -189,7 +189,7 @@ configure_limine_basic() {
   fi
   
   # Configure limine-snapper-sync to use correct limine.conf path
-  if [ "$limine_config" = "/boot/limine/limine.conf" ]; then
+  if [ "$limine_config" != "/boot/limine.conf" ]; then
     log_info "Configuring limine-snapper-sync for correct limine.conf path..."
     
     # Create config override in /etc/default/limine

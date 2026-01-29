@@ -1177,7 +1177,7 @@ detect_bootloader() {
   if [ -d "/boot/grub" ] || [ -d "/boot/grub2" ] || [ -d "/boot/efi/EFI/grub" ] || command -v grub-mkconfig &>/dev/null || pacman -Q grub &>/dev/null 2>&1; then
     echo "grub"
   # Check for Limine next (more specific than systemd-boot)
-  elif [ -d "/boot/limine" ] || [ -d "/boot/EFI/limine" ] || [ -f "/boot/limine.conf" ] || [ -f "/boot/limine/limine.conf" ] || command -v limine &>/dev/null || pacman -Q limine &>/dev/null 2>&1; then
+  elif [ -d "/boot/limine" ] || [ -d "/boot/EFI/limine" ] || [ -d "/boot/EFI/arch-limine" ] || [ -f "/boot/limine.conf" ] || [ -f "/boot/limine/limine.conf" ] || [ -f "/boot/EFI/limine/limine.conf" ] || [ -f "/boot/EFI/arch-limine/limine.conf" ] || command -v limine &>/dev/null || pacman -Q limine &>/dev/null 2>&1; then
     echo "limine"
   # Check for systemd-boot last (bootctl exists on most systemd systems)
   elif [ -d "/boot/loader/entries" ] || [ -d "/efi/loader/entries" ] || [ -f "/boot/loader/loader.conf" ]; then
@@ -1190,7 +1190,7 @@ detect_bootloader() {
 # Find limine.conf file location (centralized to avoid duplication)
 find_limine_config() {
   local limine_config=""
-  for limine_loc in "/boot/limine/limine.conf" "/boot/limine.conf" "/boot/EFI/limine/limine.conf" "/efi/limine/limine.conf"; do
+  for limine_loc in "/boot/limine/limine.conf" "/boot/limine.conf" "/boot/EFI/limine/limine.conf" "/boot/EFI/arch-limine/limine.conf" "/efi/limine/limine.conf"; do
     if [ -f "$limine_loc" ]; then
       echo "$limine_loc"
       return 0

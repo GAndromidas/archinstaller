@@ -421,7 +421,7 @@ setup_limine_bootloader() {
   fi
 
   # Configure limine-snapper-sync to use correct limine.conf path
-  if [ "$LIMINE_CONFIG" = "/boot/limine/limine.conf" ]; then
+  if [ "$LIMINE_CONFIG" != "/boot/limine.conf" ]; then
     log_info "Configuring limine-snapper-sync for correct limine.conf path..."
     
     # Create config override in /etc/default/limine
@@ -669,7 +669,7 @@ setup_btrfs_snapshots() {
     # Configure limine-snapper-sync to use correct limine.conf path if needed
     local limine_config=""
     limine_config=$(find_limine_config)
-    if [ "$limine_config" = "/boot/limine/limine.conf" ]; then
+    if [ "$limine_config" != "/boot/limine.conf" ]; then
       log_info "Configuring limine-snapper-sync for correct limine.conf path..."
       
       # Create config override in /etc/default/limine

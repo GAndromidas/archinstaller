@@ -420,10 +420,19 @@ setup_limine_bootloader() {
     log_info "Machine-id already present"
   fi
 
-  # Create symlink for limine-snapper-sync compatibility
-  if [ "$LIMINE_CONFIG" = "/boot/limine/limine.conf" ] && [ ! -f "/boot/limine.conf" ]; then
-    log_info "Creating symlink for limine-snapper-sync compatibility..."
-    sudo ln -sf "$LIMINE_CONFIG" "/boot/limine.conf" || log_warning "Failed to create symlink"
+  # Configure limine-snapper-sync to use correct limine.conf path
+  if [ "$LIMINE_CONFIG" = "/boot/limine/limine.conf" ]; then
+    log_info "Configuring limine-snapper-sync for correct limine.conf path..."
+    
+    # Create config override in /etc/default/limine
+    sudo mkdir -p /etc/default
+    sudo tee /etc/default/limine > /dev/null << EOF
+# limine-snapper-sync configuration override
+ESP_PATH="/boot"
+LIMINE_CONF_PATH="$LIMINE_CONFIG"
+EOF
+    
+    log_success "limine-snapper-sync configured to use: $LIMINE_CONFIG"
   fi
 
   # Enable limine-snapper-sync service for automatic snapshot boot entries
@@ -657,12 +666,21 @@ setup_btrfs_snapshots() {
 
   # Enable limine-snapper-sync service for Limine and Btrfs
   if [ "$BOOTLOADER" = "limine" ] && is_btrfs_system; then
-    # Create symlink for limine-snapper-sync compatibility if needed
+    # Configure limine-snapper-sync to use correct limine.conf path if needed
     local limine_config=""
     limine_config=$(find_limine_config)
-    if [ "$limine_config" = "/boot/limine/limine.conf" ] && [ ! -f "/boot/limine.conf" ]; then
-      log_info "Creating symlink for limine-snapper-sync compatibility..."
-      sudo ln -sf "$limine_config" "/boot/limine.conf" || log_warning "Failed to create symlink"
+    if [ "$limine_config" = "/boot/limine/limine.conf" ]; then
+      log_info "Configuring limine-snapper-sync for correct limine.conf path..."
+      
+      # Create config override in /etc/default/limine
+      sudo mkdir -p /etc/default
+      sudo tee /etc/default/limine > /dev/null << EOF
+# limine-snapper-sync configuration override
+ESP_PATH="/boot"
+LIMINE_CONF_PATH="$limine_config"
+EOF
+      
+      log_success "limine-snapper-sync configured to use: $limine_config"
     fi
     
     if command -v limine-snapper-sync &>/dev/null; then

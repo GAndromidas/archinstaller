@@ -188,10 +188,19 @@ configure_limine_basic() {
     log_warning "limine.conf not in modern format - cannot add Plymouth support"
   fi
   
-  # Create symlink for limine-snapper-sync compatibility (expects /boot/limine.conf)
-  if [ "$limine_config" = "/boot/limine/limine.conf" ] && [ ! -f "/boot/limine.conf" ]; then
-    log_info "Creating symlink for limine-snapper-sync compatibility..."
-    sudo ln -sf "$limine_config" "/boot/limine.conf" || log_warning "Failed to create symlink"
+  # Configure limine-snapper-sync to use correct limine.conf path
+  if [ "$limine_config" = "/boot/limine/limine.conf" ]; then
+    log_info "Configuring limine-snapper-sync for correct limine.conf path..."
+    
+    # Create config override in /etc/default/limine
+    sudo mkdir -p /etc/default
+    sudo tee /etc/default/limine > /dev/null << EOF
+# limine-snapper-sync configuration override
+ESP_PATH="/boot"
+LIMINE_CONF_PATH="$limine_config"
+EOF
+    
+    log_success "limine-snapper-sync configured to use: $limine_config"
   fi
   
   log_success "Limine bootloader configured with Plymouth support"

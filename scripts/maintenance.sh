@@ -370,9 +370,6 @@ setup_limine_bootloader() {
 
   log_info "Found limine.conf at: $LIMINE_CONFIG"
 
-  # Backup existing config
-  sudo cp "$LIMINE_CONFIG" "${LIMINE_CONFIG}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
-
   # Set timeout to 3 seconds if not already set (Limine format uses 'timeout: 3')
   if grep -q "^timeout:" "$LIMINE_CONFIG"; then
     sudo sed -i 's/^timeout:.*/timeout: 3/' "$LIMINE_CONFIG"
@@ -385,36 +382,6 @@ setup_limine_bootloader() {
 
   # Remove old DEFAULT_ENTRY line (Limine doesn't use this format)
   sudo sed -i '/^DEFAULT_ENTRY=/d' "$LIMINE_CONFIG"
-
-  # Configure Plymouth splash for all kernel entries
-  local kernel_configs_modified=0
-  if grep -q "^[[:space:]]*cmdline:" "$LIMINE_CONFIG"; then
-    # Check if any cmdline lines lack splash
-    if grep "^[[:space:]]*cmdline:" "$LIMINE_CONFIG" | grep -qv "splash"; then
-      # Add splash to cmdline lines that don't have it
-      sudo sed -i '/^[[:space:]]*cmdline:/ { /splash/! s/$/ splash/ }' "$LIMINE_CONFIG"
-      kernel_configs_modified=$((kernel_configs_modified + 1))
-      log_success "Added splash parameter to Limine kernel entries"
-    else
-      log_info "Splash parameter already present in all kernel entries"
-    fi
-
-    # Ensure all kernel entries have quiet mode for Plymouth
-    if grep "^[[:space:]]*cmdline:" "$LIMINE_CONFIG" | grep -qv "quiet"; then
-      sudo sed -i '/^[[:space:]]*cmdline:/ { /quiet/! s/splash/quiet splash/ }' "$LIMINE_CONFIG"
-      kernel_configs_modified=$((kernel_configs_modified + 1))
-      log_success "Added quiet parameter to Limine kernel entries"
-    fi
-
-    # Add nowatchdog for better Plymouth compatibility
-    if grep "^[[:space:]]*cmdline:" "$LIMINE_CONFIG" | grep -qv "nowatchdog"; then
-      sudo sed -i '/^[[:space:]]*cmdline:/ { /nowatchdog/! s/$/ nowatchdog/ }' "$LIMINE_CONFIG"
-      kernel_configs_modified=$((kernel_configs_modified + 1))
-      log_success "Added nowatchdog parameter to Limine kernel entries"
-    fi
-  else
-    log_warning "No cmdline lines found in limine.conf - cannot add Plymouth support"
-  fi
 
   # Fix subvolume path format (subvol=@ -> subvol=/@)
   sudo sed -i 's/rootflags=subvol=@/rootflags=subvol=\/@/g' "$LIMINE_CONFIG"
@@ -453,6 +420,12 @@ setup_limine_bootloader() {
     log_info "Machine-id already present"
   fi
 
+  # Create symlink for limine-snapper-sync compatibility
+  if [ "$LIMINE_CONFIG" = "/boot/limine/limine.conf" ] && [ ! -f "/boot/limine.conf" ]; then
+    log_info "Creating symlink for limine-snapper-sync compatibility..."
+    sudo ln -sf "$LIMINE_CONFIG" "/boot/limine.conf" || log_warning "Failed to create symlink"
+  fi
+
   # Enable limine-snapper-sync service for automatic snapshot boot entries
   if command -v limine-snapper-sync >/dev/null 2>&1; then
     log_info "Enabling limine-snapper-sync service for automatic snapshot boot entries..."
@@ -467,21 +440,11 @@ setup_limine_bootloader() {
     log_info "Install limine-snapper-sync from AUR to enable automatic snapshot boot entries"
   fi
 
-  # Log final configuration status
-  if [ $kernel_configs_modified -gt 0 ]; then
-    log_success "Limine bootloader configured with Plymouth support"
-    log_info "Modified $kernel_configs_modified kernel configuration entries"
-  else
-    log_info "Limine bootloader configuration unchanged (already optimal)"
-  fi
-
   log_success "Limine bootloader configuration completed"
 }
 
 # Setup systemd-boot bootloader for LTS kernel
 setup_systemd_boot() {
-
-
   step "Configuring systemd-boot for LTS kernel fallback"
 
   local BOOT_DIR="/boot/loader/entries"
@@ -694,6 +657,14 @@ setup_btrfs_snapshots() {
 
   # Enable limine-snapper-sync service for Limine and Btrfs
   if [ "$BOOTLOADER" = "limine" ] && is_btrfs_system; then
+    # Create symlink for limine-snapper-sync compatibility if needed
+    local limine_config=""
+    limine_config=$(find_limine_config)
+    if [ "$limine_config" = "/boot/limine/limine.conf" ] && [ ! -f "/boot/limine.conf" ]; then
+      log_info "Creating symlink for limine-snapper-sync compatibility..."
+      sudo ln -sf "$limine_config" "/boot/limine.conf" || log_warning "Failed to create symlink"
+    fi
+    
     if command -v limine-snapper-sync &>/dev/null; then
       log_info "Enabling limine-snapper-sync service for snapshot integration..."
       if sudo systemctl enable --now limine-snapper-sync.service 2>/dev/null; then

@@ -125,11 +125,74 @@ if [ "$BOOTLOADER" = "grub" ]; then
 elif [ "$BOOTLOADER" = "systemd-boot" ]; then
     configure_boot
 elif [ "$BOOTLOADER" = "limine" ]; then
-    # Limine configuration is now handled by maintenance.sh
-    log_info "Limine bootloader will be configured by maintenance script"
+    configure_limine_basic
 else
     log_warning "No bootloader detected or bootloader is unsupported. Defaulting to systemd-boot configuration."
     configure_boot
 fi
 
 setup_console_font
+
+# --- Limine Basic Configuration ---
+configure_limine_basic() {
+  step "Configuring Limine bootloader"
+  
+  local limine_config=""
+  limine_config=$(find_limine_config)
+  
+  if [ -z "$limine_config" ]; then
+    log_error "limine.conf not found in any location"
+    return 1
+  fi
+  
+  log_info "Found limine.conf at: $limine_config"
+  
+  # Set timeout to 3 seconds
+  if grep -q "^timeout:" "$limine_config"; then
+    sudo sed -i 's/^timeout:.*/timeout: 3/' "$limine_config"
+  else
+    sudo sed -i '1i timeout: 3' "$limine_config"
+  fi
+  
+  # Add Plymouth kernel parameters (splash, quiet, nowatchdog)
+  if grep -q "^[[:space:]]*cmdline:" "$limine_config"; then
+    local modified_count=0
+    
+    # Add splash parameter if missing
+    if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "splash"; then
+      sudo sed -i '/^[[:space:]]*cmdline:/ { /splash/! s/$/ splash/ }' "$limine_config"
+      ((modified_count++))
+      log_success "Added 'splash' to Limine cmdline parameters"
+    fi
+    
+    # Add quiet parameter if missing
+    if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "quiet"; then
+      sudo sed -i '/^[[:space:]]*cmdline:/ { /quiet/! s/$/ quiet/ }' "$limine_config"
+      ((modified_count++))
+      log_success "Added 'quiet' to Limine cmdline parameters"
+    fi
+    
+    # Add nowatchdog parameter if missing
+    if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "nowatchdog"; then
+      sudo sed -i '/^[[:space:]]*cmdline:/ { /nowatchdog/! s/$/ nowatchdog/ }' "$limine_config"
+      ((modified_count++))
+      log_success "Added 'nowatchdog' to Limine cmdline parameters"
+    fi
+    
+    if [ $modified_count -gt 0 ]; then
+      log_success "Plymouth parameters added to Limine configuration"
+    else
+      log_info "Plymouth parameters already present in Limine configuration"
+    fi
+  else
+    log_warning "limine.conf not in modern format - cannot add Plymouth support"
+  fi
+  
+  # Create symlink for limine-snapper-sync compatibility (expects /boot/limine.conf)
+  if [ "$limine_config" = "/boot/limine/limine.conf" ] && [ ! -f "/boot/limine.conf" ]; then
+    log_info "Creating symlink for limine-snapper-sync compatibility..."
+    sudo ln -sf "$limine_config" "/boot/limine.conf" || log_warning "Failed to create symlink"
+  fi
+  
+  log_success "Limine bootloader configured with Plymouth support"
+}

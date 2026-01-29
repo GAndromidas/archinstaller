@@ -32,7 +32,7 @@ INSTALLATION MODES:
 FEATURES:
     - Desktop environment detection and optimization (KDE, GNOME, Cosmic)
     - Security hardening (Fail2ban, Firewall)
-    - Performance tuning (ZRAM, Plymouth boot screen)
+    - Performance tuning (Plymouth boot screen)
     - Optional gaming mode with performance optimizations
     - Btrfs snapshot support with automatic configuration
 

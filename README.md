@@ -3,14 +3,13 @@
 # 🚀 Archinstaller
 
 [![Last Commit](https://img.shields.io/github/last-commit/GAndromidas/archinstaller.svg?style=for-the-badge)](https://github.com/GAndromidas/archinstaller/commits/main)
-[![Latest Release](https://img.shields.io/github/v/release/GAndromidas/archinstaller.svg?style=for-the-badge)](https://github.com/GAndromidas/archinstaller/releases)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 
-**Advanced Arch Linux Post-Installation Automation**
+**Professional Arch Linux Post-Installation Automation**
 
-Transform your minimal Arch Linux installation into a fully configured, optimized, and ready-to-use system in minutes.
+Transform your minimal Arch Linux installation into a fully configured, optimized system with intelligent hardware detection and tailored optimizations.
 
-[Installation](#-quick-start) • [Features](#-key-features) • [Modes](#-installation-modes) • [Contributing](#-contributing)
+[Installation](#-quick-start) • [Features](#-key-features) • [Modes](#-installation-modes)
 
 </div>
 
@@ -18,21 +17,13 @@ Transform your minimal Arch Linux installation into a fully configured, optimize
 
 ## 📋 Overview
 
-**Archinstaller** is a sophisticated post-installation automation script for Arch Linux that intelligently configures your system based on detected hardware. Rather than applying one-size-fits-all configurations, it inspects your CPU, GPU, storage type, and desktop environment to apply tailored optimizations and security hardening.
+**Archinstaller** is a sophisticated post-installation automation tool that intelligently configures Arch Linux based on your hardware. It applies targeted optimizations rather than one-size-fits-all settings, ensuring optimal performance for your specific configuration.
 
-Built on the Arch Linux philosophy of **simplicity and minimalism**, Archinstaller delivers a professional installation experience with:
-
-- 🎯 Real-time progress tracking with time estimation
-- 🔄 Intelligent resume functionality for interrupted installations
-- 🛡️ Security hardening enabled by default
-- ⚡ Hardware-aware performance optimizations
-- 🎮 Optional gaming mode for complete gaming setup
-
----
-
-## ✨ Core Philosophy
-
-**Intelligent Automation** — Rather than forcing you to make countless manual decisions, Archinstaller analyzes your system and applies best-practice configurations that typically require hours of manual research and tweaking.
+**Core Philosophy:**
+- 🎯 **Hardware-Aware** - Detects CPU, GPU, storage, and desktop environment
+- 🛡️ **Security-First** - Comprehensive hardening enabled by default
+- ⚡ **Performance-Optimized** - Intelligent I/O scheduling and kernel tuning
+- 🔄 **Reliable** - Resume functionality for interrupted installations
 
 ---
 
@@ -54,7 +45,6 @@ Built on the Arch Linux philosophy of **simplicity and minimalism**, Archinstall
   - Limine: Configuration support for modern UEFI systems
 
 - **Performance Optimization**
-  - Dynamic ZRAM swap configuration based on available memory
   - Intelligent I/O scheduler selection per storage device type
   - Kernel parameter tuning for optimal responsiveness
   - Parallel package downloads for faster installation
@@ -162,40 +152,30 @@ Transform your system into a gaming powerhouse with one click:
 
 ### Prerequisites
 
-Before running Archinstaller, ensure you have:
-
-- A **fresh, minimal Arch Linux installation**
-- An **active internet connection** (required for downloading packages)
-- A **regular user account** with `sudo` privileges
-- At least **2GB free disk space**
+- **Fresh Arch Linux installation** (minimal base system)
+- **Active internet connection**
+- **User account with sudo privileges**
+- **2GB+ free disk space**
 
 ### Installation
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/gandromidas/archinstaller.git
-   cd archinstaller
-   ```
+```bash
+# Clone and run
+git clone https://github.com/gandromidas/archinstaller.git
+cd archinstaller
+./install.sh
+```
 
-2. **Review the installation modes (optional):**
-   ```bash
-   ./install.sh --help
-   ```
+**One-Click Setup:** The installer handles everything automatically - just select your preferred mode and let it configure your system.
 
-3. **Run the installer:**
-   ```bash
-   ./install.sh
-   ```
+### Installation Modes
 
-4. **Select your installation mode:**
-   - Interactive menu will guide you through the process
-   - Choose: Standard, Minimal, Server, or Custom
-   - Confirm and let the installer work
-
-5. **After installation:**
-   - System will be fully configured and optimized
-   - Reboot to apply all changes
-   - Enjoy your new Arch system!
+| Mode | Use Case | Description |
+|------|----------|-------------|
+| **Standard** | General desktop use | Full-featured setup with all recommended packages |
+| **Minimal** | Performance-focused | Lightweight essentials only |
+| **Server** | Headless deployments | Docker, SSH, server utilities |
+| **Custom** | Power users | Interactive package selection |
 
 ### Command-Line Options
 
@@ -203,10 +183,10 @@ Before running Archinstaller, ensure you have:
 ./install.sh [OPTIONS]
 
 OPTIONS:
-  -h, --help      Show help message and exit
-  -v, --verbose   Enable verbose output (show all package details)
-  -q, --quiet     Quiet mode (minimal output)
-  -d, --dry-run   Preview changes without applying them
+  -h, --help      Show help message
+  -v, --verbose   Enable detailed output
+  -q, --quiet     Minimal output mode
+  -d, --dry-run   Preview changes only
 ```
 
 ### Installation Experience
@@ -271,7 +251,6 @@ All packages are organized in `configs/programs.yaml` with logical groupings:
 - Development essentials
 - Zsh shell with Oh-My-Zsh
 - Starship terminal prompt
-- ZRAM swap optimization
 - System monitoring tools
 
 ### Standard Mode

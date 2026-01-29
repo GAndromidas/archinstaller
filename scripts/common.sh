@@ -906,9 +906,6 @@ install_package_groups() {
       "starship")
         all_packages+=(starship)
         ;;
-      "zram")
-        all_packages+=(zram-generator)
-        ;;
       # Add more groups as needed
     esac
   done
@@ -1188,6 +1185,18 @@ detect_bootloader() {
   else
     echo "unknown"
   fi
+}
+
+# Find limine.conf file location (centralized to avoid duplication)
+find_limine_config() {
+  local limine_config=""
+  for limine_loc in "/boot/limine/limine.conf" "/boot/limine.conf" "/boot/EFI/limine/limine.conf" "/efi/limine/limine.conf"; do
+    if [ -f "$limine_loc" ]; then
+      echo "$limine_loc"
+      return 0
+    fi
+  done
+  return 1
 }
 # Parameters: $@ - Packages to install
 install_flatpak_quietly() {

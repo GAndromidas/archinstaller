@@ -132,31 +132,63 @@ add_kernel_parameters() {
       ;;
     "limine")
       # Limine logic
-      local limine_config="/boot/limine.conf"
-      if [ ! -f "$limine_config" ]; then
-        log_warning "limine.conf not found. Checking alternative locations..."
-        # Check common locations
-        for alt_loc in "/boot/limine.conf" "/boot/limine/limine.conf" "/boot/EFI/limine/limine.conf" "/efi/limine/limine.conf"; do
-          if [ -f "$alt_loc" ]; then
-            limine_config="$alt_loc"
-            log_info "Found limine.conf at: $limine_config"
-            break
-          fi
-        done
-        
-        if [ ! -f "$limine_config" ]; then
-          log_warning "limine.conf not found in any location. Skipping kernel parameter addition for Limine."
-          return
-        fi
+      local limine_config=""
+      limine_config=$(find_limine_config)
+      
+      if [ -z "$limine_config" ]; then
+        log_warning "limine.conf not found in any location. Skipping kernel parameter addition for Limine."
+        return
       fi
       
       log_info "Adding 'splash' parameter to Limine bootloader..."
       
+      # Validate format compatibility
+      if ! grep -q "^[[:space:]]*cmdline:" "$limine_config"; then
+        log_warning "limine.conf not in modern format - cannot add Plymouth support"
+        return
+      fi
+      
+      local modified_count=0
+      
+      # Add splash parameter if missing
+      if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "splash"; then
+        sudo sed -i '/^[[:space:]]*cmdline:/ { /splash/! s/$/ splash/ }' "$limine_config"
+        ((modified_count++))
+        log_success "Added 'splash' to Limine cmdline parameters"
+      else
+        log_info "Splash parameter already present in Limine configuration"
+      fi
+      
+      # Add quiet parameter if missing for better Plymouth experience
+      if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "quiet"; then
+        sudo sed -i '/^[[:space:]]*cmdline:/ { /quiet/! s/splash/quiet splash/ }' "$limine_config"
+        ((modified_count++))
+        log_success "Added 'quiet' to Limine cmdline parameters"
+      fi
+      
+      # Add nowatchdog parameter if missing for Plymouth compatibility
+      if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "nowatchdog"; then
+        sudo sed -i '/^[[:space:]]*cmdline:/ { /nowatchdog/! s/$/ nowatchdog/ }' "$limine_config"
+        ((modified_count++))
+        log_success "Added 'nowatchdog' to Limine cmdline parameters"
+      fi
+      
+      if [ $modified_count -gt 0 ]; then
+        log_success "Plymouth configuration added to Limine bootloader ($modified_count changes)"
+      else
+        log_info "Plymouth parameters already present in Limine configuration"
+      fi
+      ;;
+  esac
+}
+
+# Function to check if Plymouth is fully configured
+is_plymouth_configured() {
   local plymouth_hook_present=false
   local plymouth_theme_set=false
   local splash_parameter_set=false
 
-  # Check if plymouth hook is in mkinitcpio.conf using the command_exists utility
+  # Check if plymouth hook is in mkinitcpio.conf
   if grep -q "plymouth" /etc/mkinitcpio.conf 2>/dev/null; then
     plymouth_hook_present=true
   fi
@@ -183,13 +215,11 @@ add_kernel_parameters() {
       # Check all possible limine.conf locations (prefer /boot/limine/limine.conf)
       local limine_config=""
       local found_splash=false
-      for limine_loc in "/boot/limine/limine.conf" "/boot/limine.conf" "/boot/EFI/limine/limine.conf" "/efi/limine/limine.conf"; do
-        if [ -f "$limine_loc" ] && grep -q "splash" "$limine_loc" 2>/dev/null; then
-          found_splash=true
-          limine_config="$limine_loc"
-          break
-        fi
-      done
+      
+      limine_config=$(find_limine_config)
+      if [ -n "$limine_config" ] && grep -q "splash" "$limine_config" 2>/dev/null; then
+        found_splash=true
+      fi
       if [ "$found_splash" = true ]; then
         splash_parameter_set=true
       fi

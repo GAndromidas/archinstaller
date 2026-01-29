@@ -108,8 +108,6 @@ install_all_packages() {
     zsh zsh-autosuggestions zsh-syntax-highlighting
     # Starship
     starship
-    # ZRAM
-    zram-generator
   )
 
   step "Installing all packages"

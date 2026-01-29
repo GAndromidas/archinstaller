@@ -355,18 +355,13 @@ setup_grub_bootloader() {
   fi
 }
 
-# Setup Limine bootloader with LTS kernel support
+# Setup Limine bootloader with proper snapshot integration
 setup_limine_bootloader() {
   step "Configuring Limine bootloader for snapshot support"
 
   # Check for limine.conf in standard locations (prefer /boot/limine/limine.conf)
   local LIMINE_CONFIG=""
-  for limine_loc in "/boot/limine/limine.conf" "/boot/limine.conf" "/boot/EFI/limine/limine.conf" "/efi/limine/limine.conf"; do
-    if [ -f "$limine_loc" ]; then
-      LIMINE_CONFIG="$limine_loc"
-      break
-    fi
-  done
+  LIMINE_CONFIG=$(find_limine_config)
 
   if [ -z "$LIMINE_CONFIG" ]; then
     log_error "limine.conf not found in any standard location"
@@ -374,8 +369,6 @@ setup_limine_bootloader() {
   fi
 
   log_info "Found limine.conf at: $LIMINE_CONFIG"
-
-  log_info "Configuring Limine for Btrfs snapshot support..."
 
   # Backup existing config
   sudo cp "$LIMINE_CONFIG" "${LIMINE_CONFIG}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
@@ -426,21 +419,52 @@ setup_limine_bootloader() {
   # Fix subvolume path format (subvol=@ -> subvol=/@)
   sudo sed -i 's/rootflags=subvol=@/rootflags=subvol=\/@/g' "$LIMINE_CONFIG"
 
-  # Add machine-id comments for snapshot support
+  # Add machine-id comments for snapshot support (required by limine-snapper-sync)
   if ! grep -q "comment: machine-id=" "$LIMINE_CONFIG"; then
-    sudo sed -i '/^[^[:space:]]/{
-      /^[^[:space:]]*\/[^+]/{
-        /comment: machine-id=/!i\
+    if [ -f "/etc/machine-id" ]; then
+      local machine_id=$(cat /etc/machine-id)
+      if [ -n "$machine_id" ]; then
+        sudo sed -i '/^[^[:space:]]/{
+          /^[^[:space:]]*\/[^+]/{
+            /comment: machine-id=/!i\
+    comment: machine-id='$machine_id'
+          }
+        }' "$LIMINE_CONFIG"
+        log_success "Added machine-id: $machine_id for snapshot targeting"
+      else
+        log_warning "No machine-id found - adding placeholder"
+        sudo sed -i '/^[^[:space:]]/{
+          /^[^[:space:]]*\/[^+]/{
+            /comment: machine-id=/!i\
     comment: machine-id=
-      }
-    }' "$LIMINE_CONFIG"
+          }
+        }' "$LIMINE_CONFIG"
+      fi
+    else
+      log_warning "/etc/machine-id not found - adding placeholder"
+      sudo sed -i '/^[^[:space:]]/{
+        /^[^[:space:]]*\/[^+]/{
+          /comment: machine-id=/!i\
+    comment: machine-id=
+        }
+      }' "$LIMINE_CONFIG"
+    fi
+  else
+    log_info "Machine-id already present"
   fi
 
-  # Add //Snapshots at the end for snapshot support if not present
-  if ! grep -q "//Snapshots" "$LIMINE_CONFIG"; then
-    echo "" | sudo tee -a "$LIMINE_CONFIG" >/dev/null
-    echo "//Snapshots" | sudo tee -a "$LIMINE_CONFIG" >/dev/null
-    kernel_configs_modified=$((kernel_configs_modified + 1))
+  # Enable limine-snapper-sync service for automatic snapshot boot entries
+  if command -v limine-snapper-sync >/dev/null 2>&1; then
+    log_info "Enabling limine-snapper-sync service for automatic snapshot boot entries..."
+    if sudo systemctl enable --now limine-snapper-sync.service 2>/dev/null; then
+      log_success "limine-snapper-sync service enabled and started"
+      log_info "Snapshot boot entries will be automatically generated and updated"
+    else
+      log_warning "Failed to enable limine-snapper-sync service"
+    fi
+  else
+    log_warning "limine-snapper-sync not found - snapshot boot entries will not be generated automatically"
+    log_info "Install limine-snapper-sync from AUR to enable automatic snapshot boot entries"
   fi
 
   # Log final configuration status

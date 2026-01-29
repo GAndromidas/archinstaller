@@ -215,6 +215,76 @@ EOF
         log_success "Plymouth parameters added to copied limine.conf"
       fi
     fi
+    
+    # Validate that limine.conf has proper kernel entries for limine-snapper-sync
+    log_info "Validating limine.conf format for limine-snapper-sync..."
+    
+    # Check if there's at least one proper kernel entry
+    if grep -q "^[[:space:]]*protocol: linux" "/boot/limine.conf" && \
+       grep -q "^[[:space:]]*path: boot():/vmlinuz" "/boot/limine.conf" && \
+       grep -q "^[[:space:]]*module_path: boot():/initramfs" "/boot/limine.conf"; then
+      log_success "limine.conf has proper kernel entries for limine-snapper-sync"
+    else
+      log_warning "limine.conf may not have proper kernel entries for limine-snapper-sync"
+      log_info "Checking if we need to add kernel entries..."
+      
+      # Try to find kernel and initramfs files
+      local kernel_file=""
+      local initramfs_file=""
+      
+      # Find the main kernel
+      for kernel in /boot/vmlinuz* /boot/vmlinux*; do
+        if [ -f "$kernel" ] && [[ "$kernel" != *"-fallback"* ]]; then
+          kernel_file=$(basename "$kernel")
+          break
+        fi
+      done
+      
+      # Find corresponding initramfs
+      if [ -n "$kernel_file" ]; then
+        kernel_base=${kernel_file#vmlinuz-}
+        for initramfs in /boot/initramfs-"${kernel_base}"*.img /boot/initrd*"${kernel_base}"*; do
+          if [ -f "$initramfs" ] && [[ "$initramfs" != *"-fallback"* ]]; then
+            initramfs_file=$(basename "$initramfs")
+            break
+          fi
+        done
+      fi
+      
+      if [ -n "$kernel_file" ] && [ -n "$initramfs_file" ]; then
+        log_info "Found kernel: $kernel_file, initramfs: $initramfs_file"
+        log_info "Adding kernel entry to limine.conf for limine-snapper-sync compatibility..."
+        
+        # Add a basic kernel entry if none exists
+        if ! grep -q "^[[:space:]]*protocol: linux" "/boot/limine.conf"; then
+          local machine_id=""
+          if [ -f "/etc/machine-id" ]; then
+            machine_id=$(cat /etc/machine-id | head -c 32)
+          fi
+          
+          # Get root UUID
+          local root_uuid=""
+          root_uuid=$(findmnt -no UUID / 2>/dev/null || blkid -s UUID -o value $(findmnt -no SOURCE /) 2>/dev/null)
+          
+          if [ -n "$root_uuid" ]; then
+            sudo tee -a "/boot/limine.conf" > /dev/null << EOF
+
+/+Arch Linux
+comment: machine-id=${machine_id}
+protocol: linux
+path: boot():/${kernel_file}
+cmdline: root=UUID=${root_uuid} rw splash quiet nowatchdog
+module_path: boot():/${initramfs_file}
+EOF
+            log_success "Added kernel entry to limine.conf for limine-snapper-sync"
+          else
+            log_warning "Could not determine root UUID for kernel entry"
+          fi
+        fi
+      else
+        log_warning "Could not find kernel and initramfs files for limine-snapper-sync"
+      fi
+    fi
   fi
   
   log_success "Limine bootloader configured with Plymouth support"

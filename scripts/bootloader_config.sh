@@ -199,8 +199,29 @@ configure_limine_basic() {
   # Ensure limine.conf has a proper Linux entry with protocol for limine-snapper-sync template
   log_info "Ensuring limine.conf has proper Linux protocol entry for snapshot template..."
   if ! grep -q "^[[:space:]]*protocol: linux" "$limine_config"; then
-    log_warning "No Linux protocol entry found - limine-snapper-sync may not work properly"
-    log_info "Consider checking your limine.conf has a proper Linux boot entry"
+    log_warning "No Linux protocol entry found - creating a basic Linux entry for limine-snapper-sync"
+    
+    # Get root UUID and create basic Linux entry
+    local root_uuid=""
+    root_uuid=$(findmnt -n -o UUID /)
+    
+    if [ -n "$root_uuid" ]; then
+      log_info "Creating Linux boot entry with UUID: $root_uuid"
+      cat << EOF | sudo tee -a "$limine_config" > /dev/null
+
+//Linux
+protocol: linux
+path: boot():/vmlinuz-linux
+cmdline: root=UUID=$root_uuid rw rootflags=subvol=/@ quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 plymouth.ignore-serial-consoles
+module_path: boot():/initramfs-linux.img
+EOF
+      log_success "Added Linux boot entry to limine.conf"
+    else
+      log_error "Could not determine root UUID - cannot create Linux boot entry"
+      return 1
+    fi
+  else
+    log_success "Linux protocol entry found in limine.conf"
   fi
   
   # Step 3: Add Windows MBR entry if detected

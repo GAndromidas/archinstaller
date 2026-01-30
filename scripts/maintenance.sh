@@ -514,9 +514,11 @@ setup_limine_bootloader() {
 /+Windows
 protocol: chainloader
 path: chainloader():${windows_disk}
+driver: chainloader
 EOF
     
     # Add back //Snapshots section
+    echo "" | sudo tee -a "$temp_file" > /dev/null
     echo "" | sudo tee -a "$temp_file" > /dev/null
     echo "//Snapshots" | sudo tee -a "$temp_file" > /dev/null
     
@@ -527,18 +529,19 @@ EOF
     log_info "No Windows MBR installation detected - skipping Windows entry"
   fi
   
-  # Step 4: Add //Snapshots keyword for automatic snapshot entries (ArchWiki method)
+  # Step 4: Add //Snapshots keyword for automatic snapshot entries
   log_info "Adding //Snapshots keyword to limine.conf..."
   if ! grep -q "//Snapshots" "$LIMINE_CONFIG" && ! grep -q "/Snapshots" "$LIMINE_CONFIG"; then
-    # Add //Snapshots keyword at the end of the file
+    # Add //Snapshots keyword as a separate section at the end of the file
+    echo "" | sudo tee -a "$LIMINE_CONFIG" > /dev/null
     echo "" | sudo tee -a "$LIMINE_CONFIG" > /dev/null
     echo "//Snapshots" | sudo tee -a "$LIMINE_CONFIG" > /dev/null
-    log_success "Added //Snapshots keyword to limine.conf"
+    log_success "Added //Snapshots keyword to limine.conf as separate section"
   else
-    log_info "Snapshots keyword already present in limine.conf"
+    log_info "//Snapshots keyword already present in limine.conf"
   fi
   
-  # Step 5: Copy will be done after limine-snapper-sync is installed (more robust)
+  # Step 5: Copy will be done after limine-snapper-sync is installed
   log_info "limine.conf configured - copy to /boot/limine.conf will be done after limine-snapper-sync installation"
 
   # Enable limine-snapper-sync service for automatic snapshot boot entries
@@ -749,6 +752,14 @@ EOF
         if sudo systemctl enable --now limine-snapper-sync.service 2>/dev/null; then
           log_success "limine-snapper-sync service enabled and started"
           log_info "Snapshot boot entries will be automatically generated and updated"
+          
+          # Trigger immediate sync to populate //Snapshots section
+          log_info "Generating initial snapshot boot entries..."
+          if sudo systemctl restart limine-snapper-sync.service 2>/dev/null; then
+            log_success "Snapshot boot entries generated"
+          else
+            log_warning "Failed to generate initial snapshot boot entries"
+          fi
         else
           log_warning "Failed to enable limine-snapper-sync service"
         fi
@@ -863,13 +874,14 @@ EOF
       if ! grep -q "//Snapshots" "/boot/limine.conf" && ! grep -q "/Snapshots" "/boot/limine.conf"; then
         log_info "Adding //Snapshots keyword for automatic snapshot entries..."
         
-        # Add //Snapshots keyword at the end of the file
+        # Add //Snapshots keyword as a separate section at the end of the file
+        echo "" | sudo tee -a "/boot/limine.conf" > /dev/null
         echo "" | sudo tee -a "/boot/limine.conf" > /dev/null
         echo "//Snapshots" | sudo tee -a "/boot/limine.conf" > /dev/null
         
-        log_success "Added //Snapshots keyword to limine.conf"
+        log_success "Added //Snapshots keyword to limine.conf as separate section"
       else
-        log_info "Snapshots keyword already present in limine.conf"
+        log_info "//Snapshots keyword already present in limine.conf"
       fi
     else
       log_info "limine.conf already at standard location - no copy needed"
@@ -929,8 +941,9 @@ EOF
       if ! grep -q "//Snapshots" "/boot/limine.conf" && ! grep -q "/Snapshots" "/boot/limine.conf"; then
         log_info "Adding //Snapshots keyword for automatic snapshot entries..."
         echo "" | sudo tee -a "/boot/limine.conf" > /dev/null
+        echo "" | sudo tee -a "/boot/limine.conf" > /dev/null
         echo "//Snapshots" | sudo tee -a "/boot/limine.conf" > /dev/null
-        log_success "Added //Snapshots keyword to limine.conf"
+        log_success "Added //Snapshots keyword to limine.conf as separate section"
       fi
     fi
     
@@ -938,6 +951,14 @@ EOF
       log_info "Enabling limine-snapper-sync service for snapshot integration..."
       if sudo systemctl enable --now limine-snapper-sync.service 2>/dev/null; then
         log_success "limine-snapper-sync service enabled and started"
+        
+        # Trigger immediate sync to populate //Snapshots section
+        log_info "Generating snapshot boot entries..."
+        if sudo systemctl restart limine-snapper-sync.service 2>/dev/null; then
+          log_success "Snapshot boot entries updated"
+        else
+          log_warning "Failed to update snapshot boot entries (non-critical)"
+        fi
       else
         log_warning "Failed to enable limine-snapper-sync service (non-critical)"
       fi
@@ -968,6 +989,16 @@ EOF
   step "Creating initial snapshot"
   if sudo snapper -c root create -d "Initial snapshot after setup" 2>/dev/null; then
     log_success "Initial snapshot created"
+    
+    # Trigger limine-snapper-sync to update boot entries with new snapshot
+    if [ "$BOOTLOADER" = "limine" ] && is_btrfs_system && command -v limine-snapper-sync &>/dev/null; then
+      log_info "Updating limine.conf with snapshot entries..."
+      if sudo systemctl restart limine-snapper-sync.service 2>/dev/null; then
+        log_success "Snapshot boot entries updated in limine.conf"
+      else
+        log_warning "Failed to update snapshot boot entries (non-critical)"
+      fi
+    fi
   else
     log_warning "Failed to create initial snapshot (non-critical)"
   fi

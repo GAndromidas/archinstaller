@@ -196,6 +196,13 @@ configure_limine_basic() {
     log_warning "Machine-id file not found"
   fi
   
+  # Ensure limine.conf has a proper Linux entry with protocol for limine-snapper-sync template
+  log_info "Ensuring limine.conf has proper Linux protocol entry for snapshot template..."
+  if ! grep -q "^[[:space:]]*protocol: linux" "$limine_config"; then
+    log_warning "No Linux protocol entry found - limine-snapper-sync may not work properly"
+    log_info "Consider checking your limine.conf has a proper Linux boot entry"
+  fi
+  
   # Step 3: Add Windows MBR entry if detected
   log_info "Checking for Windows MBR installations..."
   local windows_disk=""
@@ -227,9 +234,11 @@ configure_limine_basic() {
 /+Windows
 protocol: chainloader
 path: chainloader():${windows_disk}
+driver: chainloader
 EOF
     
     # Add back //Snapshots section
+    echo "" | sudo tee -a "$temp_file" > /dev/null
     echo "" | sudo tee -a "$temp_file" > /dev/null
     echo "//Snapshots" | sudo tee -a "$temp_file" > /dev/null
     
@@ -243,12 +252,13 @@ EOF
   # Step 4: Add //Snapshots keyword for automatic snapshot entries (if not already added)
   if ! grep -q "//Snapshots" "$limine_config" && ! grep -q "/Snapshots" "$limine_config"; then
     log_info "Adding //Snapshots keyword to limine.conf..."
-    # Add //Snapshots keyword at the end of the file
+    # Add //Snapshots keyword as a separate section at the end of the file
+    echo "" | sudo tee -a "$limine_config" > /dev/null
     echo "" | sudo tee -a "$limine_config" > /dev/null
     echo "//Snapshots" | sudo tee -a "$limine_config" > /dev/null
-    log_success "Added //Snapshots keyword to limine.conf"
+    log_success "Added //Snapshots keyword to limine.conf as separate section"
   else
-    log_info "Snapshots keyword already present in limine.conf"
+    log_info "//Snapshots keyword already present in limine.conf"
   fi
   
   # Step 5: Copy will be done after limine-snapper-sync is installed

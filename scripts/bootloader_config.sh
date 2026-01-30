@@ -112,180 +112,227 @@ configure_grub() {
     log_success "GRUB configured to remember the last chosen boot entry."
 }
 
-# --- Limine Basic Configuration ---
-configure_limine_basic() {
-  step "Configuring Limine bootloader"
-  
-  local limine_config=""
-  limine_config=$(find_limine_config)
-  
-  if [ -z "$limine_config" ]; then
-    log_error "limine.conf not found in any location"
-    return 1
-  fi
-  
-  log_info "Found limine.conf at: $limine_config"
-  
-  # Set timeout to 3 seconds
-  if grep -q "^timeout:" "$limine_config"; then
-    sudo sed -i 's/^timeout:.*/timeout: 3/' "$limine_config"
-  else
-    sudo sed -i '1i timeout: 3' "$limine_config"
-  fi
-  
-  # Configure limine.conf first (original location), then copy for limine-snapper-sync
-  
-  # Step 1: Configure Plymouth parameters in original limine.conf
-  log_info "Configuring Plymouth parameters in limine.conf at: $limine_config"
-  local modified_count=0
-  
-  if grep -q "^[[:space:]]*cmdline:" "$limine_config"; then
-    # Add splash parameter if missing
-    if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "splash"; then
-      sudo sed -i '/^[[:space:]]*cmdline:/ { /splash/! s/$/ splash/ }' "$limine_config"
-      ((modified_count++))
-      log_success "Added 'splash' to limine.conf"
-    fi
-    
-    # Add quiet parameter if missing
-    if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "quiet"; then
-      sudo sed -i '/^[[:space:]]*cmdline:/ { /quiet/! s/$/ quiet/ }' "$limine_config"
-      ((modified_count++))
-      log_success "Added 'quiet' to limine.conf"
-    fi
-    
-    # Add nowatchdog parameter if missing
-    if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "nowatchdog"; then
-      sudo sed -i '/^[[:space:]]*cmdline:/ { /nowatchdog/! s/$/ nowatchdog/ }' "$limine_config"
-      ((modified_count++))
-      log_success "Added 'nowatchdog' to limine.conf"
-    fi
-    
-    if [ $modified_count -gt 0 ]; then
-      log_success "Plymouth parameters configured in limine.conf"
-    else
-      log_info "Plymouth parameters already present in limine.conf"
-    fi
-  else
-    log_warning "limine.conf not in modern format - cannot add Plymouth support"
-  fi
-  
-  # Step 2: Add machine-id comments for snapshot identification
-  log_info "Adding machine-id comments to limine.conf..."
-  if [ -f "/etc/machine-id" ]; then
-    local machine_id=$(cat /etc/machine-id | head -c 32)
-    if [ -n "$machine_id" ]; then
-      # Check if any kernel entries lack machine-id
-      if grep -q "^[[:space:]]*protocol: linux" "$limine_config" && \
-         ! grep -q "comment: machine-id=" "$limine_config"; then
-        # Add machine-id to kernel entries
-        sudo sed -i '/^[[:space:]]*\/[^+]/{
-          /^[[:space:]]*\/[^+]/{
-            /comment: machine-id=/!i\
-    comment: machine-id='"$machine_id"'
-          }
-        }' "$limine_config"
-        log_success "Added machine-id comments to limine.conf"
-      elif grep -q "comment: machine-id=" "$limine_config"; then
-        log_info "Machine-id comments already present in limine.conf"
-      fi
-    else
-      log_warning "Could not read machine-id"
-    fi
-  else
-    log_warning "Machine-id file not found"
-  fi
-  
-  # Ensure limine.conf has a proper Linux entry with protocol for limine-snapper-sync template
-  log_info "Ensuring limine.conf has proper Linux protocol entry for snapshot template..."
-  if ! grep -q "^[[:space:]]*protocol: linux" "$limine_config"; then
-    log_warning "No Linux protocol entry found - creating a basic Linux entry for limine-snapper-sync"
-    
-    # Get root UUID and create basic Linux entry
-    local root_uuid=""
-    root_uuid=$(findmnt -n -o UUID /)
-    
-    if [ -n "$root_uuid" ]; then
-      log_info "Creating Linux boot entry with UUID: $root_uuid"
-      cat << EOF | sudo tee -a "$limine_config" > /dev/null
+# --- Limine Bootloader Configuration ---
 
-//Linux
-protocol: linux
-path: boot():/vmlinuz-linux
-cmdline: root=UUID=$root_uuid rw rootflags=subvol=/@ quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 plymouth.ignore-serial-consoles
-module_path: boot():/initramfs-linux.img
-EOF
-      log_success "Added Linux boot entry to limine.conf"
-    else
-      log_error "Could not determine root UUID - cannot create Linux boot entry"
-      return 1
+# Find Limine configuration file
+find_limine_config() {
+  local config_paths=(
+    "/boot/limine/limine.conf"
+    "/boot/limine.conf"
+    "/boot/EFI/arch-limine/limine.conf"
+    "/boot/EFI/BOOT/limine.conf"
+  )
+  
+  for path in "${config_paths[@]}"; do
+    if [ -f "$path" ]; then
+      echo "$path"
+      return 0
     fi
-  else
-    log_success "Linux protocol entry found in limine.conf"
+  done
+  
+  return 1
+}
+
+# Create Limine directory structure
+setup_limine_directories() {
+  local limine_dir="/boot/limine"
+  
+  if [ ! -d "$limine_dir" ]; then
+    log_info "Creating Limine directory structure..."
+    sudo mkdir -p "$limine_dir"
   fi
   
-  # Step 3: Add Windows MBR entry if detected
-  log_info "Checking for Windows MBR installations..."
-  local windows_disk=""
+  # Ensure ESP is mounted
+  if ! mountpoint -q /boot; then
+    log_warning "/boot is not mounted. Attempting to mount..."
+    sudo mount /boot || {
+      log_error "Failed to mount /boot"
+      return 1
+    }
+  fi
+}
+
+# Detect existing OS installations
+detect_os_installations() {
+  local os_list=()
   
-  # Smart Windows MBR detection
+  # Detect Arch Linux installations
+  if [ -f "/etc/os-release" ] && grep -q "ID=arch" "/etc/os-release"; then
+    os_list+=("arch")
+  fi
+  
+  # Detect Windows installations
   for disk in /dev/sd[a-z] /dev/hd[a-z] /dev/nvme[0-9]n[0-9]p[0-9]; do
     if [ -b "$disk" ]; then
-      # Check for Windows boot signature and NTFS filesystem
       if sudo file -s "$disk" 2>/dev/null | grep -q "NTFS" || \
          sudo dd if="$disk" bs=512 count=1 2>/dev/null | strings | grep -qi "MSWIN"; then
-        windows_disk="$disk"
-        log_success "Found Windows installation on: $windows_disk"
+        os_list+=("windows:$disk")
         break
       fi
     fi
   done
   
-  if [ -n "$windows_disk" ]; then
-    # Add Windows entry before Snapshots section
-    log_info "Adding Windows MBR entry to limine.conf..."
-    
-    # Remove existing //Snapshots if present (we'll add it back after Windows)
-    local temp_file=$(mktemp)
-    grep -v "//Snapshots" "$limine_config" > "$temp_file" 2>/dev/null || cp "$limine_config" "$temp_file"
-    
-    # Add Windows entry
-    cat << EOF | sudo tee -a "$temp_file" > /dev/null
+  printf '%s\n' "${os_list[@]}"
+}
 
-/+Windows
+# Create Linux boot entry
+create_linux_entry() {
+  local config_file="$1"
+  local entry_name="$2"
+  local kernel_path="${3:-boot():/vmlinuz-linux}"
+  local initramfs_path="${4:-boot():/initramfs-linux.img}"
+  
+  # Get root filesystem information
+  local root_uuid=""
+  local root_fstype=""
+  local root_subvol=""
+  
+  root_uuid=$(findmnt -n -o UUID / 2>/dev/null || echo "")
+  root_fstype=$(findmnt -n -o FSTYPE / 2>/dev/null || echo "")
+  
+  if [ -z "$root_uuid" ]; then
+    log_error "Could not determine root UUID"
+    return 1
+  fi
+  
+  # Build kernel command line
+  local cmdline="root=UUID=$root_uuid rw"
+  
+  # Add filesystem-specific options
+  case "$root_fstype" in
+    btrfs)
+      # Detect Btrfs subvolume
+      root_subvol=$(findmnt -n -o OPTIONS / | grep -o 'subvol=[^,]*' | cut -d= -f2 || echo "/@")
+      cmdline="$cmdline rootflags=subvol=$root_subvol"
+      ;;
+    ext4)
+      cmdline="$cmdline rootflags=relatime"
+      ;;
+  esac
+  
+  # Add common parameters
+  cmdline="$cmdline quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 plymouth.ignore-serial-consoles"
+  
+  # Get machine ID for snapshot identification
+  local machine_id=""
+  if [ -f "/etc/machine-id" ]; then
+    machine_id=$(cat /etc/machine-id | head -c 32)
+  fi
+  
+  # Create the boot entry
+  cat << EOF | sudo tee -a "$config_file" > /dev/null
+
+/$entry_name
+protocol: linux
+path: $kernel_path
+cmdline: $cmdline
+module_path: $initramfs_path
+EOF
+  
+  # Add machine-id comment if available
+  if [ -n "$machine_id" ]; then
+    cat << EOF | sudo tee -a "$config_file" > /dev/null
+comment: machine-id=$machine_id
+EOF
+  fi
+  
+  log_success "Added Linux entry: $entry_name"
+}
+
+# Create Windows boot entry
+create_windows_entry() {
+  local config_file="$1"
+  local disk="$2"
+  
+  cat << EOF | sudo tee -a "$config_file" > /dev/null
+
+/Windows
 protocol: chainloader
-path: chainloader():${windows_disk}
+path: chainloader():$disk
 driver: chainloader
 EOF
-    
-    # Add back //Snapshots section
-    echo "" | sudo tee -a "$temp_file" > /dev/null
-    echo "" | sudo tee -a "$temp_file" > /dev/null
-    echo "//Snapshots" | sudo tee -a "$temp_file" > /dev/null
-    
-    # Replace original file
-    sudo mv "$temp_file" "$limine_config"
-    log_success "Added Windows MBR entry before Snapshots section"
-  else
-    log_info "No Windows MBR installation detected - skipping Windows entry"
+  
+  log_success "Added Windows entry: $disk"
+}
+
+# Create snapshot section
+create_snapshot_section() {
+  local config_file="$1"
+  
+  cat << EOF | sudo tee -a "$config_file" > /dev/null
+
+
+//Snapshots
+EOF
+  
+  log_success "Added Snapshots section"
+}
+
+# --- Limine Basic Configuration ---
+configure_limine_basic() {
+  step "Configuring Limine bootloader"
+  
+  # Setup directories
+  setup_limine_directories || return 1
+  
+  local limine_config="/boot/limine/limine.conf"
+  
+  # Backup existing configuration
+  if [ -f "$limine_config" ]; then
+    log_info "Backing up existing limine.conf..."
+    sudo cp "$limine_config" "${limine_config}.backup.$(date +%Y%m%d_%H%M%S)"
   fi
   
-  # Step 4: Add //Snapshots keyword for automatic snapshot entries (if not already added)
-  if ! grep -q "//Snapshots" "$limine_config" && ! grep -q "/Snapshots" "$limine_config"; then
-    log_info "Adding //Snapshots keyword to limine.conf..."
-    # Add //Snapshots keyword as a separate section at the end of the file
-    echo "" | sudo tee -a "$limine_config" > /dev/null
-    echo "" | sudo tee -a "$limine_config" > /dev/null
-    echo "//Snapshots" | sudo tee -a "$limine_config" > /dev/null
-    log_success "Added //Snapshots keyword to limine.conf as separate section"
-  else
-    log_info "//Snapshots keyword already present in limine.conf"
+  # Create new configuration
+  log_info "Creating Limine configuration at: $limine_config"
+  
+  # Write configuration header
+  cat << EOF | sudo tee "$limine_config" > /dev/null
+# Limine Bootloader Configuration
+# Generated by archinstaller
+
+timeout: 3
+interface_resolution: 1024x768
+
+EOF
+  
+  # Detect OS installations
+  log_info "Detecting OS installations..."
+  local os_installations
+  mapfile -t os_installations < <(detect_os_installations)
+  
+  if [ ${#os_installations[@]} -eq 0 ]; then
+    log_warning "No OS installations detected"
+    return 1
   fi
   
-  # Step 5: Copy will be done after limine-snapper-sync is installed
-  log_info "limine.conf configured - copy to /boot/limine.conf will be done after limine-snapper-sync installation"
+  # Add boot entries
+  for os in "${os_installations[@]}"; do
+    case "$os" in
+      "arch")
+        create_linux_entry "$limine_config" "Arch Linux"
+        
+        # Add LTS kernel entry if available
+        if [ -f "/boot/vmlinuz-linux-lts" ] && [ -f "/boot/initramfs-linux-lts.img" ]; then
+          create_linux_entry "$limine_config" "Arch Linux (LTS)" \
+            "boot():/vmlinuz-linux-lts" \
+            "boot():/initramfs-linux-lts.img"
+        fi
+        ;;
+      windows:*)
+        local disk="${os#windows:}"
+        create_windows_entry "$limine_config" "$disk"
+        ;;
+    esac
+  done
   
-  log_success "Limine bootloader configured with Plymouth support"
+  # Add snapshot section for Btrfs systems
+  if [ "$(findmnt -n -o FSTYPE /)" = "btrfs" ]; then
+    create_snapshot_section "$limine_config"
+  fi
+  
+  log_success "Limine configuration completed"
+  log_info "Configuration file: $limine_config"
 }
 
 # --- Console Font Setup ---

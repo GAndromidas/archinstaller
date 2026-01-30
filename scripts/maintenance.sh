@@ -783,7 +783,6 @@ EOF
         log_warning "Could not find original limine.conf for copying"
       fi
     fi
-  fi
 
   # Configure Snapper
   configure_snapper || { log_error "Snapper configuration failed"; return 1; }

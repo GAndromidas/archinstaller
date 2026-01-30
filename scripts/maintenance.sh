@@ -692,8 +692,10 @@ setup_btrfs_snapshots() {
   fi
 
   local limine_snapper_package_to_install=""
+  local limine_mkinitcpio_package_to_install=""
   if [ "$BOOTLOADER" = "limine" ] && is_btrfs_system; then
     limine_snapper_package_to_install="limine-snapper-sync"
+    limine_mkinitcpio_package_to_install="limine-mkinitcpio-hook"
   fi
 
   local snapper_packages=(snapper snap-pac btrfsmaintenance linux-lts linux-lts-headers)
@@ -719,9 +721,23 @@ setup_btrfs_snapshots() {
   if [ -n "$limine_snapper_package_to_install" ]; then
     log_info "Installing AUR package: $limine_snapper_package_to_install"
     install_aur_quietly "$limine_snapper_package_to_install"
+  fi
+  
+  if [ -n "$limine_mkinitcpio_package_to_install" ]; then
+    log_info "Installing AUR package: $limine_mkinitcpio_package_to_install"
+    install_aur_quietly "$limine_mkinitcpio_package_to_install"
     
-    # After limine-snapper-sync is installed, copy configured limine.conf to /boot/limine.conf
-    if [ "$limine_snapper_package_to_install" = "limine-snapper-sync" ]; then
+    # Trigger mkinitcpio to regenerate initramfs with limine hooks
+    log_info "Regenerating initramfs with Limine hooks..."
+    if sudo mkinitcpio -P >/dev/null 2>&1; then
+      log_success "Initramfs regenerated with Limine hooks"
+    else
+      log_warning "Failed to regenerate initramfs with Limine hooks"
+    fi
+  fi
+
+  # After limine-snapper-sync is installed, copy configured limine.conf to /boot/limine.conf
+  if [ "$limine_snapper_package_to_install" = "limine-snapper-sync" ]; then
       log_info "limine-snapper-sync installed - now copying configured limine.conf to /boot/limine.conf"
       
       # Find the original limine.conf

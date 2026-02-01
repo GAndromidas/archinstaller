@@ -254,8 +254,6 @@ main() {
   run_step "Configuring Plymouth hook and rebuilding initramfs" configure_plymouth_hook_and_initramfs
   run_step "Setting Plymouth theme" set_plymouth_theme
   run_step "Adding 'splash' to all kernel parameters" add_kernel_parameters
-
-  print_summary
 }
 
 main "$@"

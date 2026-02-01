@@ -112,170 +112,15 @@ configure_grub() {
     log_success "GRUB configured to remember the last chosen boot entry."
 }
 
-# --- Limine Bootloader Configuration ---
-
-# Find Limine configuration file
-find_limine_config() {
-  local config_paths=(
-    "/boot/limine/limine.conf"
-    "/boot/limine.conf"
-    "/boot/EFI/arch-limine/limine.conf"
-    "/boot/EFI/BOOT/limine.conf"
-  )
-  
-  for path in "${config_paths[@]}"; do
-    if [ -f "$path" ]; then
-      echo "$path"
-      return 0
-    fi
-  done
-  
-  return 1
-}
-
-# Create Limine directory structure
-setup_limine_directories() {
-  local limine_dir="/boot/limine"
-  
-  if [ ! -d "$limine_dir" ]; then
-    log_info "Creating Limine directory structure..."
-    sudo mkdir -p "$limine_dir"
-  fi
-  
-  # Ensure ESP is mounted
-  if ! mountpoint -q /boot; then
-    log_warning "/boot is not mounted. Attempting to mount..."
-    sudo mount /boot || {
-      log_error "Failed to mount /boot"
-      return 1
-    }
-  fi
-}
-
-# Detect existing OS installations
-detect_os_installations() {
-  local os_list=()
-  
-  # Detect Arch Linux installations
-  if [ -f "/etc/os-release" ] && grep -q "ID=arch" "/etc/os-release"; then
-    os_list+=("arch")
-  fi
-  
-  # Detect Windows installations
-  for disk in /dev/sd[a-z] /dev/hd[a-z] /dev/nvme[0-9]n[0-9]p[0-9]; do
-    if [ -b "$disk" ]; then
-      if sudo file -s "$disk" 2>/dev/null | grep -q "NTFS" || \
-         sudo dd if="$disk" bs=512 count=1 2>/dev/null | strings | grep -qi "MSWIN"; then
-        os_list+=("windows:$disk")
-        break
-      fi
-    fi
-  done
-  
-  printf '%s\n' "${os_list[@]}"
-}
-
-# Create Linux boot entry
-create_linux_entry() {
-  local config_file="$1"
-  local entry_name="$2"
-  local kernel_path="${3:-boot():/vmlinuz-linux}"
-  local initramfs_path="${4:-boot():/initramfs-linux.img}"
-  
-  # Get root filesystem information
-  local root_uuid=""
-  local root_fstype=""
-  local root_subvol=""
-  
-  root_uuid=$(findmnt -n -o UUID / 2>/dev/null || echo "")
-  root_fstype=$(findmnt -n -o FSTYPE / 2>/dev/null || echo "")
-  
-  if [ -z "$root_uuid" ]; then
-    log_error "Could not determine root UUID"
-    return 1
-  fi
-  
-  # Build kernel command line
-  local cmdline="root=UUID=$root_uuid rw"
-  
-  # Add filesystem-specific options
-  case "$root_fstype" in
-    btrfs)
-      # Detect Btrfs subvolume
-      root_subvol=$(findmnt -n -o OPTIONS / | grep -o 'subvol=[^,]*' | cut -d= -f2 || echo "/@")
-      cmdline="$cmdline rootflags=subvol=$root_subvol"
-      ;;
-    ext4)
-      cmdline="$cmdline rootflags=relatime"
-      ;;
-  esac
-  
-  # Add common parameters
-  cmdline="$cmdline quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 plymouth.ignore-serial-consoles"
-  
-  # Get machine ID for snapshot identification
-  local machine_id=""
-  if [ -f "/etc/machine-id" ]; then
-    machine_id=$(cat /etc/machine-id | head -c 32)
-  fi
-  
-  # Create the boot entry
-  cat << EOF | sudo tee -a "$config_file" > /dev/null
-
-/$entry_name
-protocol: linux
-path: $kernel_path
-cmdline: $cmdline
-module_path: $initramfs_path
-EOF
-  
-  # Add machine-id comment if available
-  if [ -n "$machine_id" ]; then
-    cat << EOF | sudo tee -a "$config_file" > /dev/null
-comment: machine-id=$machine_id
-EOF
-  fi
-  
-  log_success "Added Linux entry: $entry_name"
-}
-
-# Create Windows boot entry
-create_windows_entry() {
-  local config_file="$1"
-  local disk="$2"
-  
-  cat << EOF | sudo tee -a "$config_file" > /dev/null
-
-/Windows
-protocol: chainloader
-path: chainloader():$disk
-driver: chainloader
-EOF
-  
-  log_success "Added Windows entry: $disk"
-}
-
-# Create snapshot section
-create_snapshot_section() {
-  local config_file="$1"
-  
-  cat << EOF | sudo tee -a "$config_file" > /dev/null
-
-
-//Snapshots
-EOF
-  
-  log_success "Added Snapshots section"
-}
-
-# --- Limine Basic Configuration ---
+# --- Limine Bootloader Configuration (Simple Implementation) ---
 configure_limine_basic() {
   step "Configuring Limine bootloader"
   
-  # Setup directories
-  setup_limine_directories || return 1
+  # Use standard limine.conf location that works with limine-snapper-sync
+  local limine_config="/boot/limine.conf"
   
-  local limine_config="/boot/limine/limine.conf"
+  # Create simple configuration
+  log_info "Creating simple Limine configuration at: $limine_config"
   
   # Backup existing configuration
   if [ -f "$limine_config" ]; then
@@ -283,10 +128,31 @@ configure_limine_basic() {
     sudo cp "$limine_config" "${limine_config}.backup.$(date +%Y%m%d_%H%M%S)"
   fi
   
-  # Create new configuration
-  log_info "Creating Limine configuration at: $limine_config"
+  # Get root filesystem information
+  local root_uuid=""
+  root_uuid=$(findmnt -n -o UUID / 2>/dev/null || echo "")
   
-  # Write configuration header
+  if [ -z "$root_uuid" ]; then
+    log_error "Could not determine root UUID"
+    return 1
+  fi
+  
+  # Build kernel command line
+  local cmdline="root=UUID=$root_uuid rw quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3"
+  
+  # Add filesystem-specific options
+  local root_fstype=$(findmnt -n -o FSTYPE / 2>/dev/null || echo "")
+  case "$root_fstype" in
+    btrfs)
+      local root_subvol=$(findmnt -n -o OPTIONS / | grep -o 'subvol=[^,]*' | cut -d= -f2 || echo "/@")
+      cmdline="$cmdline rootflags=subvol=$root_subvol"
+      ;;
+    ext4)
+      cmdline="$cmdline rootflags=relatime"
+      ;;
+  esac
+  
+  # Create simple limine.conf
   cat << EOF | sudo tee "$limine_config" > /dev/null
 # Limine Bootloader Configuration
 # Generated by archinstaller
@@ -294,45 +160,43 @@ configure_limine_basic() {
 timeout: 3
 interface_resolution: 1024x768
 
+/Arch Linux
+protocol: linux
+path: boot():/vmlinuz-linux
+cmdline: $cmdline
+module_path: boot():/initramfs-linux.img
 EOF
   
-  # Detect OS installations
-  log_info "Detecting OS installations..."
-  local os_installations
-  mapfile -t os_installations < <(detect_os_installations)
-  
-  if [ ${#os_installations[@]} -eq 0 ]; then
-    log_warning "No OS installations detected"
-    return 1
+  # Add LTS kernel entry if available
+  if [ -f "/boot/vmlinuz-linux-lts" ] && [ -f "/boot/initramfs-linux-lts.img" ]; then
+    cat << EOF | sudo tee -a "$limine_config" > /dev/null
+
+/Arch Linux (LTS)
+protocol: linux
+path: boot():/vmlinuz-linux-lts
+cmdline: $cmdline
+module_path: boot():/initramfs-linux-lts.img
+EOF
   fi
   
-  # Add boot entries
-  for os in "${os_installations[@]}"; do
-    case "$os" in
-      "arch")
-        create_linux_entry "$limine_config" "Arch Linux"
-        
-        # Add LTS kernel entry if available
-        if [ -f "/boot/vmlinuz-linux-lts" ] && [ -f "/boot/initramfs-linux-lts.img" ]; then
-          create_linux_entry "$limine_config" "Arch Linux (LTS)" \
-            "boot():/vmlinuz-linux-lts" \
-            "boot():/initramfs-linux-lts.img"
-        fi
-        ;;
-      windows:*)
-        local disk="${os#windows:}"
-        create_windows_entry "$limine_config" "$disk"
-        ;;
-    esac
+  # Simple Windows detection (no complex logic)
+  for disk in /dev/sda /dev/sdb /dev/nvme0n1p1; do
+    if [ -b "$disk" ] && sudo file -s "$disk" 2>/dev/null | grep -q "NTFS"; then
+      cat << EOF | sudo tee -a "$limine_config" > /dev/null
+
+/Windows
+protocol: chainloader
+path: chainloader():$disk
+driver: chainloader
+EOF
+      log_success "Added Windows entry: $disk"
+      break
+    fi
   done
   
-  # Add snapshot section for Btrfs systems
-  if [ "$(findmnt -n -o FSTYPE /)" = "btrfs" ]; then
-    create_snapshot_section "$limine_config"
-  fi
-  
-  log_success "Limine configuration completed"
+  log_success "Simple Limine configuration completed"
   log_info "Configuration file: $limine_config"
+  log_warning "Note: Snapshot support removed for stability - use GRUB or systemd-boot for snapshots"
 }
 
 # --- Console Font Setup ---

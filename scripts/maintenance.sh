@@ -355,40 +355,22 @@ setup_grub_bootloader() {
   fi
 }
 
-# Setup Limine snapshot integration (bootloader already configured by bootloader_config.sh)
+# Setup Limine bootloader (simple implementation - no snapshots)
 setup_limine_bootloader() {
-  step "Setting up Limine snapshot integration"
-
-  # Check for limine.conf in standard locations (prefer /boot/limine/limine.conf)
-  local LIMINE_CONFIG=""
-  LIMINE_CONFIG=$(find_limine_config)
-
-  if [ -z "$LIMINE_CONFIG" ]; then
-    log_error "limine.conf not found in any standard location"
+  step "Setting up Limine bootloader"
+  
+  # Check for limine.conf in standard location
+  local limine_config="/boot/limine.conf"
+  
+  if [ ! -f "$limine_config" ]; then
+    log_error "limine.conf not found at $limine_config"
+    log_info "Run bootloader configuration first"
     return 1
   fi
-
-  log_info "Found limine.conf at: $LIMINE_CONFIG"
-
-  # Verify limine.conf has proper Linux entries for limine-snapper-sync
-  if ! grep -q "^[[:space:]]*protocol: linux" "$LIMINE_CONFIG"; then
-    log_warning "No Linux protocol entries found in limine.conf - limine-snapper-sync may not work properly"
-    log_info "Consider running bootloader configuration again"
-  else
-    log_success "Linux protocol entries found in limine.conf"
-  fi
-
-  # Verify //Snapshots section exists for Btrfs systems
-  if is_btrfs_system; then
-    if ! grep -q "//Snapshots" "$LIMINE_CONFIG"; then
-      log_warning "//Snapshots section not found in limine.conf - snapshots may not appear in boot menu"
-      log_info "Consider running bootloader configuration again"
-    else
-      log_success "//Snapshots section found in limine.conf"
-    fi
-  fi
-
-  log_success "Limine configuration verified for snapshot support"
+  
+  log_success "Limine configuration found and verified"
+  log_warning "Note: Limine snapshot support removed for stability"
+  log_info "Use GRUB or systemd-boot for snapshot functionality"
 }
 
 # Setup systemd-boot bootloader for LTS kernel
@@ -522,12 +504,8 @@ setup_btrfs_snapshots() {
     grub_btrfs_package_to_install="grub-btrfs"
   fi
 
-  local limine_snapper_package_to_install=""
-  local limine_mkinitcpio_package_to_install=""
-  if [ "$BOOTLOADER" = "limine" ] && is_btrfs_system; then
-    limine_snapper_package_to_install="limine-snapper-sync"
-    limine_mkinitcpio_package_to_install="limine-mkinitcpio-hook"
-  fi
+  # Note: limine-snapper-sync packages removed for stability
+  # Use GRUB or systemd-boot for snapshot functionality
 
   local snapper_packages=(snapper snap-pac btrfsmaintenance linux-lts linux-lts-headers)
   if [ -n "$grub_btrfs_package_to_install" ]; then
@@ -567,53 +545,8 @@ setup_btrfs_snapshots() {
     fi
   fi
 
-  # After limine-snapper-sync is installed, copy configured limine.conf to /boot/limine.conf
-  if [ "$limine_snapper_package_to_install" = "limine-snapper-sync" ]; then
-      log_info "limine-snapper-sync installed - now copying configured limine.conf to /boot/limine.conf"
-      
-      # Find the original limine.conf
-      local original_limine_config=""
-      original_limine_config=$(find_limine_config)
-      
-      if [ -n "$original_limine_config" ] && [ -f "$original_limine_config" ]; then
-        # Copy the fully configured limine.conf to /boot/limine.conf for limine-snapper-sync
-        if [ "$original_limine_config" != "/boot/limine.conf" ]; then
-          sudo cp "$original_limine_config" "/boot/limine.conf"
-          log_success "Copied configured limine.conf from $original_limine_config to /boot/limine.conf"
-        else
-          log_info "limine.conf already at /boot/limine.conf - no copy needed"
-        fi
-        
-        # Configure limine-snapper-sync to use the standard location
-        sudo mkdir -p /etc/default
-        sudo tee /etc/default/limine > /dev/null << EOF
-# limine-snapper-sync configuration
-ESP_PATH="/boot"
-LIMINE_CONF_PATH="/boot/limine.conf"
-EOF
-        
-        log_success "limine-snapper-sync configured to use: /boot/limine.conf"
-        
-        # Enable and start limine-snapper-sync service
-        log_info "Enabling limine-snapper-sync service..."
-        if sudo systemctl enable --now limine-snapper-sync.service 2>/dev/null; then
-          log_success "limine-snapper-sync service enabled and started"
-          log_info "Snapshot boot entries will be automatically generated and updated"
-          
-          # Trigger immediate sync to populate //Snapshots section
-          log_info "Generating initial snapshot boot entries..."
-          if sudo systemctl restart limine-snapper-sync.service 2>/dev/null; then
-            log_success "Snapshot boot entries generated"
-          else
-            log_warning "Failed to generate initial snapshot boot entries"
-          fi
-        else
-          log_warning "Failed to enable limine-snapper-sync service"
-        fi
-      else
-        log_warning "Could not find original limine.conf for copying"
-      fi
-    fi
+  # Note: limine-snapper-sync integration removed for stability
+  # Use GRUB or systemd-boot for snapshot functionality
 
   # Configure Snapper
   configure_snapper || { log_error "Snapper configuration failed"; return 1; }
@@ -643,27 +576,8 @@ EOF
     sudo grub-mkconfig -o /boot/grub/grub.cfg || log_error "Failed to re-generate GRUB configuration"
   fi
 
-  # Enable limine-snapper-sync service for Limine and Btrfs
-  if [ "$BOOTLOADER" = "limine" ] && is_btrfs_system; then
-    if command -v limine-snapper-sync &>/dev/null; then
-      log_info "Enabling limine-snapper-sync service for snapshot integration..."
-      if sudo systemctl enable --now limine-snapper-sync.service 2>/dev/null; then
-        log_success "limine-snapper-sync service enabled and started"
-        
-        # Trigger immediate sync to populate //Snapshots section
-        log_info "Generating snapshot boot entries..."
-        if sudo systemctl restart limine-snapper-sync.service 2>/dev/null; then
-          log_success "Snapshot boot entries updated"
-        else
-          log_warning "Failed to update snapshot boot entries (non-critical)"
-        fi
-      else
-        log_warning "Failed to enable limine-snapper-sync service (non-critical)"
-      fi
-    else
-      log_warning "limine-snapper-sync not found - snapshot boot entries will not be generated automatically"
-    fi
-  fi
+  # Note: limine-snapper-sync service removed for stability
+  # Use GRUB or systemd-boot for snapshot functionality
   case "$BOOTLOADER" in
     grub)
       setup_grub_bootloader || log_warning "GRUB configuration had issues but continuing"
@@ -688,15 +602,8 @@ EOF
   if sudo snapper -c root create -d "Initial snapshot after setup" 2>/dev/null; then
     log_success "Initial snapshot created"
     
-    # Trigger limine-snapper-sync to update boot entries with new snapshot
-    if [ "$BOOTLOADER" = "limine" ] && is_btrfs_system && command -v limine-snapper-sync &>/dev/null; then
-      log_info "Updating limine.conf with snapshot entries..."
-      if sudo systemctl restart limine-snapper-sync.service 2>/dev/null; then
-        log_success "Snapshot boot entries updated in limine.conf"
-      else
-        log_warning "Failed to update snapshot boot entries (non-critical)"
-      fi
-    fi
+  # Note: limine-snapper-sync trigger removed for stability
+  # Use GRUB or systemd-boot for snapshot functionality
   else
     log_warning "Failed to create initial snapshot (non-critical)"
   fi
@@ -754,9 +661,9 @@ EOF
       echo -e "  • Boot snapshots: Select 'Arch Linux snapshots' in GRUB menu"
       echo -e "  • GRUB auto-updates when new snapshots are created"
     elif [ "$BOOTLOADER" = "limine" ]; then
-      echo -e "  • Boot snapshots: Managed by limine-snapper-sync service"
-      echo -e "  • limine-snapper-sync: Auto-generates snapshot boot entries"
-      echo -e "  • LTS kernel: Select 'Arch Linux (LTS Kernel)' in Limine menu"
+      echo -e "  • Note: Limine snapshot support removed for stability"
+      echo -e "  • Use GRUB or systemd-boot for snapshot functionality"
+      echo -e "  • LTS kernel: Select 'Arch Linux (LTS)' in Limine menu"
     fi
     echo -e "  • Restore via GUI: Launch 'btrfs-assistant'"
     echo -e "  • Check maintenance timers: ${YELLOW}systemctl list-timers 'btrfs-*'${RESET}"

@@ -127,7 +127,7 @@ install_pacman_packages() {
 	printf "${YELLOW} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
 
 	for pkg in "${pacman_gaming_programs[@]}"; do
-		if pacman_install "$pkg"; then GAMING_INSTALLED+=("$pkg"); else GAMING_ERRORS+=("$pkg (pacman)"); fi
+		if pacman_install_single "$pkg" true; then GAMING_INSTALLED+=("$pkg"); else GAMING_ERRORS+=("$pkg (pacman)"); fi
 	done
 }
 
@@ -147,7 +147,7 @@ install_flatpak_packages() {
 	ui_info "Installing ${#flatpak_gaming_programs[@]} Flatpak applications for gaming..."
 
 	for pkg in "${flatpak_gaming_programs[@]}"; do
-		if flatpak_install "$pkg"; then GAMING_INSTALLED+=("$pkg (Flatpak)"); else GAMING_ERRORS+=("$pkg (Flatpak)"); fi
+		if flatpak_install_single "$pkg" true; then GAMING_INSTALLED+=("$pkg (Flatpak)"); else GAMING_ERRORS+=("$pkg (Flatpak)"); fi
 	done
 }
 

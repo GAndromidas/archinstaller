@@ -393,7 +393,7 @@ install_pacman_packages() {
 
 	printf "${YELLOW} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
 	for pkg in "${essential_programs[@]}"; do
-		if pacman_install "$pkg"; then PROGRAMS_INSTALLED+=("$pkg"); else PROGRAMS_ERRORS+=("$pkg (pacman)"); fi
+		if pacman_install_single "$pkg" true; then PROGRAMS_INSTALLED+=("$pkg"); else PROGRAMS_ERRORS+=("$pkg (pacman)"); fi
 	done
 }
 
@@ -414,7 +414,7 @@ install_aur_packages() {
 
 	printf "${YELLOW} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
 	for pkg in "${yay_programs[@]}"; do
-		if yay_install "$pkg"; then PROGRAMS_INSTALLED+=("$pkg (AUR)"); else PROGRAMS_ERRORS+=("$pkg (AUR)"); fi
+		if yay_install_single "$pkg" true; then PROGRAMS_INSTALLED+=("$pkg (AUR)"); else PROGRAMS_ERRORS+=("$pkg (AUR)"); fi
 	done
 }
 
@@ -428,7 +428,7 @@ install_flatpak_packages() {
 	ui_info "Installing ${#flatpak_programs[@]} Flatpak applications..."
 
 	for pkg in "${flatpak_programs[@]}"; do
-		if flatpak_install "$pkg"; then PROGRAMS_INSTALLED+=("$pkg (Flatpak)"); else PROGRAMS_ERRORS+=("$pkg (Flatpak)"); fi
+		if flatpak_install_single "$pkg" true; then PROGRAMS_INSTALLED+=("$pkg (Flatpak)"); else PROGRAMS_ERRORS+=("$pkg (Flatpak)"); fi
 	done
 }
 

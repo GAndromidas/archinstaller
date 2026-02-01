@@ -526,27 +526,16 @@ setup_btrfs_snapshots() {
   # Install pacman packages first
   install_packages_quietly "${snapper_packages[@]}"
   
-  # Install AUR packages separately
-  if [ -n "$limine_snapper_package_to_install" ]; then
-    log_info "Installing AUR package: $limine_snapper_package_to_install"
-    install_aur_quietly "$limine_snapper_package_to_install"
-  fi
-  
-  if [ -n "$limine_mkinitcpio_package_to_install" ]; then
-    log_info "Installing AUR package: $limine_mkinitcpio_package_to_install"
-    install_aur_quietly "$limine_mkinitcpio_package_to_install"
-    
-    # Trigger mkinitcpio to regenerate initramfs with limine hooks
-    log_info "Regenerating initramfs with Limine hooks..."
-    if sudo mkinitcpio -P >/dev/null 2>&1; then
-      log_success "Initramfs regenerated with Limine hooks"
-    else
-      log_warning "Failed to regenerate initramfs with Limine hooks"
-    fi
-  fi
-
-  # Note: limine-snapper-sync integration removed for stability
+  # Note: limine-snapper packages removed for stability
   # Use GRUB or systemd-boot for snapshot functionality
+
+  # Verify installation
+  if command -v snapper >/dev/null 2>&1; then
+    log_success "Snapper installed correctly"
+  else
+    log_error "Snapper installation failed"
+    return 1
+  fi
 
   # Configure Snapper
   configure_snapper || { log_error "Snapper configuration failed"; return 1; }

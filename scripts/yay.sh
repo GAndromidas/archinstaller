@@ -27,47 +27,40 @@ install_yay() {
   cd "$temp_dir" || { log_error "Failed to create temporary directory"; return 1; }
 
   # Clone yay repository
-  print_progress 1 4 "Cloning yay repository"
+  ui_info "Cloning yay repository..."
   if git clone https://aur.archlinux.org/yay.git . >/dev/null 2>&1; then
-    print_status " [OK]" "$GREEN"
+    log_success "yay repository cloned successfully"
   else
-    print_status " [FAIL]" "$RED"
     log_error "Failed to clone yay repository"
     cd - >/dev/null && rm -rf "$temp_dir"
     return 1
   fi
 
   # Build yay
-  print_progress 2 4 "Building yay"
-  echo -e "\n${YELLOW}Please enter your sudo password to build and install yay:${RESET}"
+  ui_info "Building and installing yay..."
+  echo -e "${YELLOW}Please enter your sudo password to build and install yay:${RESET}"
   sudo -v
   if makepkg -si --noconfirm --needed >/dev/null 2>&1; then
-    print_status " [OK]" "$GREEN"
+    log_success "yay built and installed successfully"
   else
-    print_status " [FAIL]" "$RED"
     log_error "Failed to build yay"
     cd - >/dev/null && rm -rf "$temp_dir"
     return 1
   fi
 
   # Verify installation
-  print_progress 3 4 "Verifying installation"
+  ui_info "Verifying yay installation..."
   if command -v yay &>/dev/null; then
-    print_status " [OK]" "$GREEN"
+    log_success "yay installation verified"
   else
-    print_status " [FAIL]" "$RED"
     log_error "yay installation verification failed"
     cd - >/dev/null && rm -rf "$temp_dir"
     return 1
   fi
 
   # Clean up
-  print_progress 4 4 "Cleaning up"
+  ui_info "Cleaning up temporary files..."
   cd - >/dev/null && rm -rf "$temp_dir"
-  print_status " [OK]" "$GREEN"
-
-  echo -e "\n${GREEN}yay AUR helper installed successfully${RESET}"
-  echo ""
 
   # Install rate-mirrors to get the fastest mirrors
   step "Installing rate-mirrors"

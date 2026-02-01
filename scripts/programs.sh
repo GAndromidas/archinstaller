@@ -24,42 +24,7 @@ specific_install_programs=() # DE-specific installs
 specific_remove_programs=() # DE-specific removals
 
 # ===== Local Helper Functions =====
-
-pacman_install() {
-	local pkg="$1"
-	printf "${CYAN}Installing Pacman package:${RESET} %-30s" "$pkg"
-	if sudo pacman -S --noconfirm --needed "$pkg" >/dev/null 2>&1; then
-		printf "${GREEN} ✓ Success${RESET}\n"
-		return 0
-	else
-		printf "${RED} ✗ Failed${RESET}\n"
-		return 1
-	fi
-}
-
-yay_install() {
-	local pkg="$1"
-	printf "${CYAN}Installing AUR package:${RESET} %-30s" "$pkg"
-	if yay -S --noconfirm --needed "$pkg" >/dev/null 2>&1; then
-		printf "${GREEN} ✓ Success${RESET}\n"
-		return 0
-	else
-		printf "${RED} ✗ Failed${RESET}\n"
-		return 1
-	fi
-}
-
-flatpak_install() {
-	local pkg="$1"
-	printf "${CYAN}Installing Flatpak app:${RESET} %-30s" "$pkg"
-	if flatpak install -y --noninteractive flathub "$pkg" >/dev/null 2>&1; then
-		printf "${GREEN} ✓ Success${RESET}\n"
-		return 0
-	else
-		printf "${RED} ✗ Failed${RESET}\n"
-		return 1
-	fi
-}
+# Using centralized functions from common.sh to avoid duplication
 
 pacman_remove() {
 	local pkg="$1"
@@ -78,7 +43,7 @@ pacman_remove() {
 ensure_yq() {
 	if ! command -v yq &>/dev/null; then
 		ui_info "yq is required for YAML parsing. Installing..."
-		if ! pacman_install "yq"; then
+		if ! pacman_install_single "yq" true; then
 			log_error "Failed to install yq. Please install it manually: sudo pacman -S yq"
 			return 1
 		fi
@@ -507,30 +472,6 @@ main() {
 	if [[ "$INSTALL_MODE" == "server" ]]; then
 		configure_server_applications
 	fi
-
-	# Report results
-	if [[ ${#PROGRAMS_ERRORS[@]} -gt 0 ]]; then
-		ui_warn "Some packages failed to install or remove:"
-		for err in "${PROGRAMS_ERRORS[@]}"; do
-			printf "${RED}  - $err${RESET}\n"
-		done
-	fi
-
-	if [[ ${#PROGRAMS_INSTALLED[@]} -gt 0 ]]; then
-		ui_info "Successfully installed ${#PROGRAMS_INSTALLED[@]} packages:"
-		for pkg in "${PROGRAMS_INSTALLED[@]}"; do
-			printf "${GREEN}  + $pkg${RESET}\n"
-		done
-	fi
-
-	if [[ ${#PROGRAMS_REMOVED[@]} -gt 0 ]]; then
-		ui_info "Successfully removed ${#PROGRAMS_REMOVED[@]} packages:"
-		for pkg in "${PROGRAMS_REMOVED[@]}"; do
-			printf "${YELLOW}  - $pkg${RESET}\n"
-		done
-	fi
-
-	ui_success "Program installation phase completed."
 }
 
 main

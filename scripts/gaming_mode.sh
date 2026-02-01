@@ -56,41 +56,12 @@ check_and_enable_multilib() {
 	return 0
 }
 
-pacman_install() {
-	local pkg="$1"
-	printf "${CYAN}Installing Pacman package:${RESET} %-30s" "$pkg"
-	local output
-	if output=$(sudo pacman -S --noconfirm --needed "$pkg" 2>&1); then
-		printf "${GREEN} ✓ Success${RESET}\n"
-		return 0
-	else
-		printf "${RED} ✗ Failed${RESET}\n"
-		# Indent output for readability
-		echo "$output" | sed 's/^/    /'
-		return 1
-	fi
-}
-
-flatpak_install() {
-	local pkg="$1"
-	printf "${CYAN}Installing Flatpak app:${RESET} %-30s" "$pkg"
-	local output
-	if output=$(sudo flatpak install -y --noninteractive flathub "$pkg" 2>&1); then
-		printf "${GREEN} ✓ Success${RESET}\n"
-		return 0
-	else
-		printf "${RED} ✗ Failed${RESET}\n"
-		echo "$output" | sed 's/^/    /'
-		return 1
-	fi
-}
-
 # ===== YAML Parsing Functions =====
 
 ensure_yq() {
 	if ! command -v yq &>/dev/null; then
 		ui_info "yq is required for YAML parsing. Installing..."
-		if ! pacman_install "yq"; then
+		if ! pacman_install_single "yq" true; then
 			log_error "Failed to install yq. Please install it manually: sudo pacman -S yq"
 			return 1
 		fi
@@ -206,21 +177,6 @@ enable_gamemode() {
 	fi
 }
 
-# ===== Summary =====
-print_summary() {
-	echo ""
-	ui_header "Gaming Mode Setup Summary"
-	if [[ ${#GAMING_INSTALLED[@]} -gt 0 ]]; then
-		echo -e "${GREEN}Installed:${RESET}"
-		printf "  - %s\n" "${GAMING_INSTALLED[@]}"
-	fi
-	if [[ ${#GAMING_ERRORS[@]} -gt 0 ]]; then
-		echo -e "${RED}Errors:${RESET}"
-		printf "  - %s\n" "${GAMING_ERRORS[@]}"
-	fi
-	echo ""
-}
-
 # ===== Main Execution =====
 main() {
 	step "Gaming Mode Setup"
@@ -243,8 +199,6 @@ main() {
 	install_flatpak_packages
 	configure_mangohud
 	enable_gamemode
-	print_summary
-	ui_success "Gaming Mode setup completed."
 }
 
 main

@@ -212,9 +212,19 @@ else
   trap 'save_log_on_exit' EXIT INT TERM
 fi
 
-# Function to mark step as completed
+# Function to mark step as completed with atomic write
 mark_step_complete() {
-  echo "$1" >> "$STATE_FILE"
+  local step_name="$1"
+  
+  # Validate step name
+  if [ -z "$step_name" ]; then
+    log_error "mark_step_complete: step_name cannot be empty"
+    return 1
+  fi
+  
+  # Atomic write to prevent corruption
+  local temp_state_file="$STATE_FILE.tmp"
+  echo "$step_name" >> "$temp_state_file" && mv "$temp_state_file" "$STATE_FILE"
 }
 
 # Function to check if step was completed
@@ -222,8 +232,29 @@ is_step_complete() {
   [ -f "$STATE_FILE" ] && grep -q "^$1$" "$STATE_FILE"
 }
 
+# Function to validate state file integrity
+validate_state_file() {
+  if [ ! -f "$STATE_FILE" ]; then
+    return 0  # No file is valid
+  fi
+  
+  # Check if file is readable and not empty
+  if [ ! -r "$STATE_FILE" ] || [ ! -s "$STATE_FILE" ]; then
+    log_warning "State file is corrupted or empty. Starting fresh installation."
+    rm -f "$STATE_FILE" 2>/dev/null || true
+    return 1
+  fi
+  
+  return 0
+}
+
 # Enhanced resume functionality with partial failure handling and error recovery
 show_resume_menu() {
+  # Validate state file first
+  if ! validate_state_file; then
+    return 0
+  fi
+  
   if [ -f "$STATE_FILE" ] && [ -s "$STATE_FILE" ]; then
     echo ""
     ui_info "Previous installation detected. Checking installation status..."
@@ -593,83 +624,11 @@ else
   fi
 fi
 if [ "$DRY_RUN" = true ]; then
-  print_header "Dry-Run Preview Completed"
-  echo ""
   echo -e "${YELLOW}This was a preview run. No changes were made to your system.${RESET}"
-  echo ""
-  echo -e "${CYAN}To perform the actual installation, run:${RESET}"
-  echo -e "${GREEN}  ./install.sh${RESET}"
-  echo ""
-else
-  print_header "Installation Completed Successfully"
-fi
-echo ""
-if supports_gum; then
-  echo ""
-  gum style --margin "1 2" --border thick --padding "1 2" --foreground 15 "Installation Summary"
-  echo ""
-  gum style --margin "0 2" --foreground 10 "Desktop Environment: Configured"
-  gum style --margin "0 2" --foreground 10 "System Utilities: Installed"
-  gum style --margin "0 2" --foreground 10 "Security Features: Enabled"
-  gum style --margin "0 2" --foreground 10 "Performance Optimizations: Applied"
-  gum style --margin "0 2" --foreground 10 "Shell Configuration: Complete"
-  echo ""
-else
-  echo -e "${CYAN}Installation Summary${RESET}"
-  echo ""
-  echo -e "${GREEN}Desktop Environment:${RESET} Configured"
-  echo -e "${GREEN}System Utilities:${RESET} Installed"
-  echo -e "${GREEN}Security Features:${RESET} Enabled"
-  echo -e "${GREEN}Performance Optimizations:${RESET} Applied"
-  echo -e "${GREEN}Shell Configuration:${RESET} Complete"
+  echo -e "${CYAN}To perform the actual installation, run:${RESET} ${GREEN}./install.sh${RESET}"
   echo ""
 fi
-if declare -f print_programs_summary >/dev/null 2>&1; then
-  print_programs_summary
-fi
-print_summary
+
 log_performance "Total installation time"
-
-# Save final log
-{
-  echo ""
-  echo "=========================================="
-  echo "Installation Summary"
-  echo "=========================================="
-  echo "Completed steps:"
-  [ -f "$STATE_FILE" ] && cat "$STATE_FILE" | sed 's/^/  - /'
-  echo ""
-  if [ ${#ERRORS[@]} -gt 0 ]; then
-    echo "Errors encountered:"
-    for error in "${ERRORS[@]}"; do
-      echo "  - $error"
-    done
-  fi
-  echo ""
-  echo "Installation log saved to: $INSTALL_LOG"
-} >> "$INSTALL_LOG"
-
-# Handle installation results with minimal styling
-if [ ${#ERRORS[@]} -eq 0 ]; then
-  if supports_gum; then
-    echo ""
-    gum style --margin "0 2" --foreground 10 "Installation completed successfully"
-    gum style --margin "0 2" --foreground 15 "Log: $INSTALL_LOG"
-  else
-    ui_success "Installation completed successfully"
-    ui_info "Log: $INSTALL_LOG"
-  fi
-
-
-else
-  if supports_gum; then
-    echo ""
-    gum style --margin "0 2" --foreground 196 "Installation completed with warnings"
-    gum style --margin "0 2" --foreground 15 "Log: $INSTALL_LOG"
-  else
-    ui_warn "Installation completed with warnings"
-    ui_info "Log: $INSTALL_LOG"
-  fi
-fi
 
 prompt_reboot

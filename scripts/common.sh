@@ -925,14 +925,6 @@ install_package_groups() {
   fi
 }
 
-print_summary() {
-  echo -e "\n${CYAN}=== INSTALL SUMMARY ===${RESET}"
-  [ "${#INSTALLED_PACKAGES[@]}" -gt 0 ] && echo -e "${GREEN}Installed: ${INSTALLED_PACKAGES[*]}${RESET}"
-  [ "${#REMOVED_PACKAGES[@]}" -gt 0 ] && echo -e "${RED}Removed: ${REMOVED_PACKAGES[*]}${RESET}"
-  [ "${#ERRORS[@]}" -gt 0 ] && echo -e "\n${RED}Errors: ${ERRORS[*]}${RESET}"
-  echo -e "${CYAN}======================${RESET}"
-}
-
 # Function to display a styled header for summaries
 # Usage: ui_header "My Header"
 ui_header() {
@@ -1166,6 +1158,126 @@ install_flatpak_quietly() {
   install_package_generic "flatpak" "$@"
 }
 
+# Batch package installation for better performance
+# Reduces individual package operations and consolidates output
+install_packages_batch() {
+  local manager="$1"
+  shift
+  local packages=("$@")
+  local total=${#packages[@]}
+  
+  if [ $total -eq 0 ]; then
+    return 0
+  fi
+  
+  # Filter out already installed packages
+  local packages_to_install=()
+  for pkg in "${packages[@]}"; do
+    local already_installed=false
+    case "$manager" in
+      "pacman")
+        pacman -Q "$pkg" &>/dev/null && already_installed=true
+        ;;
+      "aur")
+        pacman -Q "$pkg" &>/dev/null && already_installed=true
+        ;;
+      "flatpak")
+        flatpak list | grep -q "$pkg" &>/dev/null && already_installed=true
+        ;;
+    esac
+    
+    if [ "$already_installed" = false ]; then
+      packages_to_install+=("$pkg")
+    fi
+  done
+  
+  local install_count=${#packages_to_install[@]}
+  if [ $install_count -eq 0 ]; then
+    ui_info "All $total packages already installed"
+    return 0
+  elif [ $install_count -lt $total ]; then
+    ui_info "Installing $install_count/$total packages ($(($total - $install_count)) already installed)"
+  else
+    ui_info "Installing $install_count packages..."
+  fi
+  
+  # Use existing generic installer for the batch
+  install_package_generic "$manager" "${packages_to_install[@]}"
+}
+
+# Enhanced package installation functions with better error handling
+# These replace duplicate functions in individual scripts
+
+pacman_install_single() {
+  local pkg="$1"
+  local verbose="${2:-false}"
+  
+  if [ "$verbose" = true ]; then
+    printf "${CYAN}Installing Pacman package:${RESET} %-30s" "$pkg"
+  fi
+  
+  local output
+  if output=$(sudo pacman -S --noconfirm --needed "$pkg" 2>&1); then
+    [ "$verbose" = true ] && printf "${GREEN} ✓ Success${RESET}\n"
+    INSTALLED_PACKAGES+=("$pkg")
+    return 0
+  else
+    [ "$verbose" = true ] && printf "${RED} ✗ Failed${RESET}\n"
+    # Show output if verbose or if it's a critical error
+    if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
+      echo "$output" | sed 's/^/    /'
+    fi
+    FAILED_PACKAGES+=("$pkg")
+    return 1
+  fi
+}
+
+yay_install_single() {
+  local pkg="$1"
+  local verbose="${2:-false}"
+  
+  if [ "$verbose" = true ]; then
+    printf "${CYAN}Installing AUR package:${RESET} %-30s" "$pkg"
+  fi
+  
+  local output
+  if output=$(yay -S --noconfirm --needed "$pkg" 2>&1); then
+    [ "$verbose" = true ] && printf "${GREEN} ✓ Success${RESET}\n"
+    INSTALLED_PACKAGES+=("$pkg")
+    return 0
+  else
+    [ "$verbose" = true ] && printf "${RED} ✗ Failed${RESET}\n"
+    if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
+      echo "$output" | sed 's/^/    /'
+    fi
+    FAILED_PACKAGES+=("$pkg")
+    return 1
+  fi
+}
+
+flatpak_install_single() {
+  local pkg="$1"
+  local verbose="${2:-false}"
+  
+  if [ "$verbose" = true ]; then
+    printf "${CYAN}Installing Flatpak app:${RESET} %-30s" "$pkg"
+  fi
+  
+  local output
+  if output=$(sudo flatpak install -y --noninteractive flathub "$pkg" 2>&1); then
+    [ "$verbose" = true ] && printf "${GREEN} ✓ Success${RESET}\n"
+    INSTALLED_PACKAGES+=("$pkg")
+    return 0
+  else
+    [ "$verbose" = true ] && printf "${RED} ✗ Failed${RESET}\n"
+    if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
+      echo "$output" | sed 's/^/    /'
+    fi
+    FAILED_PACKAGES+=("$pkg")
+    return 1
+  fi
+}
+
 # Check if system uses Btrfs filesystem
 is_btrfs_system() {
   findmnt -no FSTYPE / | grep -q btrfs
@@ -1197,12 +1309,4 @@ find_limine_config() {
     fi
   done
   return 1
-}
-# Parameters: $@ - Packages to install
-install_flatpak_quietly() {
-  if ! command -v flatpak &>/dev/null; then
-    log_error "Flatpak not found. Cannot install Flatpak packages."
-    return 1
-  fi
-  install_package_generic "flatpak" "$@"
 }

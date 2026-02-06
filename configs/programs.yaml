@@ -67,6 +67,8 @@ essential:
       description: "GNU Image Manipulation Program"
     - name: kdenlive
       description: "Video editor for KDE"
+    - name: libreoffice-fresh
+      description: "Full-featured office suite"
     - name: solaar
       description: "Logitech device manager"
     - name: zed
@@ -129,8 +131,6 @@ aur:
   default:
     - name: dropbox
       description: "Cloud storage and file synchronization"
-    - name: onlyoffice-bin
-      description: "Office suite for document editing"
     - name: rustdesk-bin
       description: "Remote desktop software"
     - name: spotify
@@ -140,8 +140,6 @@ aur:
     - name: via-bin
       description: "Keyboard configuration utility"
   minimal:
-    - name: onlyoffice-bin
-      description: "Office suite for document editing"
     - name: rustdesk-bin
       description: "Remote desktop software"
 

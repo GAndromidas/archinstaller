@@ -133,8 +133,6 @@ aur:
       description: "Cloud storage and file synchronization"
     - name: rustdesk-bin
       description: "Remote desktop software"
-    - name: spotify
-      description: "Music streaming client"
     - name: ventoy-bin
       description: "Bootable USB creation tool"
     - name: via-bin

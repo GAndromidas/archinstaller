@@ -147,6 +147,7 @@ desktop_environments:
     install:
       - gwenview
       - kdeconnect
+      - kio-admin
       - kwalletmanager
       - kvantum
       - okular

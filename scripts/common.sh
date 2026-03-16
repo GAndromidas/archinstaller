@@ -38,9 +38,9 @@ INSTALLATION_START_TIME=0   # Overall installation start time
 TOTAL_STEPS=10
 : "${VERBOSE:=false}"   # Can be overridden/exported by caller
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"  # Script directory
-CONFIGS_DIR="$SCRIPT_DIR/configs"                           # Config files directory
-SCRIPTS_DIR="$SCRIPT_DIR/scripts"                           # Custom scripts directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"  # Script directory
+CONFIGS_DIR="$SCRIPT_DIR/../configs"                           # Config files directory
+SCRIPTS_DIR="$SCRIPT_DIR"                                      # Scripts directory
 
 HELPER_UTILS=(base-devel bc bluez-utils cronie curl expac eza fastfetch flatpak fzf git openssh pacman-contrib plymouth rsync ufw zoxide)  # Helper utilities to install
 

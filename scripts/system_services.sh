@@ -2,14 +2,14 @@
 set -uo pipefail
 
 # Get the directory where this script is located
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
 setup_firewall_and_services() {
   step "Setting up firewall and services"
 
-  # First handle firewall setup
-  if command -v firewalld >/dev/null 2>&1; then
+  # First handle firewall setup - EndeavourOS prefers firewalld, Arch can use either
+  if [[ "$IS_ENDEAVOUROS" = true ]] || command -v firewalld >/dev/null 2>&1; then
     run_step "Configuring Firewalld" configure_firewalld
   else
     run_step "Configuring UFW" configure_ufw

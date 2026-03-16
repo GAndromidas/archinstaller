@@ -5,9 +5,9 @@
 [![Last Commit](https://img.shields.io/github/last-commit/GAndromidas/archinstaller.svg?style=for-the-badge)](https://github.com/GAndromidas/archinstaller/commits/main)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 
-**Professional Arch Linux Post-Installation Automation**
+**Professional Arch Linux & EndeavourOS Post-Installation Automation**
 
-Transform your minimal Arch Linux installation into a fully configured, optimized system with intelligent hardware detection and tailored optimizations.
+Transform your minimal Arch Linux or EndeavourOS installation into a fully configured, optimized system with intelligent hardware detection and tailored optimizations.
 
 [Installation](#-quick-start) • [Features](#-key-features) • [Modes](#-installation-modes)
 
@@ -143,8 +143,9 @@ Transform your system into a gaming powerhouse with one click:
 - ✅ **Cosmic** (experimental)
 
 ### Base Systems
-- ✅ Arch Linux (primary)
-- ✅ Arch-based distributions (tested)
+- ✅ **Arch Linux** (primary)
+- ✅ **EndeavourOS** (Arch-based with firewalld preference)
+- ✅ **Arch-based distributions** (tested)
 
 ---
 
@@ -152,7 +153,7 @@ Transform your system into a gaming powerhouse with one click:
 
 ### Prerequisites
 
-- **Fresh Arch Linux installation** (minimal base system)
+- **Fresh Arch Linux or EndeavourOS installation** (minimal base system)
 - **Active internet connection**
 - **User account with sudo privileges**
 - **2GB+ free disk space**

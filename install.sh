@@ -7,7 +7,7 @@ INSTALL_LOG="$HOME/.archinstaller.log"
 # Function to show help
 show_help() {
   cat << EOF
-Archinstaller - Comprehensive Arch Linux Post-Installation Script
+Archinstaller - Comprehensive Arch Linux & EndeavourOS Post-Installation Script
 
 USAGE:
     ./install.sh [OPTIONS]
@@ -19,9 +19,9 @@ OPTIONS:
     -d, --dry-run   Preview what will be installed without making changes
 
 DESCRIPTION:
-    Archinstaller transforms a fresh Arch Linux installation into a fully
+    Archinstaller transforms a fresh Arch Linux or EndeavourOS installation into a fully
     configured, optimized system. It installs essential packages, configures
-    the desktop environment, sets up security features, and applies performance
+    desktop environment, sets up security features, and applies performance
     optimizations.
 
 INSTALLATION MODES:
@@ -39,7 +39,7 @@ FEATURES:
     - Automatic GPU driver detection and installation
 
 REQUIREMENTS:
-    - Fresh Arch Linux installation
+    - Fresh Arch Linux or EndeavourOS installation
     - Active internet connection
     - Regular user account with sudo privileges
     - Minimum 2GB free disk space
@@ -62,7 +62,7 @@ EOF
 # Clear terminal for clean interface
 clear
 
-# Get the directory where this script is located (archinstaller root)
+# Get's directory where this script is located (archinstaller root)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$SCRIPT_DIR/scripts"
 CONFIGS_DIR="$SCRIPT_DIR/configs"
@@ -140,10 +140,10 @@ check_system_requirements() {
     exit 1
   fi
 
-  # Check if we're on Arch Linux
-  if [[ ! -f /etc/arch-release ]]; then
-    echo -e "${RED}Error: This script is designed for Arch Linux only!${RESET}"
-    echo -e "${YELLOW}   Please run this on a fresh Arch Linux installation.${RESET}"
+  # Check if we're on Arch Linux or EndeavourOS
+  if [[ ! -f /etc/arch-release ]] && [[ ! -f /etc/endeavouros-release ]]; then
+    echo -e "${RED}Error: This script is designed for Arch Linux or EndeavourOS only!${RESET}"
+    echo -e "${YELLOW}   Please run this on a fresh Arch Linux or EndeavourOS installation.${RESET}"
     exit 1
   fi
 
@@ -436,7 +436,7 @@ save_log_on_exit() {
 }
 
 # Installation start header
-print_header "Starting Arch Linux Installation" \
+print_header "Starting Arch Linux & EndeavourOS Installation" \
   "This process will take approximately 10-20 minutes depending on your internet speed." \
   "You can safely leave this running - it will handle everything automatically!"
 

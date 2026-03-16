@@ -46,6 +46,16 @@ HELPER_UTILS=(base-devel bc bluez-utils cronie curl expac eza fastfetch flatpak 
 
 # : "${INSTALL_MODE:=default}"
 
+# Distribution detection
+IS_ENDEAVOUROS=false
+IS_ARCH=false
+
+if [[ -f /etc/endeavouros-release ]]; then
+    IS_ENDEAVOUROS=true
+elif [[ -f /etc/arch-release ]]; then
+    IS_ARCH=true
+fi
+
 # Ensure critical variables are defined
 : "${HOME:=/home/$USER}"
 : "${USER:=$(whoami)}"

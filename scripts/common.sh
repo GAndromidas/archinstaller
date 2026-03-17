@@ -48,6 +48,7 @@ SCRIPTS_DIR="$SCRIPT_DIR"                                      # Scripts directo
 IS_ARCH=false
 FIREWALL_PREFERENCE="ufw"
 
+# Check for EndeavourOS first (it also has /etc/arch-release)
 if [[ -f /etc/endeavouros-release ]]; then
     FIREWALL_PREFERENCE="firewalld"
 elif [[ -f /etc/arch-release ]]; then
@@ -64,9 +65,9 @@ HELPER_UTILS=("${BASE_HELPER_UTILS[@]}")
 # Only add firewall utilities if not on EndeavourOS (which uses firewalld)
 if [[ "$FIREWALL_PREFERENCE" != "firewalld" ]]; then
     HELPER_UTILS+=("${FIREWALL_UTILS[@]}")
-    log_info "Firewall preference: UFW (Arch Linux)"
+    echo -e "${CYAN}Firewall preference: UFW (Arch Linux)${RESET}" >&2
 else
-    log_info "Firewall preference: firewalld (EndeavourOS detected - UFW excluded)"
+    echo -e "${CYAN}Firewall preference: firewalld (EndeavourOS detected - UFW excluded)${RESET}" >&2
 fi
 
 # Ensure critical variables are defined
@@ -445,7 +446,7 @@ is_headless_system() {
 }
 
 show_menu() {
-  # Display detected OS information
+  # Display detected OS information - check EndeavourOS first
   local detected_os=""
   if [[ -f /etc/endeavouros-release ]]; then
     detected_os="EndeavourOS"
@@ -488,7 +489,7 @@ validate_install_mode() {
 }
 
 show_gum_menu() {
-  # Display detected OS information
+  # Display detected OS information - check EndeavourOS first
   local detected_os=""
   if [[ -f /etc/endeavouros-release ]]; then
     detected_os="EndeavourOS"
@@ -556,7 +557,7 @@ show_gum_menu() {
 }
 
 show_traditional_menu() {
-  # Display detected OS information
+  # Display detected OS information - check EndeavourOS first
   local detected_os=""
   if [[ -f /etc/endeavouros-release ]]; then
     detected_os="EndeavourOS"

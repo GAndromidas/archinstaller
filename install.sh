@@ -516,29 +516,12 @@ else
   fi
 fi
 
-# Step 5: Smart Peripheral Detection
-# Check if step was previously completed successfully
-if is_step_complete "peripheral_detection"; then
-  ui_info "Step 5 (Smart Peripheral Detection) already completed - skipping"
-else
-  print_step_header_with_timing 5 "$TOTAL_STEPS" "Smart Peripheral Detection"
-  ui_info "Detecting connected peripherals and installing appropriate software..."
-  if step "Smart Peripheral Detection" && source "$SCRIPTS_DIR/peripheral_detection.sh" && smart_peripheral_detection; then
-    mark_step_complete_with_progress "peripheral_detection" "completed"
-  else
-    mark_step_complete_with_progress "peripheral_detection" "failed"
-    log_error "Smart peripheral detection failed"
-    # Peripheral detection is optional for system functionality
-    ui_warn "Smart peripheral detection failed but continuing installation"
-  fi
-fi
-
-# Step 6: Programs Installation
+# Step 5: Programs Installation
 # Check if step was previously completed successfully
 if is_step_complete "programs_installation"; then
-  ui_info "Step 6 (Programs Installation) already completed - skipping"
+  ui_info "Step 5 (Programs Installation) already completed - skipping"
 else
-  print_step_header_with_timing 6 "$TOTAL_STEPS" "Programs Installation"
+  print_step_header_with_timing 5 "$TOTAL_STEPS" "Programs Installation"
   ui_info "Installing applications based on your desktop environment..."
   if step "Programs Installation" && source "$SCRIPTS_DIR/programs.sh"; then
     mark_step_complete_with_progress "programs_installation" "completed"
@@ -547,6 +530,23 @@ else
     log_error "Programs installation failed"
     # Programs are optional for system functionality
     ui_warn "Programs installation failed but continuing installation"
+  fi
+fi
+
+# Step 6: Smart Peripheral Detection
+# Check if step was previously completed successfully
+if is_step_complete "peripheral_detection"; then
+  ui_info "Step 6 (Smart Peripheral Detection) already completed - skipping"
+else
+  print_step_header_with_timing 6 "$TOTAL_STEPS" "Smart Peripheral Detection"
+  ui_info "Detecting connected peripherals and installing appropriate software..."
+  if step "Smart Peripheral Detection" && source "$SCRIPTS_DIR/peripheral_detection.sh" && smart_peripheral_detection; then
+    mark_step_complete_with_progress "peripheral_detection" "completed"
+  else
+    mark_step_complete_with_progress "peripheral_detection" "failed"
+    log_error "Smart peripheral detection failed"
+    # Peripheral detection is optional for system functionality
+    ui_warn "Smart peripheral detection failed but continuing installation"
   fi
 fi
 

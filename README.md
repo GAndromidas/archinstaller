@@ -115,19 +115,19 @@ Automatically detects connected peripherals and installs appropriate management 
 - Configures services and user permissions automatically
 - Skips installation if no supported peripherals are detected
 
-### � Installation Process
+### 🔄 Installation Process
 
 1. **System Preparation** - Update packages and install core utilities
 2. **Shell Setup** - Configure ZSH with modern features
 3. **Plymouth Setup** - Beautiful boot screen configuration
 4. **Yay Installation** - AUR helper for additional software
-5. **Smart Peripheral Detection** - Auto-detect and install peripheral software
-6. **Programs Installation** - Desktop environment and application setup
+5. **Programs Installation** - Desktop environment and application setup
+6. **Smart Peripheral Detection** - Auto-detect and install peripheral software
 7. **Gaming Mode** - Optional gaming optimizations
 8. **Bootloader Configuration** - Kernel and boot settings
 9. **Fail2ban Setup** - SSH security protection
 10. **System Services** - Enable and configure essential services
-11. **Maintenance** - Final cleanup and optimizations
+11. **Maintenance** - Final cleanup and optimization
 - **Enhanced Terminal Environment**
   - Pre-configured Zsh with Oh-My-Zsh framework
   - Starship prompt for beautiful terminal design

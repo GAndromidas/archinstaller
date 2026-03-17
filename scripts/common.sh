@@ -48,8 +48,8 @@ SCRIPTS_DIR="$SCRIPT_DIR"                                      # Scripts directo
 IS_ARCH=false
 FIREWALL_PREFERENCE="ufw"
 
-# Check for EndeavourOS first (it also has /etc/arch-release)
-if [[ -f /etc/endeavouros-release ]]; then
+# Check for EndeavourOS first using /etc/os-release (standard location)
+if [[ -f /etc/os-release ]] && grep -q 'ID="endeavouros"' /etc/os-release 2>/dev/null; then
     FIREWALL_PREFERENCE="firewalld"
 elif [[ -f /etc/arch-release ]]; then
     IS_ARCH=true
@@ -65,9 +65,9 @@ HELPER_UTILS=("${BASE_HELPER_UTILS[@]}")
 # Only add firewall utilities if not on EndeavourOS (which uses firewalld)
 if [[ "$FIREWALL_PREFERENCE" != "firewalld" ]]; then
     HELPER_UTILS+=("${FIREWALL_UTILS[@]}")
-    echo -e "${CYAN}Firewall preference: UFW (Arch Linux)${RESET}" >&2
 else
-    echo -e "${CYAN}Firewall preference: firewalld (EndeavourOS detected - UFW excluded)${RESET}" >&2
+    # Silent - no output needed
+    :
 fi
 
 # Ensure critical variables are defined
@@ -446,9 +446,9 @@ is_headless_system() {
 }
 
 show_menu() {
-  # Display detected OS information - check EndeavourOS first
+  # Display detected OS information - use /etc/os-release for EndeavourOS
   local detected_os=""
-  if [[ -f /etc/endeavouros-release ]]; then
+  if [[ -f /etc/os-release ]] && grep -q 'ID="endeavouros"' /etc/os-release 2>/dev/null; then
     detected_os="EndeavourOS"
   elif [[ -f /etc/arch-release ]]; then
     detected_os="Arch Linux"
@@ -489,9 +489,9 @@ validate_install_mode() {
 }
 
 show_gum_menu() {
-  # Display detected OS information - check EndeavourOS first
+  # Display detected OS information - use /etc/os-release for EndeavourOS
   local detected_os=""
-  if [[ -f /etc/endeavouros-release ]]; then
+  if [[ -f /etc/os-release ]] && grep -q 'ID="endeavouros"' /etc/os-release 2>/dev/null; then
     detected_os="EndeavourOS"
   elif [[ -f /etc/arch-release ]]; then
     detected_os="Arch Linux"
@@ -557,9 +557,9 @@ show_gum_menu() {
 }
 
 show_traditional_menu() {
-  # Display detected OS information - check EndeavourOS first
+  # Display detected OS information - use /etc/os-release for EndeavourOS
   local detected_os=""
-  if [[ -f /etc/endeavouros-release ]]; then
+  if [[ -f /etc/os-release ]] && grep -q 'ID="endeavouros"' /etc/os-release 2>/dev/null; then
     detected_os="EndeavourOS"
   elif [[ -f /etc/arch-release ]]; then
     detected_os="Arch Linux"

@@ -516,12 +516,29 @@ else
   fi
 fi
 
-# Step 5: Programs Installation
+# Step 5: Smart Peripheral Detection
+# Check if step was previously completed successfully
+if is_step_complete "peripheral_detection"; then
+  ui_info "Step 5 (Smart Peripheral Detection) already completed - skipping"
+else
+  print_step_header_with_timing 5 "$TOTAL_STEPS" "Smart Peripheral Detection"
+  ui_info "Detecting connected peripherals and installing appropriate software..."
+  if step "Smart Peripheral Detection" && source "$SCRIPTS_DIR/peripheral_detection.sh" && smart_peripheral_detection; then
+    mark_step_complete_with_progress "peripheral_detection" "completed"
+  else
+    mark_step_complete_with_progress "peripheral_detection" "failed"
+    log_error "Smart peripheral detection failed"
+    # Peripheral detection is optional for system functionality
+    ui_warn "Smart peripheral detection failed but continuing installation"
+  fi
+fi
+
+# Step 6: Programs Installation
 # Check if step was previously completed successfully
 if is_step_complete "programs_installation"; then
-  ui_info "Step 5 (Programs Installation) already completed - skipping"
+  ui_info "Step 6 (Programs Installation) already completed - skipping"
 else
-  print_step_header_with_timing 5 "$TOTAL_STEPS" "Programs Installation"
+  print_step_header_with_timing 6 "$TOTAL_STEPS" "Programs Installation"
   ui_info "Installing applications based on your desktop environment..."
   if step "Programs Installation" && source "$SCRIPTS_DIR/programs.sh"; then
     mark_step_complete_with_progress "programs_installation" "completed"
@@ -533,15 +550,15 @@ else
   fi
 fi
 
-# Step 6: Gaming Mode
+# Step 7: Gaming Mode
 if [[ "$INSTALL_MODE" == "server" ]]; then
   ui_info "Server mode selected, skipping Gaming Mode setup."
 else
   # Check if step was previously completed successfully
   if is_step_complete "gaming_mode"; then
-    ui_info "Step 6 (Gaming Mode) already completed - skipping"
+    ui_info "Step 7 (Gaming Mode) already completed - skipping"
   else
-    print_step_header_with_timing 6 "$TOTAL_STEPS" "Gaming Mode"
+    print_step_header_with_timing 7 "$TOTAL_STEPS" "Gaming Mode"
     ui_info "Setting up gaming tools (optional)..."
     if step "Gaming Mode" && source "$SCRIPTS_DIR/gaming_mode.sh"; then
       mark_step_complete_with_progress "gaming_mode" "completed"
@@ -553,12 +570,12 @@ else
   fi
 fi
 
-# Step 7: Bootloader and Kernel Configuration
+# Step 8: Bootloader and Kernel Configuration
 # Check if step was previously completed successfully
 if is_step_complete "bootloader_config"; then
-  ui_info "Step 7 (Bootloader Configuration) already completed - skipping"
+  ui_info "Step 8 (Bootloader Configuration) already completed - skipping"
 else
-  print_step_header_with_timing 7 "$TOTAL_STEPS" "Bootloader and Kernel Configuration"
+  print_step_header_with_timing 8 "$TOTAL_STEPS" "Bootloader and Kernel Configuration"
   ui_info "Configuring bootloader..."
   if step "Bootloader and Kernel Configuration" && source "$SCRIPTS_DIR/bootloader_config.sh"; then
     mark_step_complete_with_progress "bootloader_config" "completed"
@@ -575,12 +592,12 @@ else
   fi
 fi
 
-# Step 8: Fail2ban Setup
+# Step 9: Fail2ban Setup
 # Check if step was previously completed successfully
 if is_step_complete "fail2ban_setup"; then
-  ui_info "Step 8 (Fail2ban Setup) already completed - skipping"
+  ui_info "Step 9 (Fail2ban Setup) already completed - skipping"
 else
-  print_step_header_with_timing 8 "$TOTAL_STEPS" "Fail2ban Setup"
+  print_step_header_with_timing 9 "$TOTAL_STEPS" "Fail2ban Setup"
   ui_info "Setting up security protection for SSH..."
   if step "Fail2ban Setup" && source "$SCRIPTS_DIR/fail2ban.sh"; then
     mark_step_complete_with_progress "fail2ban_setup" "completed"
@@ -591,12 +608,12 @@ else
   fi
 fi
 
-# Step 9: System Services
+# Step 10: System Services
 # Check if step was previously completed successfully
 if is_step_complete "system_services"; then
-  ui_info "Step 9 (System Services) already completed - skipping"
+  ui_info "Step 10 (System Services) already completed - skipping"
 else
-  print_step_header_with_timing 9 "$TOTAL_STEPS" "System Services"
+  print_step_header_with_timing 10 "$TOTAL_STEPS" "System Services"
   ui_info "Enabling and configuring system services..."
   if step "System Services" && source "$SCRIPTS_DIR/system_services.sh"; then
     mark_step_complete_with_progress "system_services" "completed"
@@ -608,12 +625,12 @@ else
   fi
 fi
 
-# Step 10: Maintenance
+# Step 11: Maintenance
 # Check if step was previously completed successfully
 if is_step_complete "maintenance"; then
-  ui_info "Step 10 (Maintenance) already completed - skipping"
+  ui_info "Step 11 (Maintenance) already completed - skipping"
 else
-  print_step_header_with_timing 10 "$TOTAL_STEPS" "Maintenance"
+  print_step_header_with_timing 11 "$TOTAL_STEPS" "Maintenance"
   ui_info "Final cleanup and system optimization..."
   if step "Maintenance" && source "$SCRIPTS_DIR/maintenance.sh"; then
     mark_step_complete_with_progress "maintenance" "completed"

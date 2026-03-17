@@ -35,7 +35,7 @@ STEP_START_TIME=0           # Start time of current step
 INSTALLATION_START_TIME=0   # Overall installation start time
 
 # UI/Flow configuration
-TOTAL_STEPS=10
+TOTAL_STEPS=11
 : "${VERBOSE:=false}"   # Can be overridden/exported by caller
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"  # Script directory

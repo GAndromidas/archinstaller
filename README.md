@@ -98,24 +98,36 @@ Transform your system into a gaming powerhouse with one click:
 - GameMode for automatic performance tuning
 - ProtonDB game compatibility database
 
-### 🚀 User Experience
+### �️ Smart Peripheral Detection
 
-- **Interactive Menu System**
-  - Beautiful CLI powered by `gum` with elegant fallbacks
-  - Clear mode selection with descriptions
-  - Confirmation prompts for critical operations
+Automatically detects connected peripherals and installs appropriate management software:
 
-- **Progress Visualization**
-  - Real-time progress bars with percentage completion
-  - Dynamic time estimation that improves as installation progresses
-  - Step-by-step status updates with ✓/✗ indicators
+- **Logitech Devices**: Auto-installs Solaar for Unifying Receiver and device management
+- **Keychron Keyboards**: Auto-installs VIA-bin for keyboard configuration and customization
+- **Gaming Mice**: Detects and installs libratbag/Piper for gaming mouse configuration
+- **Razer Devices**: Auto-installs OpenRazer and Polychromatic for full device control
+- **HID Support**: Installs necessary libraries for USB/HID device communication
 
-- **Resumable Installations**
-  - Automatic progress tracking to `~/.archinstaller.state`
-  - Resume from last completed step if interrupted
-  - Intelligent handling of failed steps with retry options
-  - No data loss, no repeated work
+**How it works:**
+- Scans USB devices, Bluetooth connections, and system device tree
+- Identifies peripherals by vendor ID and device names
+- Installs appropriate packages from Pacman and AUR repositories
+- Configures services and user permissions automatically
+- Skips installation if no supported peripherals are detected
 
+### � Installation Process
+
+1. **System Preparation** - Update packages and install core utilities
+2. **Shell Setup** - Configure ZSH with modern features
+3. **Plymouth Setup** - Beautiful boot screen configuration
+4. **Yay Installation** - AUR helper for additional software
+5. **Smart Peripheral Detection** - Auto-detect and install peripheral software
+6. **Programs Installation** - Desktop environment and application setup
+7. **Gaming Mode** - Optional gaming optimizations
+8. **Bootloader Configuration** - Kernel and boot settings
+9. **Fail2ban Setup** - SSH security protection
+10. **System Services** - Enable and configure essential services
+11. **Maintenance** - Final cleanup and optimizations
 - **Enhanced Terminal Environment**
   - Pre-configured Zsh with Oh-My-Zsh framework
   - Starship prompt for beautiful terminal design

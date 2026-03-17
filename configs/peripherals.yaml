@@ -1,0 +1,84 @@
+# Peripheral-specific package configuration
+# This file defines packages to install based on detected hardware peripherals
+
+# Logitech devices (mice, keyboards, etc.)
+logitech:
+  detection:
+    vendor_ids: ["046d"]  # Logitech vendor ID
+    name_patterns: ["Logitech"]
+    specific_devices:
+      - product_id: "c086"  # G502 X Lightspeed
+        name: "Logitech G502 X Lightspeed"
+      - product_id: "c087"  # G502 X Lightspeed variant
+        name: "Logitech G502 X Lightspeed"
+      - product_id: "c088"  # G502 X Lightspeed variant
+        name: "Logitech G502 X Lightspeed"
+  packages:
+    pacman:
+      - name: solaar
+        description: "Linux device manager for Logitech Unifying Receivers and devices"
+        service: solaar.service
+        post_install:
+          - "sudo systemctl enable --now solaar.service"
+          - "Add user to plugdev group for device access"
+
+# Keychron keyboards
+keychron:
+  detection:
+    vendor_ids: ["3496", "05ac"]  # Keychron and Apple (some Keychron use Apple IDs)
+    name_patterns: ["Keychron"]
+    device_class: "03"  # HID class
+    specific_devices:
+      - product_id: "6032"  # Keychron K8 Pro
+        name: "Keychron K8 Pro"
+      - product_id: "6034"  # Keychron K8 Pro variant
+        name: "Keychron K8 Pro"
+      - product_id: "6035"  # Keychron K8 Pro variant
+        name: "Keychron K8 Pro"
+  packages:
+    aur:
+      - name: via-bin
+        description: "VIA - Keyboard configuration tool for mechanical keyboards"
+        post_install:
+          - "sudo usermod -a -G input \$USER"
+          - "Add user to input group for VIA access"
+
+# Razer gaming devices
+razer:
+  detection:
+    vendor_ids: ["1532"]  # Razer vendor ID
+    name_patterns: ["Razer"]
+  packages:
+    aur:
+      - name: polychromatic
+        description: "Frontend for Razer device configuration"
+    pacman:
+      - name: openrazer
+        description: "Drivers for Razer devices on Linux"
+        service: openrazer-daemon.service
+        post_install:
+          - "sudo systemctl enable --now openrazer-daemon.service"
+          - "sudo usermod -a -G plugdev \$USER"
+
+# Gaming mice (various vendors)
+gaming:
+  detection:
+    vendor_ids: ["046d", "1b1c", "1532", "045e"]  # Logitech, Corsair, Razer, Microsoft
+    device_types: ["mouse"]
+  packages:
+    pacman:
+      - name: libratbag
+        description: "Library for configuring gaming mice"
+      - name: piper
+        description: "Graphical configuration tool for gaming mice"
+
+# General HID devices
+hid_devices:
+  detection:
+    device_class: "03"  # HID class
+  packages:
+    pacman:
+      - name: hidapi
+        description: "HID API library for USB devices"
+      - name: libusb
+        description: "USB access library"

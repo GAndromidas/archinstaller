@@ -69,8 +69,6 @@ essential:
       description: "Video editor for KDE"
     - name: libreoffice-fresh
       description: "Full-featured office suite"
-    - name: solaar
-      description: "Logitech device manager"
     - name: zed
       description: "High-performance code editor"
   minimal:
@@ -135,8 +133,6 @@ aur:
       description: "Remote desktop software"
     - name: ventoy-bin
       description: "Bootable USB creation tool"
-    - name: via-bin
-      description: "Keyboard configuration utility"
   minimal:
     - name: rustdesk-bin
       description: "Remote desktop software"
@@ -235,8 +231,6 @@ custom:
       description: "FTP client for file transfers"
     - name: kdenlive
       description: "Video editor for KDE"
-    - name: solaar
-      description: "Logitech device manager"
     - name: zed
       description: "High-performance code editor"
   aur:
@@ -246,12 +240,8 @@ custom:
       description: "Office suite for document editing"
     - name: rustdesk-bin
       description: "Remote desktop software"
-    - name: spotify
-      description: "Music streaming client"
     - name: ventoy-bin
       description: "Bootable USB creation tool"
-    - name: via-bin
-      description: "Keyboard configuration utility"
   flatpak:
     kde:
       - name: io.github.shiftey.Desktop

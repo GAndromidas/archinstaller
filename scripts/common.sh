@@ -416,6 +416,20 @@ show_resume_menu() {
   fi
 }
 
+# Function to check if running in VM environment
+is_vm_environment() {
+  # Check for common VM indicators
+  if [[ -d /sys/class/dmi/id ]] && grep -q -i "vmware\|virtualbox\|qemu\|kvm\|hyper-v" /sys/class/dmi/id/product_name 2>/dev/null; then
+    return 0
+  elif [[ -f /proc/cpuinfo ]] && grep -q -i "hypervisor" /proc/cpuinfo 2>/dev/null; then
+    return 0
+  elif command -v systemd-detect-virt >/dev/null 2>&1 && systemd-detect-virt --vm 2>/dev/null; then
+    return 0
+  else
+    return 1
+  fi
+}
+
 # Function to check if system is headless (no display manager or X server)
 is_headless_system() {
   # Check for display manager

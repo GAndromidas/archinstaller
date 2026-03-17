@@ -8,8 +8,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
-# ===== Configuration Loading =====
-
+# Load peripheral configuration from YAML file
 load_peripheral_config() {
     local config_file="$SCRIPT_DIR/../configs/peripherals.yaml"
     
@@ -18,13 +17,14 @@ load_peripheral_config() {
         return 1
     fi
     
-    # Check if yq is available for YAML parsing
-    if ! command -v yq >/dev/null 2>&1; then
-        ui_warn "yq not available, using built-in peripheral detection"
+    # Add timeout for YAML loading to prevent hanging
+    if ! timeout 10s bash -c "command -v yq >/dev/null 2>&1 && yq eval '.' '$config_file' >/dev/null 2>&1"; then
+        ui_warn "Failed to load peripheral configuration or yq not available"
+        log_error "YAML configuration loading failed or timed out"
         return 1
     fi
     
-    ui_info "Loading peripheral configuration from $config_file"
+    ui_info "Peripheral configuration loaded successfully"
     return 0
 }
 
@@ -34,14 +34,27 @@ load_peripheral_config() {
 detect_logitech_devices() {
     local logitech_devices=()
     
-    # Check for Logitech USB devices (including wireless receivers)
-    if lsusb | grep -i "Logitech" >/dev/null 2>&1; then
-        while IFS= read -r line; do
-            local device_id=$(echo "$line" | awk '{print $6}')
-            local device_name=$(echo "$line" | cut -d: -f3- | sed 's/^ *//')
-            logitech_devices+=("USB: $device_name ($device_id)")
-        done < <(lsusb | grep -i "Logitech")
+    # Check for Logitech USB devices (including wireless receivers) with timeout
+    local usb_devices
+    if ! usb_devices=$(timeout 5s lsusb 2>/dev/null); then
+        ui_warn "USB device scan timed out - may be VM environment"
+        printf '%s\n' "${logitech_devices[@]}"
+        return 0
     fi
+    
+    # Parse lsusb output for Logitech devices with timeout protection
+    while IFS= read -r line; do
+        if [[ "$line" =~ Bus[[:space:]]+[0-9]+[[:space:]]+Device[[:space:]]+[0-9]+:[[:space:]]+ID[[:space:]]+([0-9a-f]+):([0-9a-f]+) ]]; then
+            local vendor_id="${BASH_REMATCH[1]}"
+            local product_id="${BASH_REMATCH[2]}"
+            
+            # Check for Logitech vendor ID (046d)
+            if [[ "$vendor_id" == "046d" ]]; then
+                local device_info=$(timeout 3s lsusb -d "$vendor_id:$product_id" -v 2>/dev/null || echo "Logitech device ($vendor_id:$product_id)")
+                logitech_devices+=("$device_info")
+            fi
+        fi
+    done <<< "$usb_devices" | grep -i "Logitech"
     
     # Check for Logitech wireless receivers specifically
     if lsusb | grep -i "Unifying" >/dev/null 2>&1; then
@@ -151,10 +164,16 @@ detect_keychron_keyboards() {
         done < <(lsusb | grep -i "Keychron")
     fi
     
-    # Enhanced Bluetooth detection for Keychron
+    # Enhanced Bluetooth detection for Keychron with timeout
     if command -v bluetoothctl >/dev/null 2>&1; then
-        # Get all paired and connected devices
-        local bt_devices=$(bluetoothctl devices 2>/dev/null || true)
+        # Get all paired and connected devices with timeout
+        local bt_devices
+        if ! bt_devices=$(timeout 5s bluetoothctl devices 2>/dev/null || true); then
+            ui_warn "Bluetooth device scan timed out - may be VM environment"
+            printf '%s\n' "${keychron_devices[@]}"
+            return 0
+        fi
+        
         if [[ -n "$bt_devices" ]]; then
             while IFS= read -r line; do
                 local device_mac=$(echo "$line" | awk '{print $2}')
@@ -162,13 +181,13 @@ detect_keychron_keyboards() {
                 
                 # Check if it's a Keychron device
                 if echo "$device_name" | grep -i "Keychron" >/dev/null 2>&1; then
-                    # Check if device is connected
-                    local device_info=$(bluetoothctl info "$device_mac" 2>/dev/null || true)
-                    local connected="No"
-                    if echo "$device_info" | grep -q "Connected: yes"; then
-                        connected="Yes"
+                    # Check if device is connected with timeout
+                    local device_info
+                    if ! device_info=$(timeout 3s bluetoothctl info "$device_mac" 2>/dev/null || true); then
+                        keychron_devices+=("Bluetooth: $device_name (timeout)")
+                    else
+                        keychron_devices+=("Bluetooth: $device_name")
                     fi
-                    keychron_devices+=("Bluetooth: $device_name ($device_mac) - Connected: $connected")
                 fi
             done <<< "$bt_devices"
         fi
@@ -401,6 +420,13 @@ install_keychron_software() {
 
 smart_peripheral_detection() {
     ui_info "Starting smart peripheral detection..."
+    
+    # Check if running in VM and skip intensive detection
+    if is_vm_environment; then
+        ui_warn "Virtual machine detected - using simplified peripheral detection"
+        ui_info "VM environments may not show all connected devices"
+        return 0
+    fi
     
     # Validate required commands are available
     local required_commands=("lsusb")

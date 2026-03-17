@@ -42,18 +42,31 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"  # Script directory
 CONFIGS_DIR="$SCRIPT_DIR/../configs"                           # Config files directory
 SCRIPTS_DIR="$SCRIPT_DIR"                                      # Scripts directory
 
-HELPER_UTILS=(base-devel bc bluez-utils cronie curl expac eza fastfetch flatpak fzf git openssh pacman-contrib plymouth rsync ufw zoxide)  # Helper utilities to install
-
 # : "${INSTALL_MODE:=default}"
 
 # Distribution detection
-IS_ENDEAVOUROS=false
 IS_ARCH=false
+FIREWALL_PREFERENCE="ufw"
 
 if [[ -f /etc/endeavouros-release ]]; then
-    IS_ENDEAVOUROS=true
+    FIREWALL_PREFERENCE="firewalld"
 elif [[ -f /etc/arch-release ]]; then
     IS_ARCH=true
+fi
+
+# Dynamic helper utilities based on distribution
+BASE_HELPER_UTILS=(base-devel bc bluez-utils cronie curl expac eza fastfetch flatpak fzf git openssh pacman-contrib plymouth rsync zoxide)
+FIREWALL_UTILS=(ufw)  # For Arch Linux
+
+# Build final HELPER_UTILS array
+HELPER_UTILS=("${BASE_HELPER_UTILS[@]}")
+
+# Only add firewall utilities if not on EndeavourOS (which uses firewalld)
+if [[ "$FIREWALL_PREFERENCE" != "firewalld" ]]; then
+    HELPER_UTILS+=("${FIREWALL_UTILS[@]}")
+    log_info "Firewall preference: UFW (Arch Linux)"
+else
+    log_info "Firewall preference: firewalld (EndeavourOS detected - UFW excluded)"
 fi
 
 # Ensure critical variables are defined
@@ -432,9 +445,20 @@ is_headless_system() {
 }
 
 show_menu() {
+  # Display detected OS information
+  local detected_os=""
+  if [[ -f /etc/endeavouros-release ]]; then
+    detected_os="EndeavourOS"
+  elif [[ -f /etc/arch-release ]]; then
+    detected_os="Arch Linux"
+  else
+    detected_os="Unknown"
+  fi
+  
   # Check if system is headless and only offer server mode
   if is_headless_system; then
     ui_warn "Headless system detected. Only Server mode is available."
+    echo -e "${GREEN}Your OS is: $detected_os${RESET}"
     INSTALL_MODE="server"
     print_header "Installation Mode" "Server - Headless server setup"
     return
@@ -464,6 +488,19 @@ validate_install_mode() {
 }
 
 show_gum_menu() {
+  # Display detected OS information
+  local detected_os=""
+  if [[ -f /etc/endeavouros-release ]]; then
+    detected_os="EndeavourOS"
+  elif [[ -f /etc/arch-release ]]; then
+    detected_os="Arch Linux"
+  else
+    detected_os="Unknown"
+  fi
+  
+  gum style --margin "1 0" --foreground 11 "Your OS is: $detected_os"
+  echo ""
+  
   gum style --margin "1 0" --foreground 226 "This script will transform your fresh Arch Linux installation into a"
   gum style --margin "0 0 1 0" --foreground 226 "fully configured, optimized system with all the tools you need!"
 
@@ -519,9 +556,21 @@ show_gum_menu() {
 }
 
 show_traditional_menu() {
+  # Display detected OS information
+  local detected_os=""
+  if [[ -f /etc/endeavouros-release ]]; then
+    detected_os="EndeavourOS"
+  elif [[ -f /etc/arch-release ]]; then
+    detected_os="Arch Linux"
+  else
+    detected_os="Unknown"
+  fi
+  
   echo -e "${CYAN}----------------------------------------------------------------${RESET}"
   echo -e "${CYAN}WELCOME TO ARCH INSTALLER${RESET}"
   echo -e "${CYAN}----------------------------------------------------------------${RESET}"
+  echo -e "${GREEN}Your OS is: $detected_os${RESET}"
+  echo ""
   echo -e "${YELLOW}This script will transform your fresh Arch Linux installation into a${RESET}"
   echo -e "${YELLOW}fully configured, optimized system with all the tools you need!${RESET}"
   echo ""

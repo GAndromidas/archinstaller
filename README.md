@@ -5,9 +5,9 @@
 [![Last Commit](https://img.shields.io/github/last-commit/GAndromidas/archinstaller.svg?style=for-the-badge)](https://github.com/GAndromidas/archinstaller/commits/main)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 
-**Professional Arch Linux & EndeavourOS Post-Installation Automation**
+**Professional Arch Linux Post-Installation Automation**
 
-Transform your minimal Arch Linux or EndeavourOS installation into a fully configured, optimized system with intelligent hardware detection and tailored optimizations.
+Transform your minimal Arch Linux installation into a fully configured, optimized system with intelligent hardware detection and tailored optimizations.
 
 [Installation](#-quick-start) • [Features](#-key-features) • [Modes](#-installation-modes)
 
@@ -156,7 +156,7 @@ Automatically detects connected peripherals and installs appropriate management 
 
 ### Base Systems
 - ✅ **Arch Linux** (primary)
-- ✅ **EndeavourOS** (Arch-based with firewalld preference)
+- ✅ **EndeavourOS** (silent compatibility - firewalld preference)
 - ✅ **Arch-based distributions** (tested)
 
 ---
@@ -165,7 +165,7 @@ Automatically detects connected peripherals and installs appropriate management 
 
 ### Prerequisites
 
-- **Fresh Arch Linux or EndeavourOS installation** (minimal base system)
+- **Fresh Arch Linux installation** (minimal base system)
 - **Active internet connection**
 - **User account with sudo privileges**
 - **2GB+ free disk space**

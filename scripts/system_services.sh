@@ -8,8 +8,8 @@ source "$SCRIPT_DIR/common.sh"
 setup_firewall_and_services() {
   step "Setting up firewall and services"
 
-  # First handle firewall setup - EndeavourOS prefers firewalld, Arch can use either
-  if [[ "$IS_ENDEAVOUROS" = true ]] || command -v firewalld >/dev/null 2>&1; then
+  # First handle firewall setup - prefer firewalld if available, otherwise use UFW
+  if [[ "$FIREWALL_PREFERENCE" = "firewalld" ]] || command -v firewalld >/dev/null 2>&1; then
     run_step "Configuring Firewalld" configure_firewalld
   else
     run_step "Configuring UFW" configure_ufw

@@ -70,13 +70,20 @@ install_yay() {
     ui_info "rate-mirrors is already installed, skipping installation"
     log_success "rate-mirrors already present on system"
   else
-    # Install rate-mirrors
-    if pacman -S --noconfirm rate-mirrors >/dev/null 2>&1; then
+    # Install rate-mirrors with error output for debugging
+    ui_info "Attempting to install rate-mirrors from official repositories..."
+    if pacman -S rate-mirrors; then
       log_success "rate-mirrors installed successfully"
     else
       log_error "Failed to install rate-mirrors"
-      # Continue with mirror update attempt anyway
       ui_warn "rate-mirrors installation failed, attempting mirror update anyway"
+      # Check if rate-mirrors command is available despite installation failure
+      if command -v rate-mirrors >/dev/null 2>&1; then
+        ui_info "rate-mirrors command is available despite installation failure"
+      else
+        ui_error "rate-mirrors command not found, cannot update mirrors"
+        return 1
+      fi
     fi
   fi
 
@@ -92,11 +99,13 @@ install_yay() {
     ui_info "Using Arch Linux mirrors"
   fi
   
-  if sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist "$mirror_repo" >/dev/null 2>&1; then
+  ui_info "Running: rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist $mirror_repo"
+  if sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist "$mirror_repo"; then
     log_success "Mirrorlist updated successfully with $mirror_repo mirrors"
   else
     log_error "Failed to update mirrorlist with $mirror_repo mirrors"
     ui_warn "Mirror update failed, but continuing installation"
+    ui_info "You can manually update mirrors later by running: sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist $mirror_repo"
   fi
 }
 

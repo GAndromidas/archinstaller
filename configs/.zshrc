@@ -69,7 +69,8 @@ export FZF_CTRL_R_OPTS="
 # -----------------------------------------------------------------------------
 alias sync='sudo pacman -Syy'                                                      # Sync package databases
 alias update='yay -Syyu && sudo flatpak update'                                    # Update all packages (Pacman, AUR, Flatpak)
-alias mirror='sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist arch && sudo pacman -Syy'  # Update mirror list
+# Smart mirror update alias - detects distribution automatically
+alias mirror='if [[ -f /etc/os-release ]] && grep -q '\''ID="endeavouros"'\'' /etc/os-release 2>/dev/null; then echo "Using EndeavourOS mirrors..." && sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist endeavour; else echo "Using Arch Linux mirrors..." && sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist arch; fi && sudo pacman -Syy'  # Update mirror list
 alias clean='sudo pacman -Sc --noconfirm && yay -Sc --noconfirm && sudo flatpak uninstall --unused && sudo pacman -Rns --noconfirm $(pacman -Qtdq) 2>/dev/null'  # Clean package cache and orphans
 alias cache='rm -rf ~/.cache/* && sudo paccache -r'                                # Clear user cache and old packages
 alias microcode='grep . /sys/devices/system/cpu/vulnerabilities/*'                 # Check CPU vulnerabilities

@@ -62,20 +62,30 @@ install_yay() {
   ui_info "Cleaning up temporary files..."
   cd - >/dev/null && rm -rf "$temp_dir"
 
-  # Install rate-mirrors to get the fastest mirrors
+  # Install rate-mirrors from official repositories to get the fastest mirrors
   step "Installing rate-mirrors"
-  if yay -S --noconfirm rate-mirrors-bin >/dev/null 2>&1; then
-    log_success "rate-mirrors-bin installed successfully"
+  if pacman -S --noconfirm rate-mirrors >/dev/null 2>&1; then
+    log_success "rate-mirrors installed successfully"
 
-    # Update mirrorlist
+    # Update mirrorlist with distribution-specific repositories
     step "Updating mirrorlist with rate-mirrors"
-    if sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist arch >/dev/null 2>&1; then
-      log_success "Mirrorlist updated successfully"
+    local mirror_repo="arch"
+    
+    # Use EndeavourOS mirrors if running on EndeavourOS
+    if [[ -f /etc/os-release ]] && grep -q 'ID="endeavouros"' /etc/os-release 2>/dev/null; then
+      mirror_repo="endeavour"
+      ui_info "Using EndeavourOS mirrors"
     else
-      log_error "Failed to update mirrorlist"
+      ui_info "Using Arch Linux mirrors"
+    fi
+    
+    if sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist "$mirror_repo" >/dev/null 2>&1; then
+      log_success "Mirrorlist updated successfully with $mirror_repo mirrors"
+    else
+      log_error "Failed to update mirrorlist with $mirror_repo mirrors"
     fi
   else
-    log_error "Failed to install rate-mirrors-bin"
+    log_error "Failed to install rate-mirrors"
   fi
 }
 

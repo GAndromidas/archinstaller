@@ -61,52 +61,6 @@ install_yay() {
   # Clean up
   ui_info "Cleaning up temporary files..."
   cd - >/dev/null && rm -rf "$temp_dir"
-
-  # Install rate-mirrors from official repositories to get the fastest mirrors
-  step "Installing rate-mirrors"
-  
-  # Check if rate-mirrors is already installed
-  if pacman -Qi rate-mirrors >/dev/null 2>&1; then
-    ui_info "rate-mirrors is already installed, skipping installation"
-    log_success "rate-mirrors already present on system"
-  else
-    # Install rate-mirrors with error output for debugging
-    ui_info "Attempting to install rate-mirrors from official repositories..."
-    if pacman -S rate-mirrors; then
-      log_success "rate-mirrors installed successfully"
-    else
-      log_error "Failed to install rate-mirrors"
-      ui_warn "rate-mirrors installation failed, attempting mirror update anyway"
-      # Check if rate-mirrors command is available despite installation failure
-      if command -v rate-mirrors >/dev/null 2>&1; then
-        ui_info "rate-mirrors command is available despite installation failure"
-      else
-        ui_error "rate-mirrors command not found, cannot update mirrors"
-        return 1
-      fi
-    fi
-  fi
-
-  # Update mirrorlist with distribution-specific repositories
-  step "Updating mirrorlist with rate-mirrors"
-  local mirror_repo="arch"
-  
-  # Use EndeavourOS mirrors if running on EndeavourOS
-  if [[ -f /etc/os-release ]] && grep -q 'ID="endeavouros"' /etc/os-release 2>/dev/null; then
-    mirror_repo="endeavour"
-    ui_info "Using EndeavourOS mirrors"
-  else
-    ui_info "Using Arch Linux mirrors"
-  fi
-  
-  ui_info "Running: rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist $mirror_repo"
-  if sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist "$mirror_repo"; then
-    log_success "Mirrorlist updated successfully with $mirror_repo mirrors"
-  else
-    log_error "Failed to update mirrorlist with $mirror_repo mirrors"
-    ui_warn "Mirror update failed, but continuing installation"
-    ui_info "You can manually update mirrors later by running: sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist $mirror_repo"
-  fi
 }
 
 # Execute yay installation

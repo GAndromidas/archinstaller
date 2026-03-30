@@ -56,7 +56,7 @@ elif [[ -f /etc/arch-release ]]; then
 fi
 
 # Dynamic helper utilities based on distribution
-BASE_HELPER_UTILS=(base-devel bc bluez-utils cronie curl expac eza fastfetch flatpak fzf git openssh pacman-contrib plymouth rsync zoxide)
+BASE_HELPER_UTILS=(base-devel bc bluez-utils cronie curl eza fastfetch flatpak fzf git openssh pacman-contrib plymouth rate-mirrors rsync zoxide)
 FIREWALL_UTILS=(ufw)  # For Arch Linux
 
 # Build final HELPER_UTILS array
@@ -427,6 +427,37 @@ is_vm_environment() {
     return 0
   else
     return 1
+  fi
+}
+
+# Function to update mirrors using rate-mirrors
+update_system_mirrors() {
+  ui_info "Updating system mirrors with rate-mirrors..."
+  
+  # Check if rate-mirrors is available
+  if ! command -v rate-mirrors >/dev/null 2>&1; then
+    ui_warn "rate-mirrors not available, skipping mirror update"
+    return 0
+  fi
+  
+  local mirror_repo="arch"
+  
+  # Use EndeavourOS mirrors if running on EndeavourOS
+  if [[ -f /etc/os-release ]] && grep -q 'ID="endeavouros"' /etc/os-release 2>/dev/null; then
+    mirror_repo="endeavour"
+    ui_info "Using EndeavourOS mirrors"
+  else
+    ui_info "Using Arch Linux mirrors"
+  fi
+  
+  ui_info "Running: rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist $mirror_repo && sudo pacman -Syy"
+  if sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist "$mirror_repo" && sudo pacman -Syy; then
+    log_success "System mirrors updated successfully with $mirror_repo mirrors and package databases synced"
+    ui_success "Fast mirrors configured and databases synced"
+  else
+    log_error "Failed to update system mirrors with $mirror_repo mirrors"
+    ui_warn "Mirror update failed, continuing with default mirrors"
+    ui_info "You can manually update mirrors later by running: sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist $mirror_repo && sudo pacman -Syy"
   fi
 }
 

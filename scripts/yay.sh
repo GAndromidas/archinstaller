@@ -64,28 +64,39 @@ install_yay() {
 
   # Install rate-mirrors from official repositories to get the fastest mirrors
   step "Installing rate-mirrors"
-  if pacman -S --noconfirm rate-mirrors >/dev/null 2>&1; then
-    log_success "rate-mirrors installed successfully"
-
-    # Update mirrorlist with distribution-specific repositories
-    step "Updating mirrorlist with rate-mirrors"
-    local mirror_repo="arch"
-    
-    # Use EndeavourOS mirrors if running on EndeavourOS
-    if [[ -f /etc/os-release ]] && grep -q 'ID="endeavouros"' /etc/os-release 2>/dev/null; then
-      mirror_repo="endeavour"
-      ui_info "Using EndeavourOS mirrors"
-    else
-      ui_info "Using Arch Linux mirrors"
-    fi
-    
-    if sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist "$mirror_repo" >/dev/null 2>&1; then
-      log_success "Mirrorlist updated successfully with $mirror_repo mirrors"
-    else
-      log_error "Failed to update mirrorlist with $mirror_repo mirrors"
-    fi
+  
+  # Check if rate-mirrors is already installed
+  if pacman -Qi rate-mirrors >/dev/null 2>&1; then
+    ui_info "rate-mirrors is already installed, skipping installation"
+    log_success "rate-mirrors already present on system"
   else
-    log_error "Failed to install rate-mirrors"
+    # Install rate-mirrors
+    if pacman -S --noconfirm rate-mirrors >/dev/null 2>&1; then
+      log_success "rate-mirrors installed successfully"
+    else
+      log_error "Failed to install rate-mirrors"
+      # Continue with mirror update attempt anyway
+      ui_warn "rate-mirrors installation failed, attempting mirror update anyway"
+    fi
+  fi
+
+  # Update mirrorlist with distribution-specific repositories
+  step "Updating mirrorlist with rate-mirrors"
+  local mirror_repo="arch"
+  
+  # Use EndeavourOS mirrors if running on EndeavourOS
+  if [[ -f /etc/os-release ]] && grep -q 'ID="endeavouros"' /etc/os-release 2>/dev/null; then
+    mirror_repo="endeavour"
+    ui_info "Using EndeavourOS mirrors"
+  else
+    ui_info "Using Arch Linux mirrors"
+  fi
+  
+  if sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist "$mirror_repo" >/dev/null 2>&1; then
+    log_success "Mirrorlist updated successfully with $mirror_repo mirrors"
+  else
+    log_error "Failed to update mirrorlist with $mirror_repo mirrors"
+    ui_warn "Mirror update failed, but continuing installation"
   fi
 }
 

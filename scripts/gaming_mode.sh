@@ -48,6 +48,8 @@ install_zen_kernel() {
 	# Check if Zen kernel is already installed
 	if pacman -Qi linux-zen &>/dev/null; then
 		ui_info "Zen Kernel is already installed. Skipping installation."
+		# Still configure P-state even if Zen is already installed
+		configure_amd_pstate
 		return 0
 	fi
 	
@@ -68,6 +70,9 @@ install_zen_kernel() {
 		if pacman_install_single "linux-zen-headers" true; then
 			GAMING_INSTALLED+=("linux-zen-headers")
 		fi
+		
+		# Configure AMD P-state after Zen kernel installation
+		configure_amd_pstate
 		
 		# Set Zen Kernel as default in bootloader
 		configure_zen_kernel_default
@@ -286,6 +291,92 @@ EOF
 	else
 		log_warning "Zen kernel not found in /boot. Skipping Limine Zen configuration."
 	fi
+}
+
+# Configure AMD P-state for optimal performance
+configure_amd_pstate() {
+	if ! check_amd_pstate; then
+		ui_info "AMD CPU not detected. Skipping P-state configuration."
+		return 0
+	fi
+	
+	ui_info "Configuring AMD P-state for optimal gaming performance..."
+	
+	# Check if Zen kernel is installed
+	if ! pacman -Qi linux-zen &>/dev/null; then
+		ui_info "Zen kernel not installed. P-state configuration requires Zen kernel."
+		return 0
+	fi
+	
+	# Create AMD P-state configuration
+	local pstate_conf="/etc/modprobe.d/amd-pstate.conf"
+	local pstate_defaults="/etc/default/amd-pstate"
+	
+	# Configure kernel parameters for AMD P-state
+	sudo tee "$pstate_conf" > /dev/null << EOF
+# AMD P-state configuration for optimal performance
+options amd_pstate=active
+EOF
+	
+	# Create systemd configuration for P-state
+	sudo mkdir -p "/etc/default"
+	sudo tee "$pstate_defaults" > /dev/null << EOF
+# AMD P-state default configuration
+# Set performance governor for gaming
+AMD_PSTATE_GOVERNOR="performance"
+
+# Enable P-state driver
+AMD_PSTATE_DRIVER="active"
+EOF
+	
+	# Update initramfs to include P-state configuration
+	if sudo mkinitcpio -P >/dev/null 2>&1; then
+		log_success "AMD P-state configuration applied and initramfs updated"
+	else
+		log_warning "Failed to update initramfs for P-state configuration"
+	fi
+	
+	# Configure CPU governor for current session
+	if command -v cpupower >/dev/null 2>&1; then
+		if sudo cpupower frequency-set -g performance >/dev/null 2>&1; then
+			log_success "CPU governor set to performance mode"
+		else
+			log_warning "Failed to set CPU governor to performance mode"
+		fi
+	else
+		ui_info "cpupower not available. Installing for CPU frequency control..."
+		if pacman_install_single "cpupower" true; then
+			if sudo cpupower frequency-set -g performance >/dev/null 2>&1; then
+				log_success "CPU governor set to performance mode"
+			fi
+		fi
+	fi
+	
+	# Create systemd service to set performance governor on boot
+	local pstate_service="/etc/systemd/system/amd-pstate-performance.service"
+	sudo tee "$pstate_service" > /dev/null << EOF
+[Unit]
+Description=Set AMD P-state performance governor
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/cpupower frequency-set -g performance
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+	
+	# Enable the service
+	if sudo systemctl daemon-reload && sudo systemctl enable amd-pstate-performance.service; then
+		log_success "AMD P-state performance service enabled"
+	else
+		log_warning "Failed to enable AMD P-state performance service"
+	fi
+	
+	ui_info "AMD P-state configured for optimal gaming performance"
+	ui_info "A reboot may be required to apply all P-state changes"
 }
 
 check_and_enable_multilib() {

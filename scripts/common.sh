@@ -79,15 +79,23 @@ fi
 # ===== Logging Functions =====
 
 # Log to both console and log file
+
 log_to_file() {
   echo "$1" >> "$INSTALL_LOG" 2>/dev/null || true
 }
 
 # Improved terminal output functions
+# ============================================================================
+# SECTION 2: LOGGING FUNCTIONS
+# ============================================================================
 clear_line() {
   echo -ne "\r\033[K"
 }
 
+
+# ============================================================================
+# SECTION 3: TERMINAL OUTPUT & UI FUNCTIONS
+# ============================================================================
 print_progress() {
   local current="$1"
   local total="$2"
@@ -270,6 +278,10 @@ print_unified_error() {
 }
 
 # Utility/Helper Functions
+
+# ============================================================================
+# SECTION 4: PROGRESS & TIMING FUNCTIONS
+# ============================================================================
 supports_gum() {
   command -v gum >/dev/null 2>&1
 }
@@ -310,6 +322,10 @@ ui_error() {
   fi
 }
 
+
+# ============================================================================
+# SECTION 5: UI STYLING FUNCTIONS (gum-based)
+# ============================================================================
 print_header() {
   local title="$1"; shift
   if supports_gum; then
@@ -359,64 +375,11 @@ EOF
 }
 
 # Enhanced resume functionality
-show_resume_menu() {
-  if [ -f "$STATE_FILE" ] && [ -s "$STATE_FILE" ]; then
-    echo ""
-    ui_info "Previous installation detected. The following steps were completed:"
-
-    local completed_steps=()
-    while IFS= read -r step; do
-      completed_steps+=("$step")
-    done < "$STATE_FILE"
-
-    if supports_gum; then
-      echo ""
-      gum style --margin "0 2" --foreground 15 "Completed steps:"
-      for step in "${completed_steps[@]}"; do
-        gum style --margin "0 4" --foreground 10 "✓ $step"
-      done
-
-      echo ""
-      if gum confirm --default=true "Resume installation from where you left off?"; then
-        ui_success "Resuming installation..."
-        return 0
-      else
-        if gum confirm --default=false "Start fresh installation (this will clear previous progress)?"; then
-          rm -f "$STATE_FILE" 2>/dev/null || true
-          ui_info "Starting fresh installation..."
-          return 0
-        else
-          ui_info "Installation cancelled by user"
-          exit 0
-        fi
-      fi
-    else
-      # Fallback for systems without gum
-      for step in "${completed_steps[@]}"; do
-        echo -e "  ${GREEN}✓${RESET} $step"
-      done
-
-      echo ""
-      read -r -p "Resume installation? [Y/n]: " response
-      response=${response,,}
-      if [[ "$response" == "n" || "$response" == "no" ]]; then
-        read -r -p "Start fresh installation? [y/N]: " response
-        response=${response,,}
-        if [[ "$response" == "y" || "$response" == "yes" ]]; then
-          rm -f "$STATE_FILE" 2>/dev/null || true
-          ui_info "Starting fresh installation..."
-        else
-          ui_info "Installation cancelled by user"
-          exit 0
-        fi
-      else
-        ui_success "Resuming installation..."
-      fi
-    fi
-  fi
-}
-
 # Function to check if running in VM environment
+
+# ============================================================================
+# SECTION 7: MENU & INSTALLATION MODE SELECTION
+# ============================================================================
 is_vm_environment() {
   # Check for common VM indicators
   if [[ -d /sys/class/dmi/id ]] && grep -q -i "vmware\|virtualbox\|qemu\|kvm\|hyper-v" /sys/class/dmi/id/product_name 2>/dev/null; then
@@ -490,6 +453,10 @@ is_headless_system() {
   return 0  # Headless
 }
 
+
+# ============================================================================
+# SECTION 6: DISPLAY & BANNER FUNCTIONS
+# ============================================================================
 show_menu() {
   # Display detected OS information - use /etc/os-release for EndeavourOS
   local detected_os=""
@@ -686,6 +653,10 @@ show_traditional_menu() {
 # Function: step
 # Description: Prints a step header and increments step counter
 # Parameters: $1 - Step description
+
+# ============================================================================
+# SECTION 9: UTILITY & HELPER FUNCTIONS
+# ============================================================================
 step() {
   local msg="\n${CYAN}> $1${RESET}"
   echo -e "$msg"
@@ -747,6 +718,10 @@ log_debug() {
 }
 
 # Check if a command exists
+
+# ============================================================================
+# SECTION 8: SYSTEM DETECTION & ENVIRONMENT FUNCTIONS
+# ============================================================================
 command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
@@ -888,6 +863,10 @@ run_step() {
 # Description: Generic package installer for pacman, AUR, or flatpak with better error context
 # Parameters: $1 - Package manager type (pacman|aur|flatpak), $@ - Packages to install
 # Returns: 0 on success, 1 if some packages failed
+
+# ============================================================================
+# SECTION 10: STEP EXECUTION & LOGGING
+# ============================================================================
 install_package_generic() {
   local pkg_manager="$1"
   shift
@@ -1043,12 +1022,13 @@ ui_header() {
     fi
 }
 
-supports_gum() {
-  command -v gum >/dev/null 2>&1
-}
 
 # Function for user confirmation with gum (or fallback)
 # Usage: gum_confirm "Your question?" "Optional description."
+
+# ============================================================================
+# SECTION 11: PACKAGE INSTALLATION FUNCTIONS
+# ============================================================================
 gum_confirm() {
     local question="$1"
     local description="${2:-}" # Default to empty string if not provided
@@ -1163,6 +1143,10 @@ prompt_reboot() {
 }
 
 # Pre-download package lists for faster installation
+
+# ============================================================================
+# SECTION 12: CONFIRMATION & USER INTERACTION
+# ============================================================================
 preload_package_lists() {
   step "Preloading package lists for faster installation"
   sudo pacman -Sy --noconfirm >/dev/null 2>&1
@@ -1205,9 +1189,6 @@ collect_custom_script_errors() {
 }
 
 # Check if command exists
-command_exists() {
-  command -v "$1" >/dev/null 2>&1
-}
 
 # Function: validate_file_operation
 # Description: Validates file system operations before performing them
@@ -1313,6 +1294,10 @@ install_packages_batch() {
 # Enhanced package installation functions with better error handling
 # These replace duplicate functions in individual scripts
 
+
+# ============================================================================
+# SECTION 13: SYSTEM UPDATE & OPTIMIZATION
+# ============================================================================
 pacman_install_single() {
   local pkg="$1"
   local verbose="${2:-false}"
@@ -1384,6 +1369,10 @@ flatpak_install_single() {
 }
 
 # Check if system uses Btrfs filesystem
+
+# ============================================================================
+# SECTION 14: SINGLE PACKAGE INSTALLATION WRAPPERS
+# ============================================================================
 is_btrfs_system() {
   findmnt -no FSTYPE / | grep -q btrfs
 }

@@ -446,7 +446,7 @@ if is_step_complete "system_preparation"; then
   ui_info "Step 1 (System Preparation) already completed - skipping"
 else
   print_step_header_with_timing 1 "$TOTAL_STEPS" "System Preparation"
-  ui_info "Updating package lists and installing system utilities..."
+  ui_info "Installing system utilities..."
   if step "System Preparation" && source "$SCRIPTS_DIR/system_preparation.sh"; then
     mark_step_complete_with_progress "system_preparation" "completed"
   else
@@ -468,7 +468,7 @@ if is_step_complete "shell_setup"; then
   ui_info "Step 2 (Shell Setup) already completed - skipping"
 else
   print_step_header_with_timing 2 "$TOTAL_STEPS" "Shell Setup"
-  ui_info "Installing ZSH shell with autocompletion and syntax highlighting..."
+  ui_info "Installing shell environment..."
   if step "Shell Setup" && source "$SCRIPTS_DIR/shell_setup.sh"; then
     mark_step_complete_with_progress "shell_setup" "completed"
   else
@@ -488,7 +488,7 @@ else
     ui_info "Step 3 (Plymouth Setup) already completed - skipping"
   else
     print_step_header_with_timing 3 "$TOTAL_STEPS" "Plymouth Setup"
-    ui_info "Setting up boot screen..."
+    ui_info "Configuring boot..."
     if step "Plymouth Setup" && source "$SCRIPTS_DIR/plymouth.sh"; then
       mark_step_complete_with_progress "plymouth_setup" "completed"
     else
@@ -505,7 +505,7 @@ if is_step_complete "yay_installation"; then
   ui_info "Step 4 (Yay Installation) already completed - skipping"
 else
   print_step_header_with_timing 4 "$TOTAL_STEPS" "Yay Installation"
-  ui_info "Installing AUR helper for additional software..."
+  ui_info "Installing AUR helper..."
   if step "Yay Installation" && source "$SCRIPTS_DIR/yay.sh"; then
     mark_step_complete_with_progress "yay_installation" "completed"
   else
@@ -522,7 +522,7 @@ if is_step_complete "programs_installation"; then
   ui_info "Step 5 (Programs Installation) already completed - skipping"
 else
   print_step_header_with_timing 5 "$TOTAL_STEPS" "Programs Installation"
-  ui_info "Installing applications based on your desktop environment..."
+  ui_info "Installing applications..."
   if step "Programs Installation" && source "$SCRIPTS_DIR/programs.sh"; then
     mark_step_complete_with_progress "programs_installation" "completed"
   else
@@ -539,7 +539,7 @@ if is_step_complete "peripheral_detection"; then
   ui_info "Step 6 (Smart Peripheral Detection) already completed - skipping"
 else
   print_step_header_with_timing 6 "$TOTAL_STEPS" "Smart Peripheral Detection"
-  ui_info "Detecting connected peripherals and installing appropriate software..."
+  ui_info "Detecting peripherals..."
   if step "Smart Peripheral Detection" && source "$SCRIPTS_DIR/peripheral_detection.sh" && smart_peripheral_detection; then
     mark_step_complete_with_progress "peripheral_detection" "completed"
   else
@@ -614,7 +614,7 @@ if is_step_complete "system_services"; then
   ui_info "Step 10 (System Services) already completed - skipping"
 else
   print_step_header_with_timing 10 "$TOTAL_STEPS" "System Services"
-  ui_info "Enabling and configuring system services..."
+  ui_info "Configuring services..."
   if step "System Services" && source "$SCRIPTS_DIR/system_services.sh"; then
     mark_step_complete_with_progress "system_services" "completed"
   else
@@ -631,7 +631,7 @@ if is_step_complete "maintenance"; then
   ui_info "Step 11 (Maintenance) already completed - skipping"
 else
   print_step_header_with_timing 11 "$TOTAL_STEPS" "Maintenance"
-  ui_info "Final cleanup and system optimization..."
+  ui_info "System optimization..."
   if step "Maintenance" && source "$SCRIPTS_DIR/maintenance.sh"; then
     mark_step_complete_with_progress "maintenance" "completed"
   else

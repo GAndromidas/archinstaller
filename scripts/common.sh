@@ -394,35 +394,28 @@ is_vm_environment() {
 }
 
 # Function to update mirrors using rate-mirrors
+# Function to update mirrors using rate-mirrors (optimized - silent operation)
 update_system_mirrors() {
-  ui_info "Updating system mirrors with rate-mirrors..."
-  
-  # Check if rate-mirrors is available
+  # Check if rate-mirrors is available (silent check)
   if ! command -v rate-mirrors >/dev/null 2>&1; then
-    ui_warn "rate-mirrors not available, skipping mirror update"
     return 0
   fi
   
   local mirror_repo="arch"
   
-  # Use EndeavourOS mirrors if running on EndeavourOS
+  # Detect mirror repo silently
   if [[ -f /etc/os-release ]] && grep -q 'ID="endeavouros"' /etc/os-release 2>/dev/null; then
     mirror_repo="endeavour"
-    ui_info "Using EndeavourOS mirrors"
-  else
-    ui_info "Using Arch Linux mirrors"
   fi
   
-  ui_info "Running: rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist $mirror_repo && sudo pacman -Syy"
-  if sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist "$mirror_repo" && sudo pacman -Syy; then
-    log_success "System mirrors updated successfully with $mirror_repo mirrors and package databases synced"
-    ui_success "Fast mirrors configured and databases synced"
-  else
-    log_error "Failed to update system mirrors with $mirror_repo mirrors"
-    ui_warn "Mirror update failed, continuing with default mirrors"
-    ui_info "You can manually update mirrors later by running: sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist $mirror_repo && sudo pacman -Syy"
-  fi
+  # Run mirror update silently in background - prevents terminal bloat
+  (sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist "$mirror_repo" 2>/dev/null && \
+   sudo pacman -Syy >/dev/null 2>&1) &
+  
+  # Return immediately without blocking
+  return 0
 }
+
 
 # Function to check if system is headless (no display manager or X server)
 is_headless_system() {

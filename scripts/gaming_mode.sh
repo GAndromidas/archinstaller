@@ -96,12 +96,16 @@ configure_zen_kernel_default() {
 	
 	# Detect bootloader type using the same detection logic as bootloader_config.sh
 	local BOOTLOADER=$(detect_bootloader)
+	ui_info "Detected bootloader: $BOOTLOADER"
 	
 	if [[ "$BOOTLOADER" = "systemd-boot" ]]; then
+		ui_info "Configuring systemd-boot for Zen kernel..."
 		configure_systemd_boot_zen
 	elif [[ "$BOOTLOADER" = "grub" ]]; then
+		ui_info "Configuring GRUB for Zen kernel..."
 		configure_grub_zen
 	elif [[ "$BOOTLOADER" = "limine" ]]; then
+		ui_info "Configuring Limine for Zen kernel..."
 		configure_limine_zen
 	else
 		ui_warn "No supported bootloader detected. Manual configuration may be required."
@@ -113,10 +117,15 @@ configure_systemd_boot_zen() {
 	local loader_conf="/boot/loader/loader.conf"
 	local entries_dir="/boot/loader/entries"
 	
+	ui_info "Configuring systemd-boot: $loader_conf, $entries_dir"
+	
 	# Find the best existing entry to copy from (handle date prefixes like 2026-04-01_linux.conf)
 	local existing_entry=""
 	local linux_entry=$(find "$entries_dir" -name "*_linux.conf" ! -name "*fallback*" ! -name "*zen*" | head -1)
 	local lts_entry=$(find "$entries_dir" -name "*_linux-lts.conf" ! -name "*fallback*" ! -name "*zen*" | head -1)
+	
+	ui_info "Found linux entry: $linux_entry"
+	ui_info "Found LTS entry: $lts_entry"
 	
 	# Prefer linux.conf over linux-lts.conf
 	if [[ -f "$linux_entry" ]]; then
@@ -128,6 +137,8 @@ configure_systemd_boot_zen() {
 		existing_entry=$(find "$entries_dir" -name "*.conf" ! -name "*fallback*" ! -name "*zen*" | head -1)
 	fi
 	
+	ui_info "Using existing entry: $existing_entry"
+	
 	if [[ -f "$existing_entry" ]]; then
 		# Extract ALL parameters from existing entry
 		local title=$(grep "^title " "$existing_entry" | sed 's/^title //')
@@ -135,6 +146,8 @@ configure_systemd_boot_zen() {
 		local initrd=$(grep "^initrd " "$existing_entry" | sed 's/^initrd //')
 		local options=$(grep "^options " "$existing_entry" | sed 's/^options //')
 		local machine_id=$(grep "^machine-id " "$existing_entry" | sed 's/^machine-id //' || echo "")
+		
+		ui_info "Creating linux-zen.conf with parameters from $(basename "$existing_entry")"
 		
 		# Create Zen kernel entry with EXACT same parameters, just changing kernel files
 		sudo tee "$entries_dir/linux-zen.conf" > /dev/null << EOF
@@ -157,6 +170,8 @@ EOF
 	
 	# Update loader.conf to set linux-zen.conf as default
 	if [[ -f "$loader_conf" ]]; then
+		ui_info "Updating loader.conf to set default to linux-zen.conf"
+		
 		# Backup existing loader.conf
 		sudo cp "$loader_conf" "${loader_conf}.backup.$(date +%Y%m%d_%H%M%S)"
 		
@@ -173,6 +188,9 @@ EOF
 				fi
 			done < "$loader_conf"
 		} | sudo tee "$loader_conf" > /dev/null
+		
+		ui_info "loader.conf updated. Contents:"
+		ui_info "$(cat "$loader_conf")"
 		
 		log_success "Set linux-zen.conf as default in loader.conf"
 	else

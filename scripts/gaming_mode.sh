@@ -19,6 +19,270 @@ flatpak_gaming_programs=()
 
 # ===== Local Helper Functions =====
 
+# Check if CPU supports AMD P-state
+check_amd_pstate() {
+	local cpu_vendor=$(grep -m1 'vendor_id' /proc/cpuinfo | awk '{print $3}')
+	local cpu_model=$(grep -m1 'model name' /proc/cpuinfo | cut -d':' -f2- | sed 's/^[ \t]*//')
+	
+	if [[ "$cpu_vendor" == "AuthenticAMD" ]]; then
+		# Check if AMD P-state driver is available or supported
+		if [[ -d "/sys/devices/system/cpu/cpufreq" ]] && grep -q "amd_pstate" /sys/devices/system/cpu/cpufreq/policy*/scaling_driver 2>/dev/null; then
+			ui_info "AMD CPU with P-state support detected: $cpu_model"
+			return 0
+		elif [[ -f "/sys/devices/system/cpu/amd_pstate/status" ]] || grep -q "amd_pstate" /proc/cpuinfo 2>/dev/null; then
+			ui_info "AMD CPU with P-state support detected: $cpu_model"
+			return 0
+		else
+			ui_info "AMD CPU detected but P-state support not confirmed: $cpu_model"
+			# Still return 0 for AMD CPUs as Zen kernel can enable P-state support
+			return 0
+		fi
+	fi
+	
+	ui_info "Non-AMD CPU detected: $cpu_model (Zen Kernel not required for Gaming Mode)"
+	return 1
+}
+
+# Install Zen Kernel for AMD systems
+install_zen_kernel() {
+	# Check if Zen kernel is already installed
+	if pacman -Qi linux-zen &>/dev/null; then
+		ui_info "Zen Kernel is already installed. Skipping installation."
+		return 0
+	fi
+	
+	# Check for AMD P-state support
+	if ! check_amd_pstate; then
+		ui_info "AMD CPU with P-state support not detected. Skipping Zen Kernel installation."
+		ui_info "Other gaming optimizations will still be installed."
+		return 0
+	fi
+	
+	ui_info "Installing Zen Kernel for optimal AMD P-state performance..."
+	
+	if pacman_install_single "linux-zen" true; then
+		GAMING_INSTALLED+=("linux-zen")
+		log_success "Zen Kernel installed successfully"
+		
+		# Install headers for module compilation
+		if pacman_install_single "linux-zen-headers" true; then
+			GAMING_INSTALLED+=("linux-zen-headers")
+		fi
+		
+		# Set Zen Kernel as default in bootloader
+		configure_zen_kernel_default
+		return 0
+	else
+		log_error "Failed to install Zen Kernel"
+		GAMING_ERRORS+=("linux-zen")
+		return 1
+	fi
+}
+
+# Configure bootloader to use Zen Kernel as default
+configure_zen_kernel_default() {
+	step "Configuring Zen Kernel as default boot option"
+	
+	# Detect bootloader type using the same detection logic as bootloader_config.sh
+	local BOOTLOADER=$(detect_bootloader)
+	
+	if [[ "$BOOTLOADER" = "systemd-boot" ]]; then
+		configure_systemd_boot_zen
+	elif [[ "$BOOTLOADER" = "grub" ]]; then
+		configure_grub_zen
+	elif [[ "$BOOTLOADER" = "limine" ]]; then
+		configure_limine_zen
+	else
+		ui_warn "No supported bootloader detected. Manual configuration may be required."
+	fi
+}
+
+# Configure systemd-boot for Zen Kernel
+configure_systemd_boot_zen() {
+	local loader_conf="/boot/loader/loader.conf"
+	local entries_dir="/boot/loader/entries"
+	
+	# Backup existing loader.conf
+	if [[ -f "$loader_conf" ]]; then
+		sudo cp "$loader_conf" "${loader_conf}.backup.$(date +%Y%m%d_%H%M%S)"
+	fi
+	
+	# Update loader.conf to default to Zen kernel
+	sudo tee "$loader_conf" > /dev/null << EOF
+default linux-zen.conf
+timeout 3
+console-mode max
+EOF
+	
+	# Find existing entry to copy parameters from
+	local existing_entry=$(find "$entries_dir" -name "linux*.conf" ! -name "*fallback*" ! -name "*zen*" | head -1)
+	
+	if [[ -f "$existing_entry" ]]; then
+		# Extract parameters from existing entry
+		local options=$(grep "^options " "$existing_entry" | sed 's/^options //')
+		local machine_id=$(grep "^machine-id " "$existing_entry" | sed 's/^machine-id //')
+		
+		# Ensure Plymouth parameters are included for proper boot animation
+		if [[ "$options" != *"quiet"* ]]; then
+			options="quiet $options"
+		fi
+		if [[ "$options" != *"splash"* ]]; then
+			options="$options splash"
+		fi
+		if [[ "$options" != *"loglevel=3"* ]]; then
+			options="$options loglevel=3"
+		fi
+		if [[ "$options" != *"systemd.show_status=auto"* ]]; then
+			options="$options systemd.show_status=auto"
+		fi
+		if [[ "$options" != *"rd.udev.log_level=3"* ]]; then
+			options="$options rd.udev.log_level=3"
+		fi
+		if [[ "$options" != *"plymouth.ignore-serial-consoles"* ]]; then
+			options="$options plymouth.ignore-serial-consoles"
+		fi
+		
+		# Create Zen kernel entry with enhanced Plymouth parameters
+		sudo tee "$entries_dir/linux-zen.conf" > /dev/null << EOF
+title   Arch Linux (Zen Kernel)
+linux   /vmlinuz-linux-zen
+initrd  /initramfs-linux-zen.img
+options $options
+EOF
+		
+		if [[ -n "$machine_id" ]]; then
+			echo "machine-id $machine_id" | sudo tee -a "$entries_dir/linux-zen.conf" > /dev/null
+		fi
+		
+		log_success "Created systemd-boot entry for Zen Kernel with Plymouth support"
+	else
+		log_warning "Could not find existing boot entry to copy parameters from"
+		# Create a basic entry with Plymouth support
+		local root_uuid=$(findmnt -n -o UUID / 2>/dev/null || echo "")
+		if [[ -n "$root_uuid" ]]; then
+			sudo tee "$entries_dir/linux-zen.conf" > /dev/null << EOF
+title   Arch Linux (Zen Kernel)
+linux   /vmlinuz-linux-zen
+initrd  /initramfs-linux-zen.img
+options root=UUID=$root_uuid rw quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 plymouth.ignore-serial-consoles
+EOF
+			log_success "Created basic systemd-boot entry for Zen Kernel with Plymouth support"
+		fi
+	fi
+}
+
+# Configure GRUB for Zen Kernel with Plymouth support
+configure_grub_zen() {
+	# GRUB automatically detects installed kernels, but we need to ensure Plymouth parameters are set
+	if [[ -f "/etc/default/grub" ]]; then
+		# Ensure GRUB is configured to save the default
+		sudo sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=saved/' /etc/default/grub
+		sudo sed -i 's/^GRUB_SAVEDEFAULT=.*/GRUB_SAVEDEFAULT=true/' /etc/default/grub
+		
+		# Ensure Plymouth parameters are set for all kernels including Zen
+		sudo sed -i 's@^GRUB_CMDLINE_LINUX_DEFAULT=.*@GRUB_CMDLINE_LINUX_DEFAULT="quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 plymouth.ignore-serial-consoles"@' /etc/default/grub || \
+			echo 'GRUB_CMDLINE_LINUX_DEFAULT="quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 plymouth.ignore-serial-consoles"' | sudo tee -a /etc/default/grub >/dev/null
+		
+		# Enable submenu for additional kernels (linux-lts, linux-zen)
+		grep -q '^GRUB_DISABLE_SUBMENU=' /etc/default/grub && sudo sed -i 's/^GRUB_DISABLE_SUBMENU=.*/GRUB_DISABLE_SUBMENU=notlinux/' /etc/default/grub || \
+			echo 'GRUB_DISABLE_SUBMENU=notlinux' | sudo tee -a /etc/default/grub >/dev/null
+		
+		# Regenerate GRUB config to include Zen kernel with Plymouth support
+		if sudo grub-mkconfig -o /boot/grub/grub.cfg >/dev/null 2>&1; then
+			log_success "GRUB configured for Zen Kernel with Plymouth support"
+		else
+			log_error "Failed to regenerate GRUB configuration"
+		fi
+	fi
+}
+
+# Configure Limine bootloader for Zen Kernel with Plymouth support
+configure_limine_zen() {
+	local limine_config="/boot/limine.conf"
+	
+	# Backup existing configuration
+	if [[ -f "$limine_config" ]]; then
+		sudo cp "$limine_config" "${limine_config}.backup.$(date +%Y%m%d_%H%M%S)"
+	fi
+	
+	# Get root filesystem information
+	local root_uuid=""
+	root_uuid=$(findmnt -n -o UUID / 2>/dev/null || echo "")
+	
+	if [[ -z "$root_uuid" ]]; then
+		log_error "Could not determine root UUID for Limine configuration"
+		return 1
+	fi
+	
+	# Build kernel command line with Plymouth support
+	local cmdline="root=UUID=$root_uuid rw quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 plymouth.ignore-serial-consoles"
+	
+	# Add filesystem-specific options
+	local root_fstype=$(findmnt -n -o FSTYPE / 2>/dev/null || echo "")
+	case "$root_fstype" in
+		btrfs)
+			local root_subvol=$(findmnt -n -o OPTIONS / | grep -o 'subvol=[^,]*' | cut -d= -f2 || echo "/@")
+			cmdline="$cmdline rootflags=subvol=$root_subvol"
+			;;
+		ext4)
+			cmdline="$cmdline rootflags=relatime"
+			;;
+	esac
+	
+	# Check if Zen kernel is installed
+	if [[ -f "/boot/vmlinuz-linux-zen" ]] && [[ -f "/boot/initramfs-linux-zen.img" ]]; then
+		# Add Zen kernel entry to existing or new limine.conf
+		if [[ -f "$limine_config" ]]; then
+			# Check if Zen entry already exists
+			if grep -q "vmlinuz-linux-zen" "$limine_config"; then
+				log_info "Zen kernel entry already exists in limine.conf"
+				return 0
+			fi
+			
+			# Append Zen kernel entry to existing config
+			cat << EOF | sudo tee -a "$limine_config" > /dev/null
+
+/Arch Linux (Zen Kernel)
+protocol: linux
+path: boot():/vmlinuz-linux-zen
+cmdline: $cmdline
+module_path: boot():/initramfs-linux-zen.img
+EOF
+		else
+			# Create new limine.conf with Zen kernel as default
+			cat << EOF | sudo tee "$limine_config" > /dev/null
+# Limine Bootloader Configuration
+# Generated by archinstaller
+
+timeout: 3
+interface_resolution: 1024x768
+
+/Arch Linux (Zen Kernel)
+protocol: linux
+path: boot():/vmlinuz-linux-zen
+cmdline: $cmdline
+module_path: boot():/initramfs-linux-zen.img
+
+EOF
+			
+			# Add standard kernel entry as fallback
+			if [[ -f "/boot/vmlinuz-linux" ]] && [[ -f "/boot/initramfs-linux.img" ]]; then
+				cat << EOF | sudo tee -a "$limine_config" > /dev/null
+/Arch Linux
+protocol: linux
+path: boot():/vmlinuz-linux
+cmdline: $cmdline
+module_path: boot():/initramfs-linux.img
+EOF
+			fi
+		fi
+		
+		log_success "Added Zen Kernel entry to Limine bootloader with Plymouth support"
+	else
+		log_warning "Zen kernel not found in /boot. Skipping Limine Zen configuration."
+	fi
+}
+
 check_and_enable_multilib() {
 	local needs_sync=false
 
@@ -194,6 +458,9 @@ main() {
 
 	# Crucial: Ensure multilib is actually working before attempting to install steam/wine
 	check_and_enable_multilib
+
+	# Install Zen Kernel for AMD systems with P-state support
+	install_zen_kernel
 
 	install_pacman_packages
 	install_flatpak_packages

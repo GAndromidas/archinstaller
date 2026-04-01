@@ -102,47 +102,30 @@ configure_systemd_boot_zen() {
 	local loader_conf="/boot/loader/loader.conf"
 	local entries_dir="/boot/loader/entries"
 	
-	# Backup existing loader.conf
-	if [[ -f "$loader_conf" ]]; then
-		sudo cp "$loader_conf" "${loader_conf}.backup.$(date +%Y%m%d_%H%M%S)"
+	# Find the best existing entry to copy from (handle date prefixes like 2026-04-01_linux.conf)
+	local existing_entry=""
+	local linux_entry=$(find "$entries_dir" -name "*_linux.conf" ! -name "*fallback*" ! -name "*zen*" | head -1)
+	local lts_entry=$(find "$entries_dir" -name "*_linux-lts.conf" ! -name "*fallback*" ! -name "*zen*" | head -1)
+	
+	# Prefer linux.conf over linux-lts.conf
+	if [[ -f "$linux_entry" ]]; then
+		existing_entry="$linux_entry"
+	elif [[ -f "$lts_entry" ]]; then
+		existing_entry="$lts_entry"
+	else
+		# Fallback to any non-fallback, non-zen entry
+		existing_entry=$(find "$entries_dir" -name "*.conf" ! -name "*fallback*" ! -name "*zen*" | head -1)
 	fi
 	
-	# Update loader.conf to default to Zen kernel
-	sudo tee "$loader_conf" > /dev/null << EOF
-default linux-zen.conf
-timeout 3
-console-mode max
-EOF
-	
-	# Find existing entry to copy parameters from
-	local existing_entry=$(find "$entries_dir" -name "linux*.conf" ! -name "*fallback*" ! -name "*zen*" | head -1)
-	
 	if [[ -f "$existing_entry" ]]; then
-		# Extract parameters from existing entry
+		# Extract ALL parameters from existing entry
+		local title=$(grep "^title " "$existing_entry" | sed 's/^title //')
+		local linux=$(grep "^linux " "$existing_entry" | sed 's/^linux //')
+		local initrd=$(grep "^initrd " "$existing_entry" | sed 's/^initrd //')
 		local options=$(grep "^options " "$existing_entry" | sed 's/^options //')
-		local machine_id=$(grep "^machine-id " "$existing_entry" | sed 's/^machine-id //')
+		local machine_id=$(grep "^machine-id " "$existing_entry" | sed 's/^machine-id //' || echo "")
 		
-		# Ensure Plymouth parameters are included for proper boot animation
-		if [[ "$options" != *"quiet"* ]]; then
-			options="quiet $options"
-		fi
-		if [[ "$options" != *"splash"* ]]; then
-			options="$options splash"
-		fi
-		if [[ "$options" != *"loglevel=3"* ]]; then
-			options="$options loglevel=3"
-		fi
-		if [[ "$options" != *"systemd.show_status=auto"* ]]; then
-			options="$options systemd.show_status=auto"
-		fi
-		if [[ "$options" != *"rd.udev.log_level=3"* ]]; then
-			options="$options rd.udev.log_level=3"
-		fi
-		if [[ "$options" != *"plymouth.ignore-serial-consoles"* ]]; then
-			options="$options plymouth.ignore-serial-consoles"
-		fi
-		
-		# Create Zen kernel entry with enhanced Plymouth parameters
+		# Create Zen kernel entry with EXACT same parameters, just changing kernel files
 		sudo tee "$entries_dir/linux-zen.conf" > /dev/null << EOF
 title   Arch Linux (Zen Kernel)
 linux   /vmlinuz-linux-zen
@@ -150,24 +133,42 @@ initrd  /initramfs-linux-zen.img
 options $options
 EOF
 		
+		# Add machine-id if it existed in original
 		if [[ -n "$machine_id" ]]; then
 			echo "machine-id $machine_id" | sudo tee -a "$entries_dir/linux-zen.conf" > /dev/null
 		fi
 		
-		log_success "Created systemd-boot entry for Zen Kernel with Plymouth support"
+		log_success "Created systemd-boot entry for Zen Kernel with exact same parameters as $(basename "$existing_entry")"
 	else
 		log_warning "Could not find existing boot entry to copy parameters from"
-		# Create a basic entry with Plymouth support
-		local root_uuid=$(findmnt -n -o UUID / 2>/dev/null || echo "")
-		if [[ -n "$root_uuid" ]]; then
-			sudo tee "$entries_dir/linux-zen.conf" > /dev/null << EOF
-title   Arch Linux (Zen Kernel)
-linux   /vmlinuz-linux-zen
-initrd  /initramfs-linux-zen.img
-options root=UUID=$root_uuid rw quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 plymouth.ignore-serial-consoles
-EOF
-			log_success "Created basic systemd-boot entry for Zen Kernel with Plymouth support"
+		return 1
+	fi
+	
+	# Update loader.conf to set linux-zen.conf as default
+	if [[ -f "$loader_conf" ]]; then
+		# Backup existing loader.conf
+		sudo cp "$loader_conf" "${loader_conf}.backup.$(date +%Y%m%d_%H%M%S)"
+		
+		# Remove existing default line and add new one at the top
+		sudo sed -i '/^default /d' "$loader_conf"
+		sudo sed -i '1i default linux-zen.conf' "$loader_conf"
+		
+		# Ensure timeout and console-mode are set correctly
+		sudo sed -i 's/^timeout.*/timeout 3/' "$loader_conf"
+		sudo sed -i 's/^console-mode.*/console-mode max/' "$loader_conf"
+		
+		# Add timeout and console-mode if they don't exist
+		if ! grep -q '^timeout' "$loader_conf"; then
+			echo "timeout 3" | sudo tee -a "$loader_conf" > /dev/null
 		fi
+		if ! grep -q '^console-mode' "$loader_conf"; then
+			echo "console-mode max" | sudo tee -a "$loader_conf" > /dev/null
+		fi
+		
+		log_success "Set linux-zen.conf as default in loader.conf"
+	else
+		log_error "loader.conf not found"
+		return 1
 	fi
 }
 

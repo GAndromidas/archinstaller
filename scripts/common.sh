@@ -393,7 +393,6 @@ is_vm_environment() {
   fi
 }
 
-# Function to update mirrors using rate-mirrors
 # Function to update mirrors using rate-mirrors (optimized - silent operation)
 update_system_mirrors() {
   # Check if rate-mirrors is available (silent check)
@@ -408,9 +407,9 @@ update_system_mirrors() {
     mirror_repo="endeavour"
   fi
   
-  # Run mirror update silently in background - prevents terminal bloat
-  (sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist "$mirror_repo" 2>/dev/null && \
-   sudo pacman -Syy >/dev/null 2>&1) &
+  # Run mirror update completely silently in background
+  # Redirect all output to /dev/null to prevent any terminal output
+  nohup bash -c "sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist '$mirror_repo' >/dev/null 2>&1 && sudo pacman -Syy >/dev/null 2>&1" >/dev/null 2>&1 &
   
   # Return immediately without blocking
   return 0

@@ -141,17 +141,30 @@ aur:
 desktop_environments:
   kde:
     install:
+      - bluedevil
+      - discover
+      - flatpak-kcm
       - gwenview
+      - kde-gtk-config
       - kdeconnect
+      - kdeplasma-addons
+      - kinfocenter
       - kio-admin
+      - kscreen
       - kwalletmanager
       - kvantum
       - okular
+      - plasma-firewall
+      - plasma-nm
+      - plasma-pa
+      - plasma-systemmonitor
+      - powerdevil
       - python-pyqt5
       - python-pyqt6
       - qbittorrent
       - spectacle
       - smplayer
+      - xdg-desktop-portal-kde
     remove:
       - htop
   gnome:

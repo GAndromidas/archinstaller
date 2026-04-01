@@ -142,6 +142,7 @@ desktop_environments:
   kde:
     install:
       - bluedevil
+      - breeze-gtk
       - discover
       - flatpak-kcm
       - gwenview
@@ -159,7 +160,6 @@ desktop_environments:
       - plasma-pa
       - plasma-systemmonitor
       - powerdevil
-      - python-pyqt5
       - python-pyqt6
       - qbittorrent
       - spectacle

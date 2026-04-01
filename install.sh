@@ -179,7 +179,9 @@ fi
 export INSTALL_MODE
 
 # Show resume menu if previous installation detected
-show_resume_menu
+if [ -f "$STATE_FILE" ] && [ -s "$STATE_FILE" ]; then
+  show_resume_menu
+fi
 
 # Dry-run mode banner
 if [ "$DRY_RUN" = true ]; then

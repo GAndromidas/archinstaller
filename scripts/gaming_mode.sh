@@ -535,24 +535,10 @@ main() {
 
 	local description="This includes popular tools like Discord, Steam, Wine, GameMode, MangoHud, Goverlay, Heroic Games Launcher, and more."
 	
-	# Interactive gum menu with Yes as default
-	if supports_gum; then
-		echo ""
-		gum style --margin "0 2" --foreground 226 "Enable Gaming Mode?"
-		gum style --margin "0 2" --foreground 250 "$description"
-		echo ""
-		
-		local choice=$(gum choose --selected="Yes" "Yes" "No")
-		if [[ "$choice" != "Yes" ]]; then
-			ui_info "Gaming Mode skipped."
-			return 0
-		fi
-	else
-		# Fallback to original gum_confirm if gum choose not available
-		if ! gum_confirm "Enable Gaming Mode?" "$description"; then
-			ui_info "Gaming Mode skipped."
-			return 0
-		fi
+	# Use the same robust gum_confirm pattern as other scripts
+	if ! gum_confirm "Enable Gaming Mode?" "$description"; then
+		ui_info "Gaming Mode skipped."
+		return 0
 	fi
 
 	ui_success "Gaming Mode enabled! Installing gaming packages and optimizations..."

@@ -81,6 +81,12 @@ install_zen_kernel() {
 
 # Configure bootloader to use Zen Kernel as default
 configure_zen_kernel_default() {
+	# First check if Zen kernel is actually installed
+	if ! pacman -Qi linux-zen &>/dev/null; then
+		ui_info "Zen kernel not installed. Skipping bootloader configuration."
+		return 0
+	fi
+	
 	step "Configuring Zen Kernel as default boot option"
 	
 	# Detect bootloader type using the same detection logic as bootloader_config.sh
@@ -149,21 +155,19 @@ EOF
 		# Backup existing loader.conf
 		sudo cp "$loader_conf" "${loader_conf}.backup.$(date +%Y%m%d_%H%M%S)"
 		
-		# Remove existing default line and add new one at the top
-		sudo sed -i '/^default /d' "$loader_conf"
-		sudo sed -i '1i default linux-zen.conf' "$loader_conf"
-		
-		# Ensure timeout and console-mode are set correctly
-		sudo sed -i 's/^timeout.*/timeout 3/' "$loader_conf"
-		sudo sed -i 's/^console-mode.*/console-mode max/' "$loader_conf"
-		
-		# Add timeout and console-mode if they don't exist
-		if ! grep -q '^timeout' "$loader_conf"; then
-			echo "timeout 3" | sudo tee -a "$loader_conf" > /dev/null
-		fi
-		if ! grep -q '^console-mode' "$loader_conf"; then
-			echo "console-mode max" | sudo tee -a "$loader_conf" > /dev/null
-		fi
+		# Create new loader.conf with proper structure
+		{
+			echo "default linux-zen.conf"
+			echo "timeout 3"
+			echo "console-mode max"
+			
+			# Preserve any other lines that aren't default, timeout, or console-mode
+			while IFS= read -r line; do
+				if [[ ! "$line" =~ ^default ]] && [[ ! "$line" =~ ^timeout ]] && [[ ! "$line" =~ ^console-mode ]]; then
+					echo "$line"
+				fi
+			done < "$loader_conf"
+		} | sudo tee "$loader_conf" > /dev/null
 		
 		log_success "Set linux-zen.conf as default in loader.conf"
 	else

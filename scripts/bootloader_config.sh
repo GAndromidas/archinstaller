@@ -47,17 +47,38 @@ configure_boot() {
   run_step "Adding kernel parameters to systemd-boot entries" add_systemd_boot_kernel_params
 
   if [ -f "/boot/loader/loader.conf" ]; then
-    sudo sed -i \
-      -e '/^default /d' \
-      -e '1i default @saved' \
-      -e 's/^timeout.*/timeout 3/' \
-      -e 's/^[#]*console-mode[[:space:]]\+.*/console-mode max/' \
-      /boot/loader/loader.conf
-
-    run_step "Ensuring timeout is set in loader.conf" \
-        grep -q '^timeout' /boot/loader/loader.conf || echo "timeout 3" | sudo tee -a /boot/loader/loader.conf >/dev/null
-    run_step "Ensuring console-mode is set in loader.conf" \
-        grep -q '^console-mode' /boot/loader/loader.conf || echo "console-mode max" | sudo tee -a /boot/loader/loader.conf >/dev/null
+    # Remove zen kernel configuration from gaming_mode.sh to avoid duplication
+  if [[ "$is_gaming_mode" == "true" && "$zen_kernel_installed" == "true" ]]; then
+    ui_info "Zen kernel configuration handled in step 8 - removing from gaming mode"
+    # Remove any zen kernel configuration that might have been set by gaming_mode.sh
+    if [[ -f "/boot/loader/entries/linux-zen.conf" ]]; then
+      ui_info "Updating existing zen kernel entry with optimized settings"
+    fi
+  else
+    ui_info "Standard bootloader configuration applied"
+  fi
+    # Keep original behavior for standard mode or when zen kernel exists without gaming mode
+      sudo sed -i \
+        -e '/^default /d' \
+        -e '1i default @saved' \
+        /boot/loader/loader.conf
+      ui_info "Keeping default boot behavior (not gaming mode or zen kernel not installed)"
+    fi
+    
+    # Set timeout 3 for gaming mode, 5s for standard mode
+    if [[ "$is_gaming_mode" == "true" ]]; then
+      sudo sed -i \
+        -e 's/^timeout.*/timeout 3/' \
+        -e 's/^[#]*console-mode[[:space:]]\+.*/console-mode max/' \
+        /boot/loader/loader.conf
+      ui_info "Set timeout to 3s and console-mode to max for gaming"
+    else
+      sudo sed -i \
+        -e 's/^timeout.*/timeout 5/' \
+        -e 's/^[#]*console-mode[[:space:]]\+.*/console-mode keep/' \
+        /boot/loader/loader.conf
+      ui_info "Set timeout to 5s and console-mode to keep for standard mode"
+    fi
   else
     log_warning "loader.conf not found. Skipping loader.conf configuration for systemd-boot."
   fi
@@ -71,11 +92,21 @@ IS_BTRFS=$(is_btrfs_system && echo "true" || echo "false")
 
 # --- GRUB configuration ---
 configure_grub() {
-    step "Configuring GRUB: set default kernel to 'linux'"
+    step "Configuring GRUB"
 
-    # /etc/default/grub settings
-    sudo sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=3/' /etc/default/grub || echo 'GRUB_TIMEOUT=3' | sudo tee -a /etc/default/grub >/dev/null
-    sudo sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=saved/' /etc/default/grub || echo 'GRUB_DEFAULT=saved' | sudo tee -a /etc/default/grub >/dev/null
+    # Smart GRUB configuration based on mode
+    if [[ "$is_gaming_mode" == "true" && "$zen_kernel_installed" == "true" ]]; then
+      step "Configuring GRUB for Gaming Mode with Zen Kernel"
+      # Set zen kernel as default for gaming
+      sudo sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=0/' /etc/default/grub || echo 'GRUB_DEFAULT=0' | sudo tee -a /etc/default/grub >/dev/null
+      ui_info "Set GRUB to boot first kernel (Zen) for gaming"
+    else
+      step "Configuring GRUB: set default kernel to 'linux'"
+      # Use saved/default behavior for standard mode
+      sudo sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=saved/' /etc/default/grub || echo 'GRUB_DEFAULT=saved' | sudo tee -a /etc/default/grub >/dev/null
+      ui_info "Using standard GRUB configuration (not gaming mode or zen kernel not installed)"
+    fi
+
     grep -q '^GRUB_SAVEDEFAULT=' /etc/default/grub && sudo sed -i 's/^GRUB_SAVEDEFAULT=.*/GRUB_SAVEDEFAULT=true/' /etc/default/grub || echo 'GRUB_SAVEDEFAULT=true' | sudo tee -a /etc/default/grub >/dev/null
     sudo sed -i 's@^GRUB_CMDLINE_LINUX_DEFAULT=.*@GRUB_CMDLINE_LINUX_DEFAULT="quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 plymouth.ignore-serial-consoles"@' /etc/default/grub || \
         echo 'GRUB_CMDLINE_LINUX_DEFAULT="quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 plymouth.ignore-serial-consoles"' | sudo tee -a /etc/default/grub >/dev/null
@@ -160,18 +191,46 @@ configure_limine_basic() {
 timeout: 3
 interface_resolution: 1024x768
 
-/Arch Linux
+EOF
+  
+  # Add kernels in smart order (Zen first for gaming mode ONLY)
+  local kernels_added=()
+  
+  # Zen kernel first if gaming mode AND zen kernel installed
+  if [[ "$is_gaming_mode" == "true" && "$zen_kernel_installed" == "true" ]]; then
+    if [[ -f "/boot/vmlinuz-linux-zen" ]] && [[ -f "/boot/initramfs-linux-zen.img" ]]; then
+      cat << EOF | sudo tee -a "$limine_config" > /dev/null
+
+Arch Linux (Zen Kernel)
+protocol: linux
+path: boot():/vmlinuz-linux-zen
+cmdline: $cmdline
+module_path: boot():/initramfs-linux-zen.img
+EOF
+      kernels_added+=("zen")
+      ui_info "Added Zen kernel entry to Limine (gaming mode)"
+    fi
+  fi
+  
+  # Standard kernel (always added)
+  if [[ -f "/boot/vmlinuz-linux" ]] && [[ -f "/boot/initramfs-linux.img" ]]; then
+    cat << EOF | sudo tee -a "$limine_config" > /dev/null
+
+Arch Linux
 protocol: linux
 path: boot():/vmlinuz-linux
 cmdline: $cmdline
 module_path: boot():/initramfs-linux.img
 EOF
+    kernels_added+=("standard")
+    ui_info "Added standard kernel entry to Limine"
+  fi
   
   # Add LTS kernel entry if available
-  if [ -f "/boot/vmlinuz-linux-lts" ] && [ -f "/boot/initramfs-linux-lts.img" ]; then
+  if [[ -f "/boot/vmlinuz-linux-lts" ]] && [[ -f "/boot/initramfs-linux-lts.img" ]]; then
     cat << EOF | sudo tee -a "$limine_config" > /dev/null
 
-/Arch Linux (LTS)
+Arch Linux (LTS)
 protocol: linux
 path: boot():/vmlinuz-linux-lts
 cmdline: $cmdline
@@ -194,14 +253,21 @@ EOF
     fi
   done
   
-  log_success "Simple Limine configuration completed"
+  if [[ "$is_gaming_mode" == "true" && "$zen_kernel_installed" == "true" ]]; then
+    log_success "GRUB configured for Gaming Mode with Zen kernel as default"
+  else
+    log_success "GRUB configured to remember the last chosen boot entry."
+  fi
   log_info "Configuration file: $limine_config"
+  log_info "Kernels configured: ${kernels_added[*]}"
   log_warning "Note: Snapshot support removed for stability - use GRUB or systemd-boot for snapshots"
 }
 
 # --- Console Font Setup ---
 setup_console_font() {
-    run_step "Installing console font" sudo pacman -S --noconfirm --needed terminus-font
+  run_step "Installing console font" sudo pacman -S --noconfirm --needed terminus-font
+  run_step "Configuring /etc/vconsole.conf" bash -c "(grep -q '^FONT=' /etc/vconsole.conf 2>/dev/null && sudo sed -i 's/^FONT=.*/FONT=ter-v16n/' /etc/vconsole.conf) || echo 'FONT=ter-v16n' | sudo tee -a /etc/vconsole.conf >/dev/null"
+  run_step "Rebuilding initramfs" sudo mkinitcpio -P
     run_step "Configuring /etc/vconsole.conf" bash -c "(grep -q '^FONT=' /etc/vconsole.conf 2>/dev/null && sudo sed -i 's/^FONT=.*/FONT=ter-v16n/' /etc/vconsole.conf) || echo 'FONT=ter-v16n' | sudo tee -a /etc/vconsole.conf >/dev/null"
     run_step "Rebuilding initramfs" sudo mkinitcpio -P
 }

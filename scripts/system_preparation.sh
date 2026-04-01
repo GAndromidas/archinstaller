@@ -378,7 +378,7 @@ check_prerequisites
 detect_network_speed  # This now installs speedtest-cli silently before testing
 configure_pacman
 install_all_packages
-update_system_mirrors  # Update mirrors after rate-mirrors is installed
+update_system_mirrors  # Update mirrors BEFORE system update
 update_system
 set_sudo_pwfeedback
 install_cpu_microcode

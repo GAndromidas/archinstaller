@@ -175,18 +175,21 @@ EOF
 		# Backup existing loader.conf
 		sudo cp "$loader_conf" "${loader_conf}.backup.$(date +%Y%m%d_%H%M%S)"
 		
+		# Read original content first, then create new file
+		local original_content=$(cat "$loader_conf")
+		
 		# Create new loader.conf with proper structure
 		{
 			echo "default linux-zen.conf"
 			echo "timeout 3"
 			echo "console-mode max"
 			
-			# Preserve any other lines that aren't default, timeout, or console-mode
-			while IFS= read -r line; do
+			# Process original content line by line
+			echo "$original_content" | while IFS= read -r line; do
 				if [[ ! "$line" =~ ^default ]] && [[ ! "$line" =~ ^timeout ]] && [[ ! "$line" =~ ^console-mode ]]; then
 					echo "$line"
 				fi
-			done < "$loader_conf"
+			done
 		} | sudo tee "$loader_conf" > /dev/null
 		
 		ui_info "loader.conf updated. Contents:"

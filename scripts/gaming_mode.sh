@@ -92,14 +92,14 @@ configure_zen_kernel_default() {
 		return 0
 	fi
 	
-	step "Configuring Zen Kernel as default boot option"
+	step "Configuring Zen Kernel boot entry"
 	
 	# Detect bootloader type using the same detection logic as bootloader_config.sh
 	local BOOTLOADER=$(detect_bootloader)
 	ui_info "Detected bootloader: $BOOTLOADER"
 	
 	if [[ "$BOOTLOADER" = "systemd-boot" ]]; then
-		ui_info "Configuring systemd-boot for Zen kernel..."
+		ui_info "Creating systemd-boot entry for Zen kernel..."
 		configure_systemd_boot_zen
 	elif [[ "$BOOTLOADER" = "grub" ]]; then
 		ui_info "Configuring GRUB for Zen kernel..."
@@ -110,14 +110,15 @@ configure_zen_kernel_default() {
 	else
 		ui_warn "No supported bootloader detected. Manual configuration may be required."
 	fi
+	
+	ui_info "Note: Zen kernel entry created. You may need to manually set it as default in your bootloader."
 }
 
 # Configure systemd-boot for Zen Kernel
 configure_systemd_boot_zen() {
-	local loader_conf="/boot/loader/loader.conf"
 	local entries_dir="/boot/loader/entries"
 	
-	ui_info "Configuring systemd-boot: $loader_conf, $entries_dir"
+	ui_info "Creating Zen kernel entry in: $entries_dir"
 	
 	# Find the best existing entry to copy from (handle date prefixes like 2026-04-01_linux.conf)
 	local existing_entry=""
@@ -163,41 +164,10 @@ EOF
 		fi
 		
 		log_success "Created systemd-boot entry for Zen Kernel with exact same parameters as $(basename "$existing_entry")"
+		ui_info "Zen kernel entry created: $entries_dir/linux-zen.conf"
+		ui_info "To make Zen kernel default, edit /boot/loader/loader.conf and set: default linux-zen.conf"
 	else
 		log_warning "Could not find existing boot entry to copy parameters from"
-		return 1
-	fi
-	
-	# Update loader.conf to set linux-zen.conf as default
-	if [[ -f "$loader_conf" ]]; then
-		ui_info "Updating loader.conf to set default to linux-zen.conf"
-		
-		# Backup existing loader.conf
-		sudo cp "$loader_conf" "${loader_conf}.backup.$(date +%Y%m%d_%H%M%S)"
-		
-		# Read original content first, then create new file
-		local original_content=$(cat "$loader_conf")
-		
-		# Create new loader.conf with proper structure
-		{
-			echo "default linux-zen.conf"
-			echo "timeout 3"
-			echo "console-mode max"
-			
-			# Process original content line by line
-			echo "$original_content" | while IFS= read -r line; do
-				if [[ ! "$line" =~ ^default ]] && [[ ! "$line" =~ ^timeout ]] && [[ ! "$line" =~ ^console-mode ]]; then
-					echo "$line"
-				fi
-			done
-		} | sudo tee "$loader_conf" > /dev/null
-		
-		ui_info "loader.conf updated. Contents:"
-		ui_info "$(cat "$loader_conf")"
-		
-		log_success "Set linux-zen.conf as default in loader.conf"
-	else
-		log_error "loader.conf not found"
 		return 1
 	fi
 }

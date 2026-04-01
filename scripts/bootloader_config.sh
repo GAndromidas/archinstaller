@@ -47,37 +47,28 @@ configure_boot() {
   run_step "Adding kernel parameters to systemd-boot entries" add_systemd_boot_kernel_params
 
   if [ -f "/boot/loader/loader.conf" ]; then
-    # Remove zen kernel configuration from gaming_mode.sh to avoid duplication
-  if [[ "$is_gaming_mode" == "true" && "$zen_kernel_installed" == "true" ]]; then
-    ui_info "Zen kernel configuration handled in step 8 - removing from gaming mode"
-    # Remove any zen kernel configuration that might have been set by gaming_mode.sh
-    if [[ -f "/boot/loader/entries/linux-zen.conf" ]]; then
-      ui_info "Updating existing zen kernel entry with optimized settings"
-    fi
-  else
-    ui_info "Standard bootloader configuration applied"
-  fi
-    # Keep original behavior for standard mode or when zen kernel exists without gaming mode
+    # Check if zen kernel is installed (from gaming_mode.sh script)
+    if pacman -Qi linux-zen &>/dev/null; then
+      ui_info "Zen kernel detected - setting as default"
       sudo sed -i \
         -e '/^default /d' \
-        -e '1i default @saved' \
+        -e '1i default linux-zen.conf' \
         /boot/loader/loader.conf
-      ui_info "Keeping default boot behavior (not gaming mode or zen kernel not installed)"
-    fi
-    
-    # Set timeout 3 for gaming mode, 5s for standard mode
-    if [[ "$is_gaming_mode" == "true" ]]; then
+      # Set timeout 3 and console-mode max for zen kernel
       sudo sed -i \
         -e 's/^timeout.*/timeout 3/' \
         -e 's/^[#]*console-mode[[:space:]]\+.*/console-mode max/' \
         /boot/loader/loader.conf
-      ui_info "Set timeout to 3s and console-mode to max for gaming"
+      ui_info "Set timeout to 3s and console-mode to max for zen kernel"
     else
+      # Keep original behavior for standard mode
       sudo sed -i \
+        -e '/^default /d' \
+        -e '1i default @saved' \
         -e 's/^timeout.*/timeout 5/' \
         -e 's/^[#]*console-mode[[:space:]]\+.*/console-mode keep/' \
         /boot/loader/loader.conf
-      ui_info "Set timeout to 5s and console-mode to keep for standard mode"
+      ui_info "Using standard bootloader configuration"
     fi
   else
     log_warning "loader.conf not found. Skipping loader.conf configuration for systemd-boot."
@@ -94,17 +85,21 @@ IS_BTRFS=$(is_btrfs_system && echo "true" || echo "false")
 configure_grub() {
     step "Configuring GRUB"
 
-    # Smart GRUB configuration based on mode
-    if [[ "$is_gaming_mode" == "true" && "$zen_kernel_installed" == "true" ]]; then
-      step "Configuring GRUB for Gaming Mode with Zen Kernel"
-      # Set zen kernel as default for gaming
-      sudo sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=0/' /etc/default/grub || echo 'GRUB_DEFAULT=0' | sudo tee -a /etc/default/grub >/dev/null
-      ui_info "Set GRUB to boot first kernel (Zen) for gaming"
+    # Check if zen kernel is installed (from gaming_mode.sh script)
+    if pacman -Qi linux-zen &>/dev/null; then
+        step "Configuring GRUB for Zen Kernel"
+        # Set zen kernel as default (first entry)
+        sudo sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=0/' /etc/default/grub || echo 'GRUB_DEFAULT=0' | sudo tee -a /etc/default/grub >/dev/null
+        ui_info "Set GRUB to boot first kernel (Zen)"
+        # Set timeout to 3 for zen kernel
+        sudo sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=3/' /etc/default/grub || echo 'GRUB_TIMEOUT=3' | sudo tee -a /etc/default/grub >/dev/null
     else
-      step "Configuring GRUB: set default kernel to 'linux'"
-      # Use saved/default behavior for standard mode
-      sudo sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=saved/' /etc/default/grub || echo 'GRUB_DEFAULT=saved' | sudo tee -a /etc/default/grub >/dev/null
-      ui_info "Using standard GRUB configuration (not gaming mode or zen kernel not installed)"
+        step "Configuring GRUB: set default kernel to 'linux'"
+        # Use saved/default behavior for standard mode
+        sudo sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=saved/' /etc/default/grub || echo 'GRUB_DEFAULT=saved' | sudo tee -a /etc/default/grub >/dev/null
+        # Set timeout to 5 for standard mode
+        sudo sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=5/' /etc/default/grub || echo 'GRUB_TIMEOUT=5' | sudo tee -a /etc/default/grub >/dev/null
+        ui_info "Using standard GRUB configuration"
     fi
 
     grep -q '^GRUB_SAVEDEFAULT=' /etc/default/grub && sudo sed -i 's/^GRUB_SAVEDEFAULT=.*/GRUB_SAVEDEFAULT=true/' /etc/default/grub || echo 'GRUB_SAVEDEFAULT=true' | sudo tee -a /etc/default/grub >/dev/null
@@ -140,7 +135,11 @@ configure_grub() {
     # Regenerate grub.cfg
     sudo grub-mkconfig -o /boot/grub/grub.cfg >/dev/null 2>&1 || { log_error "grub-mkconfig failed"; return 1; }
 
-    log_success "GRUB configured to remember the last chosen boot entry."
+    if pacman -Qi linux-zen &>/dev/null; then
+        log_success "GRUB configured with Zen kernel as default"
+    else
+        log_success "GRUB configured to remember the last chosen boot entry."
+    fi
 }
 
 # --- Limine Bootloader Configuration (Simple Implementation) ---
@@ -193,11 +192,11 @@ interface_resolution: 1024x768
 
 EOF
   
-  # Add kernels in smart order (Zen first for gaming mode ONLY)
+  # Add kernels in smart order (Zen first if installed)
   local kernels_added=()
   
-  # Zen kernel first if gaming mode AND zen kernel installed
-  if [[ "$is_gaming_mode" == "true" && "$zen_kernel_installed" == "true" ]]; then
+  # Zen kernel first if installed (from gaming_mode.sh script)
+  if pacman -Qi linux-zen &>/dev/null; then
     if [[ -f "/boot/vmlinuz-linux-zen" ]] && [[ -f "/boot/initramfs-linux-zen.img" ]]; then
       cat << EOF | sudo tee -a "$limine_config" > /dev/null
 
@@ -208,7 +207,7 @@ cmdline: $cmdline
 module_path: boot():/initramfs-linux-zen.img
 EOF
       kernels_added+=("zen")
-      ui_info "Added Zen kernel entry to Limine (gaming mode)"
+      ui_info "Added Zen kernel entry to Limine"
     fi
   fi
   
@@ -253,10 +252,10 @@ EOF
     fi
   done
   
-  if [[ "$is_gaming_mode" == "true" && "$zen_kernel_installed" == "true" ]]; then
-    log_success "GRUB configured for Gaming Mode with Zen kernel as default"
+  if pacman -Qi linux-zen &>/dev/null; then
+    log_success "Limine configured with Zen kernel prioritized"
   else
-    log_success "GRUB configured to remember the last chosen boot entry."
+    log_success "Simple Limine configuration completed"
   fi
   log_info "Configuration file: $limine_config"
   log_info "Kernels configured: ${kernels_added[*]}"

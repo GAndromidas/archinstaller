@@ -562,6 +562,7 @@ else
   else
     print_step_header_with_timing 7 "$TOTAL_STEPS" "Gaming Mode"
     ui_info "Setting up gaming tools (optional)..."
+    
     if step "Gaming Mode" && source "$SCRIPTS_DIR/gaming_mode.sh"; then
       mark_step_complete_with_progress "gaming_mode" "completed"
     else

@@ -146,6 +146,7 @@ desktop_environments:
       - discover
       - flatpak-kcm
       - gwenview
+      - haruna
       - kde-gtk-config
       - kdeconnect
       - kdeplasma-addons
@@ -163,7 +164,6 @@ desktop_environments:
       - python-pyqt6
       - qbittorrent
       - spectacle
-      - smplayer
       - xdg-desktop-portal-kde
     remove:
       - htop

@@ -1,196 +1,186 @@
 <div align="center">
 
-# 🚀 Archinstaller
+# <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/logo.png" alt="Archinstaller Logo" width="120"/>
 
-[![Last Commit](https://img.shields.io/github/last-commit/GAndromidas/archinstaller.svg?style=for-the-badge)](https://github.com/GAndromidas/archinstaller/commits/main)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
+# Archinstaller
+
+[![GitHub release](https://img.shields.io/github/release/GAndromidas/archinstaller.svg?style=for-the-badge&logo=github)](https://github.com/GAndromidas/archinstaller/releases)
+[![Last Commit](https://img.shields.io/github/last-commit/GAndromidas/archinstaller.svg?style=for-the-badge&logo=git)](https://github.com/GAndromidas/archinstaller/commits/main)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge&logo=open-source-initiative)](LICENSE)
+[![Arch Linux](https://img.shields.io/badge/Platform-Arch%20Linux-1793E1?style=for-the-badge&logo=arch-linux)](https://archlinux.org/)
+[![Stars](https://img.shields.io/github/stars/GAndromidas/archinstaller.svg?style=for-the-badge&logo=star)](https://github.com/GAndromidas/archinstaller/stargazers)
 
 **Professional Arch Linux Post-Installation Automation**
 
 Transform your minimal Arch Linux installation into a fully configured, optimized system with intelligent hardware detection and tailored optimizations.
 
-[Installation](#-quick-start) • [Features](#-key-features) • [Modes](#-installation-modes)
+[Quick Start](#-quick-start) · [Features](#-key-features) · [Installation Modes](#-installation-modes) · [Configuration](#-customization)
 
 </div>
 
 ---
 
-## 📋 Overview
+## <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/overview.png" alt="Overview" width="30"/> Overview
 
 **Archinstaller** is a sophisticated post-installation automation tool that intelligently configures Arch Linux based on your hardware. It applies targeted optimizations rather than one-size-fits-all settings, ensuring optimal performance for your specific configuration.
 
-**Core Philosophy:**
-- 🎯 **Hardware-Aware** - Detects CPU, GPU, storage, and desktop environment
-- 🛡️ **Security-First** - Comprehensive hardening enabled by default
-- ⚡ **Performance-Optimized** - Intelligent I/O scheduling and kernel tuning
-- 🔄 **Reliable** - Resume functionality for interrupted installations
+### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/philosophy.png" alt="Philosophy" width="25"/> Core Philosophy
+
+| Philosophy | Description |
+|------------|-------------|
+| **<img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/hardware.png" alt="Hardware" width="20"/> Hardware-Aware** | Detects CPU, GPU, storage, and desktop environment for tailored optimizations |
+| **<img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/security.png" alt="Security" width="20"/> Security-First** | Comprehensive hardening enabled by default with firewall and fail2ban |
+| **<img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/performance.png" alt="Performance" width="20"/> Performance-Optimized** | Intelligent I/O scheduling and kernel tuning for optimal responsiveness |
+| **<img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/reliable.png" alt="Reliable" width="20"/> Reliable** | Resume functionality for interrupted installations with progress tracking |
 
 ---
 
-## 🎯 Key Features
+## <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/features.png" alt="Features" width="30"/> Key Features
 
-### 🔍 System Intelligence & Automation
+### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/intelligence.png" alt="Intelligence" width="25"/> System Intelligence & Automation
 
-- **Hardware Detection**
-  - Automatically identifies CPU (Intel/AMD) and installs appropriate microcode
-  - Detects GPU (NVIDIA/AMD/Intel) and installs correct drivers
-  - Optimizes I/O scheduling based on storage type (NVMe/SSD/HDD)
-  - Recognizes laptop hardware and enables power-saving features
+#### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/hardware-detection.png" alt="Hardware Detection" width="20"/> Hardware Detection
+```yaml
+CPU Detection:
+  Intel: intel-ucode + microcode updates
+  AMD: amd-ucode + microcode updates
+  
+GPU Detection:
+  NVIDIA: Proprietary drivers + CUDA support
+  AMD: Open-source drivers + Vulkan
+  Intel: Integrated graphics + VA-API
+  
+Storage Optimization:
+  NVMe: BFQ scheduler + trim optimizations
+  SSD: Deadline scheduler + wear leveling
+  HDD: CFQ scheduler + readahead settings
+  
+Laptop Features:
+  Power management + thermal throttling
+  Battery optimization + suspend/resume
+```
 
-- **Bootloader Detection & Configuration**
-  - Auto-detects installed bootloader (GRUB, systemd-boot, Limine)
-  - Applies tailored configuration for each bootloader type
-  - GRUB: Snapshot boot entries via grub-btrfs integration
-  - systemd-boot: LTS kernel fallback entry management
-  - Limine: Configuration support for modern UEFI systems
+#### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/bootloader.png" alt="Bootloader" width="20"/> Bootloader Detection & Configuration
+| Bootloader | Features | Integration |
+|------------|----------|-------------|
+| **GRUB** | Snapshot entries, timeout optimization | grub-btrfs + grub-btrfsd |
+| **systemd-boot** | LTS kernel fallback, EFI support | Automatic entry management |
+| **Limine** | Modern UEFI, fast boot | limine-snapper-sync |
 
-- **Performance Optimization**
-  - Intelligent I/O scheduler selection per storage device type
-  - Kernel parameter tuning for optimal responsiveness
-  - Parallel package downloads for faster installation
+#### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/performance.png" alt="Performance" width="20"/> Performance Optimization
+- **I/O Scheduling**: Automatic selection based on storage type
+- **Kernel Tuning**: `vm.swappiness=10`, `fs.inotify.max_user_watches=524288`
+- **Parallel Downloads**: Pacman parallel package fetching
+- **Memory Management**: ZRAM compression + swap optimization
 
-- **Desktop Environment Integration**
-  - KDE Plasma: Custom keyboard shortcuts and workspace optimization
-  - GNOME: Dark theme, window manager tweaks, and gestures
-  - Cosmic: Full environment support and integration
-  - Automatic detection and installation of DE-specific packages
+#### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/desktop.png" alt="Desktop" width="20"/> Desktop Environment Integration
+| Environment | Optimizations | Features |
+|-------------|---------------|----------|
+| **KDE Plasma** | Custom shortcuts, workspace optimization | kglobalshortcutsrc + performance tweaks |
+| **GNOME** | Dark theme, window manager tweaks | dconf settings + gesture support |
+| **Cosmic** | Full environment support | Experimental DE integration |
 
-### 🛡️ Security & Stability
+### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/security.png" alt="Security" width="25"/> Security & Stability
 
-- **Security Hardening (Enabled by Default)**
-  - UFW/Firewalld firewall with secure-by-default policies
-  - Fail2ban SSH brute-force protection
-  - Sudo password feedback for better UX
-  - Automatic port management for installed services (KDE Connect)
+#### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/firewall.png" alt="Firewall" width="20"/> Security Hardening (Enabled by Default)
+```bash
+# Firewall Configuration
+UFW/Firewalld:
+  - Secure-by-default policies
+  - Deny incoming, allow outgoing
+  - SSH automatically allowed
+  - Service-aware port management
 
-- **Btrfs Snapshot System**
-  - Full snapshot and recovery solution with Snapper
-  - Bootloader integration for easy rollbacks (GRUB, systemd-boot, Limine)
-  - GRUB: Automatic snapshot menu via grub-btrfs and grub-btrfsd
-  - Limine: Automatic snapshot boot entries via limine-snapper-sync
-  - systemd-boot: LTS kernel fallback option for system recovery
-  - Automatic snapshot creation before/after package operations
-  - GUI management with btrfs-assistant
+# SSH Protection
+Fail2ban:
+  - Strict SSH policies
+  - 15-minute ban on suspicious activity
+  - Automatic brute-force detection
+  - Customizable ban thresholds
 
-- **Data Integrity**
-  - Automatic filesystem maintenance (fstrim)
-  - Package cache optimization (paccache)
-  - System log rotation and management
+# User Security
+Sudo:
+  - Password feedback enabled
+  - Proper user group membership
+  - Hardware access permissions
+```
 
-### 🎮 Installation Modes
+#### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/snapshot.png" alt="Snapshot" width="20"/> Btrfs Snapshot System
+- **Full Solution**: Snapper + bootloader integration
+- **Automatic Snapshots**: Before/after package operations
+- **GUI Management**: btrfs-assistant for easy rollback
+- **Boot Integration**: GRUB/systemd-boot/Limine snapshot entries
 
-Choose the perfect setup for your use case:
-
-| Mode | Description | Best For |
-|------|-------------|----------|
-| **Standard** | Full-featured desktop with all recommended packages | General users, enthusiasts |
-| **Minimal** | Lightweight essentials for performance-focused systems | Low-spec hardware, minimal bloat |
-| **Server** | Headless configuration with Docker, Portainer, and SSH | Servers, VMs, headless deployments |
-| **Custom** | Interactive selection of packages and features | Power users, specific requirements |
-
-### 🎮 Optional Gaming Mode
+### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/gaming.png" alt="Gaming" width="25"/> Gaming Mode (Optional)
 
 Transform your system into a gaming powerhouse with one click:
 
-- Steam, Lutris, Heroic Games Launcher
-- MangoHud performance overlay
-- Goverlay for MangoHud configuration
-- GameMode for automatic performance tuning
-- ProtonDB game compatibility database
+| Component | Description |
+|-----------|-------------|
+| **Steam** | Native gaming platform with Proton |
+| **Lutris** | Multiple gaming platform support |
+| **Heroic Games Launcher** | Epic Games + GOG support |
+| **MangoHud** | Performance overlay and monitoring |
+| **Goverlay** | MangoHud configuration GUI |
+| **GameMode** | Automatic performance tuning |
 
-### �️ Smart Peripheral Detection
+### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/peripherals.png" alt="Peripherals" width="25"/> Smart Peripheral Detection
 
 Automatically detects connected peripherals and installs appropriate management software:
 
-- **Logitech Devices**: Auto-installs Solaar for Unifying Receiver and device management
-- **Keychron Keyboards**: Auto-installs VIA-bin for keyboard configuration and customization
-- **Gaming Mice**: Detects and installs libratbag/Piper for gaming mouse configuration
-- **Razer Devices**: Auto-installs OpenRazer and Polychromatic for full device control
-- **HID Support**: Installs necessary libraries for USB/HID device communication
-
-**How it works:**
-- Scans USB devices, Bluetooth connections, and system device tree
-- Identifies peripherals by vendor ID and device names
-- Installs appropriate packages from Pacman and AUR repositories
-- Configures services and user permissions automatically
-- Skips installation if no supported peripherals are detected
-
-### 🔄 Installation Process
-
-1. **System Preparation** - Update packages and install core utilities
-2. **Shell Setup** - Configure ZSH with modern features
-3. **Plymouth Setup** - Beautiful boot screen configuration
-4. **Yay Installation** - AUR helper for additional software
-5. **Programs Installation** - Desktop environment and application setup
-6. **Smart Peripheral Detection** - Auto-detect and install peripheral software
-7. **Gaming Mode** - Optional gaming optimizations
-8. **Bootloader Configuration** - Kernel and boot settings
-9. **Fail2ban Setup** - SSH security protection
-10. **System Services** - Enable and configure essential services
-11. **Maintenance** - Final cleanup and optimization
-- **Enhanced Terminal Environment**
-  - Pre-configured Zsh with Oh-My-Zsh framework
-  - Starship prompt for beautiful terminal design
-  - Syntax highlighting and auto-completion
-  - Custom aliases and productivity plugins
+| Peripheral | Detection | Software |
+|------------|------------|----------|
+| **Logitech Devices** | USB vendor ID | Solaar (Unifying Receiver) |
+| **Keychron Keyboards** | Device name | VIA-bin (keyboard configuration) |
+| **Gaming Mice** | HID detection | libratbag + Piper |
+| **Razer Devices** | Vendor ID | OpenRazer + Polychromatic |
+| **Generic HID** | USB/HID tree | hidapi + udev rules |
 
 ---
 
-### 📊 Supported Platforms
+## <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/modes.png" alt="Modes" width="30"/> Installation Modes
 
-### Hardware
-- ✅ **CPU**: Intel, AMD (with appropriate microcode)
-- ✅ **GPU**: NVIDIA (including legacy drivers), AMD, Intel
-- ✅ **Storage**: NVMe, SSD, HDD (with appropriate optimizations)
-- ✅ **Form Factors**: Desktop, Laptop, Virtual Machines (Virt-Manager, QEMU)
+Choose the perfect setup for your use case:
 
-### Bootloaders
-- ✅ **GRUB** 2.x with Btrfs snapshot support
-- ✅ **systemd-boot** with LTS kernel fallback
-- ✅ **Limine** (modern UEFI bootloader)
+<div align="center">
 
-### Desktop Environments
-- ✅ **KDE Plasma** 5.x and 6.x
-- ✅ **GNOME** 40+
-- ✅ **Cosmic** (experimental)
+| Mode | <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/desktop.png" alt="Desktop" width="20"/> Use Case | <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/specs.png" alt="Specs" width="20"/> Requirements |
+|------|-------------|-------------|
+| **<img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/standard.png" alt="Standard" width="25"/> Standard** | Full-featured desktop | General users, enthusiasts |
+| **<img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/minimal.png" alt="Minimal" width="25"/> Minimal** | Lightweight essentials | Low-spec hardware, minimal bloat |
+| **<img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/server.png" alt="Server" width="25"/> Server** | Headless configuration | Docker, SSH, server utilities |
+| **<img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/custom.png" alt="Custom" width="25"/> Custom** | Interactive selection | Power users, specific requirements |
+| **<img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/gaming.png" alt="Gaming" width="25"/> Gaming** | Gaming-optimized | Steam, Lutris, performance tools |
 
-### Base Systems
-- ✅ **Arch Linux** (primary)
-- ✅ **EndeavourOS** (silent compatibility - firewalld preference)
-- ✅ **Arch-based distributions** (tested)
+</div>
 
 ---
 
-## 🚀 Quick Start
+## <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/rocket.png" alt="Quick Start" width="30"/> Quick Start
 
-### Prerequisites
+### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/prerequisites.png" alt="Prerequisites" width="25"/> Prerequisites
 
-- **Fresh Arch Linux installation** (minimal base system)
-- **Active internet connection**
-- **User account with sudo privileges**
-- **2GB+ free disk space**
+- **<img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/arch.png" alt="Arch" width="20"/> Fresh Arch Linux installation** (minimal base system)
+- **<img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/internet.png" alt="Internet" width="20"/> Active internet connection**
+- **<img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/user.png" alt="User" width="20"/> User account with sudo privileges**
+- **<img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/storage.png" alt="Storage" width="20"/> 2GB+ free disk space**
 
-### Installation
+### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/installation.png" alt="Installation" width="25"/> Installation
+
+<div align="center">
 
 ```bash
 # Clone and run
-git clone https://github.com/gandromidas/archinstaller.git
+git clone https://github.com/GAndromidas/archinstaller.git
 cd archinstaller
 ./install.sh
 ```
 
-**One-Click Setup:** The installer handles everything automatically - just select your preferred mode and let it configure your system.
+**<img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/magic.png" alt="Magic" width="20"/> One-Click Setup:** The installer handles everything automatically - just select your preferred mode and let it configure your system.
 
-### Installation Modes
+</div>
 
-| Mode | Use Case | Description |
-|------|----------|-------------|
-| **Standard** | General desktop use | Full-featured setup with all recommended packages |
-| **Minimal** | Performance-focused | Lightweight essentials only |
-| **Server** | Headless deployments | Docker, SSH, server utilities |
-| **Custom** | Power users | Interactive package selection |
-
-### Command-Line Options
+### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/cli.png" alt="CLI" width="25"/> Command-Line Options
 
 ```bash
 ./install.sh [OPTIONS]
@@ -202,297 +192,139 @@ OPTIONS:
   -d, --dry-run   Preview changes only
 ```
 
-### Installation Experience
+### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/interface.png" alt="Interface" width="25"/> Installation Experience
 
-The installer provides a professional, user-friendly experience:
+<div align="center">
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│ Archinstaller - Choose Installation Mode               │
-├─────────────────────────────────────────────────────────┤
-│                                                           │
-│  ▪ Standard     Full-featured desktop setup             │
-│  ▪ Minimal      Lightweight essentials                  │
-│  ▪ Server       Headless server configuration           │
-│  ▪ Custom       Interactive package selection           │
-│  ▪ Gaming       Gaming-optimized environment            │
-│                                                           │
-└─────────────────────────────────────────────────────────┘
-
-✓ System Preparation                    [████████░░] 50%
-✓ Shell Setup                           [█████████░] 60%
-⟳ Programs Installation                 [██████░░░░] 35%
+<img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/installer-interface.png" alt="Installer Interface"/>
 ```
+
+</div>
 
 ---
 
-## ⚙️ Customization
+## <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/config.png" alt="Configuration" width="30"/> Customization
 
-### Package Management
+### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/packages.png" alt="Packages" width="25"/> Package Management
 
 All packages are organized in `configs/programs.yaml` with logical groupings:
 
-- `common`: Packages installed across all modes
-- `essential`: Mode-specific core packages
-- `desktop_base`: Desktop environment packages
-- `desktop_specific`: DE-specific optimizations
-- `server`: Server-mode packages
-- `gaming`: Gaming-mode packages
+```yaml
+# Package Structure
+pacman:          # Core packages (all modes)
+essential:       # Mode-specific packages
+desktop_environments:  # DE-specific packages
+aur:             # AUR packages
+flatpak:         # Flatpak applications
+custom:          # Optional additions
+```
 
-**To customize:**
+**<img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/easy.png" alt="Easy" width="20"/> Easy Customization:**
 
 1. Open `configs/programs.yaml`
-2. Add or remove packages from relevant sections
+2. Add/remove packages from relevant sections
 3. No script modification needed
-4. Run installer - custom packages will be installed
+4. Run installer - custom packages installed automatically
 
-### Configuration Files
+### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/files.png" alt="Files" width="25"/> Configuration Files
 
-- `.zshrc` — Zsh shell configuration
-- `starship.toml` — Starship prompt theme
-- `kglobalshortcutsrc` — KDE keyboard shortcuts
-- `config.jsonc` — fastfetch system information display
-- `gaming_mode.yaml` — Gaming package definitions
-
----
-
-## 📈 What Gets Installed
-
-### Common Across All Modes
-
-- System utilities and tools
-- Development essentials
-- Zsh shell with Oh-My-Zsh
-- Starship terminal prompt
-- System monitoring tools
-
-### Standard Mode
-
-- Full desktop environment (KDE/GNOME/Cosmic)
-- Multimedia applications
-- Office and productivity tools
-- Development tools and IDEs
-- Performance monitoring utilities
-
-### Minimal Mode
-
-- Lightweight desktop environment
-- Essential command-line tools
-- Text editors and basic utilities
-- Minimal additional packages
-
-### Server Mode
-
-- Docker and Docker Compose
-- SSH server (sshd)
-- System service utilities
-- Portainer for container management
-- Server monitoring tools
-- No desktop environment
-
-### Gaming Mode
-
-- Steam platform
-- Lutris game launcher
-- Heroic Games Launcher
-- MangoHud performance overlay
-- Goverlay configuration tool
-- GameMode for optimization
+| File | Purpose |
+|------|---------|
+| `.zshrc` | Zsh shell configuration |
+| `starship.toml` | Starship prompt theme |
+| `kglobalshortcutsrc` | KDE keyboard shortcuts |
+| `config.jsonc` | Fastfetch system info |
+| `gaming_mode.yaml` | Gaming package definitions |
 
 ---
 
-## 🔒 Security Features
+## <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/installed.png" alt="Installed" width="30"/> What Gets Installed
 
-### Enabled by Default
+### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/common.png" alt="Common" width="25"/> Common Across All Modes
 
-✓ **Firewall Configuration**
-- UFW with secure-by-default policies
-- Deny all incoming, allow all outgoing
-- SSH automatically allowed
-- Service-aware port management
+- <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/tools.png" alt="Tools" width="20"/> System utilities and tools
+- <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/dev.png" alt="Dev" width="20"/> Development essentials
+- <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/shell.png" alt="Shell" width="20"/> Zsh shell with Oh-My-Zsh
+- <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/prompt.png" alt="Prompt" width="20"/> Starship terminal prompt
+- <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/monitor.png" alt="Monitor" width="20"/> System monitoring tools
 
-✓ **SSH Protection**
-- Fail2ban with strict SSH policies
-- Automatic brute-force detection
-- 15-minute ban on suspicious activity
+### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/modes-detail.png" alt="Modes Detail" width="25"/> Mode-Specific Packages
 
-✓ **User Group Configuration**
-- Automatic membership in required groups
-- Proper permissions for hardware access
-- Sudo password feedback enabled
-
-✓ **Bootloader Hardening**
-- Bootloader-specific security configurations
-- GRUB: Password protection support (optional)
-- Secure boot configurations where applicable
-
-✓ **Power Management**
-- Power profiles for laptops
-- Thermal management (Intel systems)
-- Automatic service startup on boot
+| Mode | <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/desktop.png" alt="Desktop" width="20"/> Desktop | <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/apps.png" alt="Apps" width="20"/> Applications | <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/tools.png" alt="Tools" width="20"/> Tools |
+|------|-------------|-------------|------|
+| **Standard** | Full DE (KDE/GNOME/Cosmic) | Multimedia, Office, IDEs | Performance monitoring |
+| **Minimal** | Lightweight DE | Essential apps only | Basic utilities |
+| **Server** | No DE | Docker, Portainer | Server utilities |
+| **Gaming** | Gaming-optimized DE | Steam, Lutris, Heroic | Performance tools |
 
 ---
 
-## 📖 Usage Examples
+## <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/security-badge.png" alt="Security" width="30"/> Security Features
 
-### Install with Standard Mode
-```bash
-./install.sh
-# Select "Standard" from menu
-# Let the installer complete
-```
+### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/lock.png" alt="Lock" width="25"/> Enabled by Default
 
-### Dry-Run Preview
-```bash
-./install.sh --dry-run
-# See what would be installed without making changes
-```
+<div align="center">
 
-### Verbose Installation
-```bash
-./install.sh --verbose
-# See detailed output of every step
-```
+| Feature | Status | <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/status-icon.png" alt="Status Icon" width="20"/> |
+|---------|--------|---------|
+| **Firewall** | <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/check.png" alt="Check" width="20"/> Active | UFW/Firewalld with secure policies |
+| **SSH Protection** | <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/check.png" alt="Check" width="20"/> Active | Fail2ban with strict policies |
+| **User Groups** | <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/check.png" alt="Check" width="20"/> Active | Proper permissions configured |
+| **Bootloader** | <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/check.png" alt="Check" width="20"/> Active | Security-hardened configuration |
 
-### Resume Previous Installation
-```bash
-./install.sh
-# If previous installation detected, choose to resume
-# Installer will skip completed steps and continue
-```
+</div>
 
 ---
 
-## 🐛 Troubleshooting
+## <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/support.png" alt="Support" width="30"/> Supported Platforms
 
-### Installation Interrupted
+### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/hardware.png" alt="Hardware" width="25"/> Hardware Support
 
-The installer saves progress to `~/.archinstaller.state`. If interrupted:
+| Component | Support | Notes |
+|-----------|---------|-------|
+| **CPU** | <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/check.png" alt="Check" width="20"/> Intel, AMD | Microcode + optimizations |
+| **GPU** | <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/check.png" alt="Check" width="20"/> NVIDIA, AMD, Intel | Driver auto-detection |
+| **Storage** | <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/check.png" alt="Check" width="20"/> NVMe, SSD, HDD | I/O scheduler optimization |
+| **Form Factor** | <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/check.png" alt="Check" width="20"/> Desktop, Laptop, VM | Power management + thermal |
 
-```bash
-./install.sh
-# Choose "Resume from last completed step"
-# Installation continues seamlessly
-```
+### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/bootloaders.png" alt="Bootloaders" width="25"/> Bootloader Support
 
-### No Internet Connection
+- <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/check.png" alt="Check" width="20"/> **GRUB** 2.x with Btrfs snapshot support
+- <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/check.png" alt="Check" width="20"/> **systemd-boot** with LTS kernel fallback
+- <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/check.png" alt="Check" width="20"/> **Limine** (modern UEFI bootloader)
 
-Archinstaller requires internet to download packages:
+### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/desktops.png" alt="Desktops" width="25"/> Desktop Environments
 
-```bash
-# Check connection
-ping archlinux.org
-
-# If failed, fix network first, then rerun
-./install.sh
-```
-
-### Insufficient Disk Space
-
-Minimum 2GB free space required:
-
-```bash
-df -h /
-# Check available space
-# Free up space if needed
-./install.sh
-```
-
-### Package Installation Failures
-
-If individual packages fail:
-
-- Installer will skip failed packages and continue
-- Check `~/.archinstaller.log` for details
-- You can retry later or install manually
+- <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/check.png" alt="Check" width="20"/> **KDE Plasma** 5.x and 6.x
+- <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/check.png" alt="Check" width="20"/> **GNOME** 40+
+- <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/check.png" alt="Check" width="20"/> **Cosmic** (experimental)
 
 ---
 
-## 📝 Configuration Files
+## <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/troubleshooting.png" alt="Troubleshooting" width="30"/> Troubleshooting
 
-After installation, customize your system:
+### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/common-issues.png" alt="Common Issues" width="25"/> Common Issues
 
-### ZSH Configuration
-```bash
-~/.zshrc              # Main shell configuration
-~/.config/starship.toml  # Terminal prompt theme
-```
+| Issue | Solution |
+|-------|----------|
+| **Installation Interrupted** | Resume from `~/.archinstaller.state` |
+| **No Internet Connection** | Check `ping archlinux.org` |
+| **Insufficient Disk Space** | Minimum 2GB free required |
+| **Package Installation Failures** | Check `~/.archinstaller.log` |
 
-### Bootloader Configuration
-```bash
-/boot/grub/grub.cfg           # GRUB configuration (auto-generated)
-/boot/loader/loader.conf      # systemd-boot configuration
-/boot/limine.conf             # Limine bootloader configuration
-```
-
-### Btrfs & Snapshots
-```bash
-/etc/snapper/configs/root                # Snapper snapshot configuration
-/etc/default/btrfsmaintenance            # Btrfs maintenance settings
-~/.config/btrfs-assistant.conf            # btrfs-assistant GUI settings
-```
-
-### Desktop Environment
-```bash
-~/.config/kglobalshortcutsrc  # KDE shortcuts
-~/.config/dconf/user          # GNOME settings
-```
-
-### System Information
-```bash
-~/.config/fastfetch/config.jsonc  # System info display
-```
-
----
-
-## 📋 Installation Log
-
-Full installation logs are saved for reference:
+### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/logs.png" alt="Logs" width="25"/> Log Files
 
 ```bash
 ~/.archinstaller.log     # Complete installation log
 ~/.archinstaller.state   # Progress tracking
 ```
 
-Check logs if you need to:
-- Troubleshoot issues
-- See what was installed
-- Verify system changes
-
-## 🔧 Bootloader Integration Details
-
-### GRUB
-- **Auto-detection**: Checks `/boot/grub`, `/boot/grub2`, and pacman packages
-- **Btrfs Integration**: Uses `grub-btrfs` for automatic snapshot boot entries
-- **Daemon**: Runs `grub-btrfsd` for dynamic menu updates
-- **Configuration**: `/boot/grub/grub.cfg` (auto-regenerated)
-
-### systemd-boot
-- **Auto-detection**: Checks `/boot/loader/entries` and bootctl availability
-- **LTS Fallback**: Automatically creates LTS kernel boot entry
-- **Configuration**: `/boot/loader/loader.conf` and `/boot/loader/entries/`
-- **Kernel Parameters**: Applied to all boot entries automatically
-
-### Limine
-- **Auto-detection**: Checks `/boot/limine`, `/boot/EFI/limine`, and pacman packages
-- **Btrfs Integration**: Uses `limine-snapper-sync` for automatic snapshot boot entries
-- **Snapshot Service**: Runs `limine-snapper-sync.service` for dynamic snapshot menu updates
-- **Configuration**: `/boot/limine.conf` with timeout and default entry settings
-- **Modern UEFI**: Full support for modern UEFI-only systems
-- **Snapshot Boot Entries**: Auto-generated and synchronized with Snapper configuration
-
 ---
 
-## 🤝 Contributing
+## <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/contributing.png" alt="Contributing" width="30"/> Contributing
 
-Contributions are welcome! Whether you want to:
-
-- **Report bugs**: Open an issue with details
-- **Suggest features**: Describe your use case
-- **Improve code**: Submit a pull request
-- **Update documentation**: Help others understand the project
-
-### How to Contribute
+### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/how-to.png" alt="How to Contribute" width="25"/> How to Contribute
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
@@ -500,48 +332,71 @@ Contributions are welcome! Whether you want to:
 4. Push to the branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
 
----
+### <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/contribution-types.png" alt="Contribution Types" width="25"/> Contribution Types
 
-## 📊 Project Status
-
-| Component | Status |
-|-----------|--------|
-| **Core Functionality** | ✅ Production Ready |
-| **Hardware Detection** | ✅ Stable |
-| **Gaming Mode** | ✅ Tested |
-| **Security Hardening** | ✅ Active |
-| **Documentation** | ✅ Complete |
+- <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/bug.png" alt="Bug" width="20"/> **Report bugs**: Open an issue with details
+- <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/feature.png" alt="Feature" width="20"/> **Suggest features**: Describe your use case
+- <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/code.png" alt="Code" width="20"/> **Improve code**: Submit a pull request
+- <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/docs.png" alt="Docs" width="20"/> **Update documentation**: Help others understand the project
 
 ---
 
-## 📜 License
+## <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/status.png" alt="Status" width="30"/> Project Status
 
-This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+<div align="center">
+
+| Component | Status | <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/status-icon.png" alt="Status Icon" width="20"/> |
+|-----------|--------|---------|
+| **Core Functionality** | <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/production.png" alt="Production" width="20"/> Production Ready |
+| **Hardware Detection** | <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/stable.png" alt="Stable" width="20"/> Stable |
+| **Gaming Mode** | <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/tested.png" alt="Tested" width="20"/> Tested |
+| **Security Hardening** | <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/active.png" alt="Active" width="20"/> Active |
+| **Documentation** | <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/complete.png" alt="Complete" width="20"/> Complete |
+
+</div>
+
+---
+
+## <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/license.png" alt="License" width="30"/> License
+
+This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
+
+<div align="center">
 
 You are free to use, modify, and distribute this software for personal or commercial purposes.
 
----
-
-## 🙏 Acknowledgments
-
-- Inspired by Arch Linux philosophy: simplicity and user control
-- Built with community best practices and feedback
-- Thanks to all contributors and users
+</div>
 
 ---
 
-## 📞 Support & Contact
+## <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/acknowledgments.png" alt="Acknowledgments" width="30"/> Acknowledgments
 
-- **Issues**: [GitHub Issues](https://github.com/gandromidas/archinstaller/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/gandromidas/archinstaller/discussions)
-- **Repository**: [github.com/gandromidas/archinstaller](https://github.com/gandromidas/archinstaller)
+- <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/arch-linux.png" alt="Arch Linux" width="20"/> Inspired by Arch Linux philosophy: simplicity and user control
+- <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/community.png" alt="Community" width="20"/> Built with community best practices and feedback
+- <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/contributors.png" alt="Contributors" width="20"/> Thanks to all contributors and users
+
+---
+
+## <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/support.png" alt="Support" width="30"/> Support & Contact
+
+<div align="center">
+
+| Platform | Link |
+|----------|------|
+| **Issues** | [GitHub Issues](https://github.com/GAndromidas/archinstaller/issues) |
+| **Discussions** | [GitHub Discussions](https://github.com/GAndromidas/archinstaller/discussions) |
+| **Repository** | [github.com/GAndromidas/archinstaller](https://github.com/GAndromidas/archinstaller) |
+
+</div>
 
 ---
 
 <div align="center">
 
-**Made with ❤️ for the Arch Linux community**
+## <img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/heart.png" alt="Heart" width="25"/> Made with love for the Arch Linux community
 
-⭐ If you find this useful, please consider starring the repository!
+**<img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/star.png" alt="Star" width="20"/> If you find this useful, please consider starring the repository!**
+
+[<img src="https://raw.githubusercontent.com/GAndromidas/archinstaller/main/assets/star-button.png" alt="Star Button" width="150"/>](https://github.com/GAndromidas/archinstaller)
 
 </div>

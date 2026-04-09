@@ -8,7 +8,7 @@
 [![Arch Linux](https://img.shields.io/badge/Platform-Arch%20Linux-1793E1?style=for-the-badge&logo=arch-linux)](https://archlinux.org/)
 [![Stars](https://img.shields.io/github/stars/GAndromidas/archinstaller.svg?style=for-the-badge&logo=star)](https://github.com/GAndromidas/archinstaller/stargazers)
 
-**Professional Arch Linux Post-Installation Automation**
+**Arch Linux Post-Installation Automation**
 
 Transform your minimal Arch Linux installation into a fully configured, optimized system with intelligent hardware detection and tailored optimizations.
 
@@ -116,11 +116,12 @@ Transform your system into a gaming powerhouse with one click:
 | Component | Description |
 |-----------|-------------|
 | **Steam** | Native gaming platform with Proton |
-| **Lutris** | Multiple gaming platform support |
 | **Heroic Games Launcher** | Epic Games + GOG support |
+| **Faugus Launcher** | Game management and launcher |
 | **MangoHud** | Performance overlay and monitoring |
 | **Goverlay** | MangoHud configuration GUI |
 | **GameMode** | Automatic performance tuning |
+| **Wine** | Windows compatibility layer |
 
 ### Smart Peripheral Detection
 
@@ -146,7 +147,7 @@ Choose the perfect setup for your use case:
 | **Minimal** | Lightweight essentials | Low-spec hardware, minimal bloat |
 | **Server** | Headless configuration | Docker, SSH, server utilities |
 | **Custom** | Interactive selection | Power users, specific requirements |
-| **Gaming** | Gaming-optimized | Steam, Lutris, performance tools |
+| **Gaming** | Gaming-optimized | Steam, Heroic Games Launcher, Faugus Launcher, performance tools |
 
 ---
 
@@ -236,7 +237,7 @@ custom:          # Optional additions
 | **Standard** | Full DE (KDE/GNOME/Cosmic) | Multimedia, Office, IDEs | Performance monitoring |
 | **Minimal** | Lightweight DE | Essential apps only | Basic utilities |
 | **Server** | No DE | Docker, Portainer | Server utilities |
-| **Gaming** | Gaming-optimized DE | Steam, Lutris, Heroic | Performance tools |
+| **Gaming** | Gaming-optimized DE | Steam, Heroic Games Launcher, Faugus Launcher, Wine | Performance tools |
 
 ---
 

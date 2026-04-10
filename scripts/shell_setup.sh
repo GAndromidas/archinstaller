@@ -188,6 +188,18 @@ setup_kde_shortcuts() {
     plasma_version=$(get_desktop_version "KDE")
 
     log_info "KDE Plasma detected: $plasma_version"
+    
+    # Extract version number for validation
+    local version_number=$(echo "$plasma_version" | grep -oP '\d+' | head -1)
+    
+    # Only support Plasma 6+ for bleeding edge Arch Linux
+    if [ -n "$version_number" ] && [ "$version_number" -ge 6 ]; then
+      log_success "KDE Plasma 6+ detected - supported configuration"
+    else
+      log_error "KDE Plasma 5 detected - not supported on bleeding edge Arch Linux"
+      log_info "Please upgrade to Plasma 6 for full compatibility"
+      return 1
+    fi
 
     local kde_shortcuts_source="$CONFIGS_DIR/kglobalshortcutsrc"
     local kde_shortcuts_dest="$HOME/.config/kglobalshortcutsrc"
@@ -214,6 +226,9 @@ setup_kde_shortcuts() {
 
     # Reload KDE configuration
     reload_kde_config
+
+    # Cleanup temporary dependencies
+    cleanup_kde_dependencies
 
   else
     log_info "KDE Plasma not detected. Skipping KDE shortcuts configuration"
@@ -551,6 +566,17 @@ EOF
   
   chmod +x "$launcher_script"
   log_success "Created Konsole fullscreen launcher at $launcher_script"
+}
+
+# Function to cleanup temporary PyQt6 after KDE configuration
+cleanup_kde_dependencies() {
+  # Check if python-pyqt6 was installed as helper utility and remove it
+  if pacman -Q python-pyqt6 &>/dev/null; then
+    log_info "Cleaning up temporary python-pyqt6 (no longer needed after KDE configuration)"
+    sudo pacman -Rns --noconfirm python-pyqt6 || {
+      log_warning "Failed to remove python-pyqt6, will keep installed"
+    }
+  fi
 }
 
 # Function to reload KDE configuration

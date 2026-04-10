@@ -70,6 +70,31 @@ else
     :
 fi
 
+# Smart PyQt6 installation for KDE Plasma 6+ (needed for qdbus/konsole automation)
+add_kde_pyqt6_if_needed() {
+    # Check if KDE Plasma is running and version 6+
+    if [ -n "${KDE_SESSION_VERSION:-}" ] || echo "${XDG_CURRENT_DESKTOP:-}" | grep -qi "kde"; then
+        # Get Plasma version
+        local plasma_version=""
+        if command -v plasmashell >/dev/null; then
+            plasma_version=$(plasmashell --version 2>/dev/null | grep -oP '\d+' | head -1)
+        fi
+        
+        # Only support Plasma 6+ for bleeding edge Arch Linux
+        if [ -n "$plasma_version" ] && [ "$plasma_version" -ge 6 ]; then
+            log_info "KDE Plasma 6+ detected: Adding python-pyqt6 for KDE automation"
+            HELPER_UTILS+=("python-pyqt6")
+        else
+            log_error "KDE Plasma 5 detected - not supported on bleeding edge Arch Linux"
+            log_info "Arch Linux recommends Plasma 6 for latest features and Qt6 support"
+            # Don't add PyQt6 for unsupported versions
+        fi
+    fi
+}
+
+# Call the function to add PyQt6 if needed
+add_kde_pyqt6_if_needed
+
 # Ensure critical variables are defined
 : "${HOME:=/home/$USER}"
 : "${USER:=$(whoami)}"

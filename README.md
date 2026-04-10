@@ -74,9 +74,9 @@ Laptop Features:
 #### Desktop Environment Integration
 | Environment | Optimizations | Features |
 |-------------|---------------|----------|
-| **KDE Plasma** | Custom shortcuts, workspace optimization | kglobalshortcutsrc + performance tweaks |
-| **GNOME** | Dark theme, window manager tweaks | dconf settings + gesture support |
-| **Cosmic** | Full environment support | Experimental DE integration |
+| **KDE Plasma 6+** | Qt6-based shortcuts, fullscreen automation | kglobalshortcutsrc + Konsole fullscreen |
+| **GNOME 46+** | Latest dark theme, modern tweaks | dconf settings + current extensions |
+| **Cosmic** | Latest alpha builds support | Experimental DE integration |
 
 ### Security & Stability
 
@@ -273,9 +273,9 @@ custom:          # Optional additions
 
 ### Desktop Environments
 
-- **KDE Plasma** 5.x and 6.x
-- **GNOME** 40+
-- **Cosmic** (experimental)
+- **KDE Plasma** 6.x (Qt6-based) - bleeding edge only
+- **GNOME** 46+ (latest stable)
+- **Cosmic** (experimental, latest builds)
 
 ---
 

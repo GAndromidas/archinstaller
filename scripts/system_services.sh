@@ -833,7 +833,8 @@ detect_de_version() {
         if [ "$plasma_version" -ge 6 ]; then
           log_info "KDE Plasma 6 detected (Qt6-based)"
         else
-          log_info "KDE Plasma 5 detected (Qt5-based)"
+          log_error "KDE Plasma 5 detected - not supported. Please upgrade to Plasma 6"
+          log_info "Arch Linux recommends using the latest Plasma 6 for bleeding edge support"
         fi
       fi
       ;;

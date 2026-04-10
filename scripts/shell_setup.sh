@@ -229,9 +229,15 @@ setup_kde_shortcuts() {
         log_success "KDE shortcuts file verified at $kde_shortcuts_dest"
         # Check for Window Close shortcut (Meta+Q)
         if grep -q "Window Close=Meta+Q" "$kde_shortcuts_dest"; then
-          log_success "Meta+Q (Window Close) shortcut found in configuration"
+          log_success "Meta+Q (Window Close) shortcut found"
+          # Also verify Alt+F4 is not set as secondary
+          if grep -q "Window Close=.*Alt+F4" "$kde_shortcuts_dest"; then
+            log_warning "Alt+F4 still present as secondary shortcut - may conflict with Meta+Q"
+          else
+            log_success "Meta+Q is the exclusive Window Close shortcut"
+          fi
         else
-          log_warning "Meta+Q (Window Close) shortcut not found in configuration file"
+          log_warning "Meta+Q (Window Close) shortcut not found in configuration"
         fi
         # Check for Konsole shortcut
         if grep -q "konsole" "$kde_shortcuts_dest"; then

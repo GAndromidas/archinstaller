@@ -227,9 +227,6 @@ setup_kde_shortcuts() {
     # Reload KDE configuration
     reload_kde_config
 
-    # Cleanup temporary dependencies
-    cleanup_kde_dependencies
-
   else
     log_info "KDE Plasma not detected. Skipping KDE shortcuts configuration"
   fi
@@ -370,10 +367,11 @@ setup_konsole_fullscreen_rules() {
     cp "$kwin_rules_dest" "${kwin_rules_dest}.backup.$(date +%Y%m%d_%H%M%S)"
   fi
   
-  # Copy the pre-configured kwinrulesrc
+  # Copy the pre-configured kwinrulesrc from configs to user config
   if [ -f "$kwin_rules_source" ]; then
     cp "$kwin_rules_source" "$kwin_rules_dest"
-    log_success "Konsole fullscreen window rules configured"
+    log_success "KDE window rules copied from configs to ~/.config/kwinrulesrc"
+    log_info "Konsole will automatically go fullscreen without titlebar"
   else
     log_warning "KDE window rules configuration file not found at $kwin_rules_source"
   fi

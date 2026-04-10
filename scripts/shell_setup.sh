@@ -217,7 +217,6 @@ setup_kde_shortcuts() {
 
     local kde_shortcuts_source="$CONFIGS_DIR/kglobalshortcutsrc"
     local kde_shortcuts_dest="$HOME/.config/kglobalshortcutsrc"
-    local kwin_rules_file="$HOME/.config/kwinrulesrc"
 
     if [ -f "$kde_shortcuts_source" ]; then
       # Create .config directory if it doesn't exist
@@ -261,9 +260,6 @@ setup_kde_shortcuts() {
       log_warning "KDE shortcuts configuration file not found at $kde_shortcuts_source"
     fi
 
-    # Setup Konsole fullscreen window rules
-    setup_konsole_fullscreen_rules
-    
     # Apply KDE changes immediately
     apply_kde_changes
 
@@ -389,57 +385,6 @@ setup_gnome_configs() {
     fi
   else
     log_info "GNOME not detected. Skipping GNOME configurations"
-  fi
-}
-
-# Function to setup Konsole maximized window rules
-setup_konsole_fullscreen_rules() {
-  log_info "Setting up Konsole maximized window rules..."
-  
-  local kwin_rules_source="$CONFIGS_DIR/kwinrulesrc"
-  local kwin_rules_dest="$HOME/.config/kwinrulesrc"
-  
-  # Create .config directory if it doesn't exist
-  mkdir -p "$HOME/.config"
-  
-  # Copy the pre-configured kwinrulesrc from configs to user config
-  if [ -f "$kwin_rules_source" ]; then
-    cp "$kwin_rules_source" "$kwin_rules_dest"
-    log_success "KDE window rules copied from configs to ~/.config/kwinrulesrc"
-    log_info "Konsole will automatically go maximized without titlebar"
-    
-    # Verify the file was copied correctly
-    if [ -f "$kwin_rules_dest" ]; then
-      log_success "KDE window rules file verified at $kwin_rules_dest"
-      # Check for Konsole maximized rule
-      if grep -q "Konsole Maximized" "$kwin_rules_dest"; then
-        log_success "Konsole maximized rule found in configuration"
-      else
-        log_warning "Konsole maximized rule not found in configuration file"
-      fi
-      
-      # Check for specific rule properties
-      if grep -q "noborder=true" "$kwin_rules_dest" && grep -q "maximize=true" "$kwin_rules_dest"; then
-        log_success "Konsole no-border and maximized rules verified"
-      else
-        log_warning "Konsole border or maximized rules not properly configured"
-      fi
-      
-      # Check for window class matching
-      if grep -q "wmclass=konsole" "$kwin_rules_dest"; then
-        log_success "Konsole window class matching verified"
-      else
-        log_warning "Konsole window class matching not found"
-      fi
-      
-      # Set proper permissions
-      chmod 644 "$kwin_rules_dest"
-      log_success "Set proper permissions on KDE window rules file"
-    else
-      log_error "KDE window rules file was not copied successfully"
-    fi
-  else
-    log_warning "KDE window rules configuration file not found at $kwin_rules_source"
   fi
 }
 

@@ -181,8 +181,17 @@ setup_shell() {
 setup_kde_shortcuts() {
   step "Setting up KDE global shortcuts and Konsole fullscreen"
 
-  # Only proceed if KDE Plasma is detected
+  # Check for KDE Plasma installation (works during installation too)
+  local kde_detected=false
   if [[ "$XDG_CURRENT_DESKTOP" == "KDE" ]]; then
+    kde_detected=true
+  elif pacman -Q plasma-workspace >/dev/null 2>&1; then
+    kde_detected=true
+  elif [[ -d "/usr/share/plasma" ]] || [[ -d "/usr/lib/plasma" ]]; then
+    kde_detected=true
+  fi
+
+  if [[ "$kde_detected" == true ]]; then
     # Get full Plasma version
     local plasma_version
     plasma_version=$(get_desktop_version "KDE")
@@ -214,6 +223,19 @@ setup_kde_shortcuts() {
       log_success "KDE global shortcuts configuration copied successfully"
       log_info "KDE shortcuts will be active after next login or KDE restart"
       log_info "Custom shortcuts: Meta+Q (Close Window), Meta+Return (Konsole)"
+      
+      # Verify the file was copied correctly
+      if [ -f "$kde_shortcuts_dest" ]; then
+        log_success "KDE shortcuts file verified at $kde_shortcuts_dest"
+        # Check for Konsole shortcut
+        if grep -q "konsole" "$kde_shortcuts_dest"; then
+          log_success "Konsole shortcut found in configuration"
+        else
+          log_warning "Konsole shortcut not found in configuration file"
+        fi
+      else
+        log_error "KDE shortcuts file was not copied successfully"
+      fi
     else
       log_warning "KDE shortcuts configuration file not found at $kde_shortcuts_source"
     fi
@@ -366,6 +388,19 @@ setup_konsole_fullscreen_rules() {
     cp "$kwin_rules_source" "$kwin_rules_dest"
     log_success "KDE window rules copied from configs to ~/.config/kwinrulesrc"
     log_info "Konsole will automatically go fullscreen without titlebar"
+    
+    # Verify the file was copied correctly
+    if [ -f "$kwin_rules_dest" ]; then
+      log_success "KDE window rules file verified at $kwin_rules_dest"
+      # Check for Konsole fullscreen rule
+      if grep -q "Konsole Fullscreen" "$kwin_rules_dest"; then
+        log_success "Konsole fullscreen rule found in configuration"
+      else
+        log_warning "Konsole fullscreen rule not found in configuration file"
+      fi
+    else
+      log_error "KDE window rules file was not copied successfully"
+    fi
   else
     log_warning "KDE window rules configuration file not found at $kwin_rules_source"
   fi

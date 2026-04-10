@@ -105,12 +105,52 @@ configure_systemd_boot_zen_default() {
 		return 1
 	fi
 	
+	# First check for existing zen entries (archinstall style with date prefixes)
+	local zen_entry=$(find_zen_entry)
+	
+	if [[ -n "$zen_entry" ]]; then
+		log_success "Found existing Zen kernel entry: $zen_entry"
+		# Use the existing zen entry filename for loader.conf
+		local zen_filename=$(basename "$zen_entry")
+		ui_info "Using existing Zen entry: $zen_filename"
+	else
+		log_info "No existing Zen kernel entry found, creating new one..."
+		# Create a new zen entry with date prefix
+		zen_entry=$(configure_systemd_boot_zen)
+		if [[ $? -ne 0 ]] || [[ -z "$zen_entry" ]]; then
+			log_error "Failed to create Zen kernel entry"
+			return 1
+		fi
+		local zen_filename=$(basename "$zen_entry")
+	fi
+	
 	# Remove existing default line and add Zen kernel as default
 	sudo sed -i '/^default /d' "$loader_config"
-	echo "default linux-zen.conf" | sudo tee -a "$loader_config" >/dev/null
+	echo "default $zen_filename" | sudo tee -a "$loader_config" >/dev/null
 	
 	log_success "Set Zen kernel as default in systemd-boot loader.conf"
-	ui_info "Zen kernel will be used as default boot entry"
+	ui_info "Zen kernel will be used as default boot entry: $zen_filename"
+}
+
+# Find existing Zen kernel entry (handles archinstall date prefixes)
+find_zen_entry() {
+	local entries_dir="/boot/loader/entries"
+	
+	# Look for zen entries with date prefixes (archinstall style)
+	local zen_entry=$(find "$entries_dir" -name "*linux-zen.conf" ! -name "*fallback*" | head -1)
+	
+	if [[ -f "$zen_entry" ]]; then
+		echo "$zen_entry"
+		return 0
+	fi
+	
+	# Fallback: simple linux-zen.conf
+	if [[ -f "$entries_dir/linux-zen.conf" ]]; then
+		echo "$entries_dir/linux-zen.conf"
+		return 0
+	fi
+	
+	return 1
 }
 
 # Configure systemd-boot for Zen Kernel
@@ -147,10 +187,14 @@ configure_systemd_boot_zen() {
 		local options=$(grep "^options " "$existing_entry" | sed 's/^options //')
 		local machine_id=$(grep "^machine-id " "$existing_entry" | sed 's/^machine-id //' || echo "")
 		
-		ui_info "Creating linux-zen.conf with parameters from $(basename "$existing_entry")"
+		# Create date-prefixed filename like archinstall does
+		local date_prefix=$(date +%Y-%m-%d)
+		local zen_entry_file="$entries_dir/${date_prefix}_linux-zen.conf"
+		
+		ui_info "Creating ${date_prefix}_linux-zen.conf with parameters from $(basename "$existing_entry")"
 		
 		# Create Zen kernel entry with EXACT same parameters, just changing kernel files
-		sudo tee "$entries_dir/linux-zen.conf" > /dev/null << EOF
+		sudo tee "$zen_entry_file" > /dev/null << EOF
 title   Arch Linux (Zen Kernel)
 linux   /vmlinuz-linux-zen
 initrd  /initramfs-linux-zen.img
@@ -159,12 +203,15 @@ EOF
 		
 		# Add machine-id if it existed in original
 		if [[ -n "$machine_id" ]]; then
-			echo "machine-id $machine_id" | sudo tee -a "$entries_dir/linux-zen.conf" > /dev/null
+			echo "machine-id $machine_id" | sudo tee -a "$zen_entry_file" > /dev/null
 		fi
 		
 		log_success "Created systemd-boot entry for Zen Kernel with exact same parameters as $(basename "$existing_entry")"
-		ui_info "Zen kernel entry created: $entries_dir/linux-zen.conf"
-		ui_info "To make Zen kernel default, edit /boot/loader/loader.conf and set: default linux-zen.conf"
+		ui_info "Zen kernel entry created: $zen_entry_file"
+		
+		# Return the full path for use in loader.conf
+		echo "$zen_entry_file"
+		return 0
 	else
 		log_warning "Could not find existing boot entry to copy parameters from"
 		return 1

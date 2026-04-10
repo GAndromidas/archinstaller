@@ -71,38 +71,75 @@ add_kernel_parameters() {
   
   case "$BOOTLOADER" in
     "systemd-boot")
-      # systemd-boot logic (existing)
+      # systemd-boot logic with consistent options
       local boot_entries_dir="/boot/loader/entries"
       if [ ! -d "$boot_entries_dir" ]; then
         log_warning "Boot entries directory not found. Skipping kernel parameter addition."
         return
       fi
-      local boot_entries=()
+      
+      # Find all kernel entries (excluding fallback)
+      local kernel_entries=()
       while IFS= read -r -d '' entry; do
-        boot_entries+=("$entry")
-      done < <(find "$boot_entries_dir" -name "*.conf" -print0 2>/dev/null)
-      if [ ${#boot_entries[@]} -eq 0 ]; then
-        log_warning "No boot entries found. Skipping kernel parameter addition."
+        kernel_entries+=("$entry")
+      done < <(find "$boot_entries_dir" -name "*.conf" ! -name "*fallback*" -print0 2>/dev/null)
+      
+      if [ ${#kernel_entries[@]} -eq 0 ]; then
+        log_warning "No kernel entries found. Skipping kernel parameter addition."
         return
       fi
-      echo -e "${CYAN}Found ${#boot_entries[@]} systemd-boot entries${RESET}"
-      local total=${#boot_entries[@]}
-      local current=0
-      local modified_count=0
-      for entry in "${boot_entries[@]}"; do
+      
+      echo -e "${CYAN}Found ${#kernel_entries[@]} systemd-boot kernel entries${RESET}"
+      
+      # Use the first entry as the standard for options
+      local standard_entry="${kernel_entries[0]}"
+      local standard_options=$(grep "^options " "$standard_entry" | sed 's/^options //' || echo "")
+      
+      if [[ -z "$standard_options" ]]; then
+        log_warning "No options found in standard entry: $(basename "$standard_entry")"
+        return
+      fi
+      
+      # Add splash to standard options if not already present
+      if [[ "$standard_options" != *"splash"* ]]; then
+        standard_options="$standard_options splash"
+        log_info "Adding 'splash' to standard options"
+      else
+        log_info "'splash' already present in standard options"
+      fi
+      
+      # Update all entries to have the same options with splash
+      local updated_count=0
+      for entry in "${kernel_entries[@]}"; do
         local entry_name=$(basename "$entry")
-        if ! grep -q "splash" "$entry"; then
-          if sudo sed -i '/^options / s/$/ splash/' "$entry"; then
-            log_success "Added 'splash' to $entry_name"
-            ((modified_count++))
-          else
-            log_error "Failed to add 'splash' to $entry_name"
-          fi
+        
+        # Extract current options from the entry
+        local current_options=$(grep "^options " "$entry" | sed 's/^options //' || echo "")
+        
+        # Only update if options are different
+        if [[ "$current_options" != "$standard_options" ]]; then
+          # Create a temporary file with updated options
+          local temp_file=$(mktemp)
+          
+          # Copy all lines except options, then add new options
+          grep -v "^options " "$entry" > "$temp_file"
+          echo "options $standard_options" >> "$temp_file"
+          
+          # Replace the original file
+          sudo mv "$temp_file" "$entry"
+          
+          log_success "Updated options in $entry_name with splash"
+          ((updated_count++))
         else
-          log_warning "'splash' already set in $entry_name"
+          log_info "Options already consistent in $entry_name"
         fi
       done
-      echo -e "\\n${GREEN}Kernel parameters updated for all boot entries (${modified_count} modified)${RESET}\\n"
+      
+      if [[ $updated_count -gt 0 ]]; then
+        echo -e "\\n${GREEN}Kernel parameters updated consistently for all entries (${updated_count} modified)${RESET}\\n"
+      else
+        echo -e "\\n${GREEN}All kernel entries already have consistent options with splash${RESET}\\n"
+      fi
       ;;
     "grub")
       # GRUB logic

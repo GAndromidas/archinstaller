@@ -227,12 +227,22 @@ setup_kde_shortcuts() {
       # Verify the file was copied correctly
       if [ -f "$kde_shortcuts_dest" ]; then
         log_success "KDE shortcuts file verified at $kde_shortcuts_dest"
+        # Check for Window Close shortcut (Meta+Q)
+        if grep -q "Window Close=Meta+Q" "$kde_shortcuts_dest"; then
+          log_success "Meta+Q (Window Close) shortcut found in configuration"
+        else
+          log_warning "Meta+Q (Window Close) shortcut not found in configuration file"
+        fi
         # Check for Konsole shortcut
         if grep -q "konsole" "$kde_shortcuts_dest"; then
           log_success "Konsole shortcut found in configuration"
         else
           log_warning "Konsole shortcut not found in configuration file"
         fi
+        
+        # Set proper permissions
+        chmod 644 "$kde_shortcuts_dest"
+        log_success "Set proper permissions on KDE shortcuts file"
       else
         log_error "KDE shortcuts file was not copied successfully"
       fi
@@ -242,6 +252,9 @@ setup_kde_shortcuts() {
 
     # Setup Konsole fullscreen window rules
     setup_konsole_fullscreen_rules
+    
+    # Apply KDE changes immediately
+    apply_kde_changes
 
   else
     log_info "KDE Plasma not detected. Skipping KDE shortcuts configuration"
@@ -378,11 +391,6 @@ setup_konsole_fullscreen_rules() {
   # Create .config directory if it doesn't exist
   mkdir -p "$HOME/.config"
   
-  # Backup existing rules if they exist
-  if [ -f "$kwin_rules_dest" ]; then
-    cp "$kwin_rules_dest" "${kwin_rules_dest}.backup.$(date +%Y%m%d_%H%M%S)"
-  fi
-  
   # Copy the pre-configured kwinrulesrc from configs to user config
   if [ -f "$kwin_rules_source" ]; then
     cp "$kwin_rules_source" "$kwin_rules_dest"
@@ -398,12 +406,57 @@ setup_konsole_fullscreen_rules() {
       else
         log_warning "Konsole fullscreen rule not found in configuration file"
       fi
+      
+      # Check for specific rule properties
+      if grep -q "noborder=true" "$kwin_rules_dest" && grep -q "fullscreen=true" "$kwin_rules_dest"; then
+        log_success "Konsole no-border and fullscreen rules verified"
+      else
+        log_warning "Konsole border or fullscreen rules not properly configured"
+      fi
+      
+      # Check for window class matching
+      if grep -q "wmclass=konsole" "$kwin_rules_dest"; then
+        log_success "Konsole window class matching verified"
+      else
+        log_warning "Konsole window class matching not found"
+      fi
+      
+      # Set proper permissions
+      chmod 644 "$kwin_rules_dest"
+      log_success "Set proper permissions on KDE window rules file"
     else
       log_error "KDE window rules file was not copied successfully"
     fi
   else
     log_warning "KDE window rules configuration file not found at $kwin_rules_source"
   fi
+}
+
+# Apply KDE changes immediately
+apply_kde_changes() {
+  log_info "Applying KDE configuration changes..."
+  
+  # Restart kglobalshortcut daemon to apply new shortcuts
+  if command -v kquitapp5 >/dev/null 2>&1; then
+    kquitapp5 kglobalaccel && kstart5 kglobalaccel >/dev/null 2>&1 &
+    log_success "Restarted KDE global shortcuts daemon"
+  fi
+  
+  # Restart kwin to apply window rules
+  if command -v kquitapp5 >/dev/null 2>&1; then
+    kquitapp5 kwin && kstart5 kwin >/dev/null 2>&1 &
+    log_success "Restarted KWin window manager"
+  fi
+  
+  # Alternative method: use dbus to reload configurations
+  if command -v qdbus >/dev/null 2>&1; then
+    qdbus org.kde.kglobalaccel /Component reconfigure >/dev/null 2>&1 || true
+    qdbus org.kde.kwin /KWin reconfigure >/dev/null 2>&1 || true
+    log_success "Sent reload signals to KDE components"
+  fi
+  
+  ui_info "KDE shortcuts and window rules should now be active"
+  ui_info "If changes don't appear, please restart KDE session"
 }
 
 # Main execution

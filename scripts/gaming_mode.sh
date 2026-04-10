@@ -105,52 +105,19 @@ configure_systemd_boot_zen_default() {
 		return 1
 	fi
 	
-	# First check for existing zen entries (archinstall style with date prefixes)
-	local zen_entry=$(find_zen_entry)
-	
-	if [[ -n "$zen_entry" ]]; then
-		log_success "Found existing Zen kernel entry: $zen_entry"
-		# Use the existing zen entry filename for loader.conf
-		local zen_filename=$(basename "$zen_entry")
-		ui_info "Using existing Zen entry: $zen_filename"
-	else
-		log_info "No existing Zen kernel entry found, creating new one..."
-		# Create a new zen entry with date prefix
-		zen_entry=$(configure_systemd_boot_zen)
-		if [[ $? -ne 0 ]] || [[ -z "$zen_entry" ]]; then
-			log_error "Failed to create Zen kernel entry"
-			return 1
-		fi
-		local zen_filename=$(basename "$zen_entry")
+	# Always create or update simple linux-zen.conf entry
+	local zen_entry=$(configure_systemd_boot_zen)
+	if [[ $? -ne 0 ]] || [[ -z "$zen_entry" ]]; then
+		log_error "Failed to create Zen kernel entry"
+		return 1
 	fi
 	
-	# Remove existing default line and add Zen kernel as default
+	# Always use simple linux-zen.conf as default
 	sudo sed -i '/^default /d' "$loader_config"
-	echo "default $zen_filename" | sudo tee -a "$loader_config" >/dev/null
+	echo "default linux-zen.conf" | sudo tee -a "$loader_config" >/dev/null
 	
 	log_success "Set Zen kernel as default in systemd-boot loader.conf"
-	ui_info "Zen kernel will be used as default boot entry: $zen_filename"
-}
-
-# Find existing Zen kernel entry (handles archinstall date prefixes)
-find_zen_entry() {
-	local entries_dir="/boot/loader/entries"
-	
-	# Look for zen entries with date prefixes (archinstall style)
-	local zen_entry=$(find "$entries_dir" -name "*linux-zen.conf" ! -name "*fallback*" | head -1)
-	
-	if [[ -f "$zen_entry" ]]; then
-		echo "$zen_entry"
-		return 0
-	fi
-	
-	# Fallback: simple linux-zen.conf
-	if [[ -f "$entries_dir/linux-zen.conf" ]]; then
-		echo "$entries_dir/linux-zen.conf"
-		return 0
-	fi
-	
-	return 1
+	ui_info "Zen kernel will be used as default boot entry: linux-zen.conf"
 }
 
 # Configure systemd-boot for Zen Kernel
@@ -159,10 +126,10 @@ configure_systemd_boot_zen() {
 	
 	ui_info "Creating Zen kernel entry in: $entries_dir"
 	
-	# Find the best existing entry to copy from (handle date prefixes like 2026-04-01_linux.conf)
+	# Find the best existing entry to copy from (handle both dated and simple names)
 	local existing_entry=""
-	local linux_entry=$(find "$entries_dir" -name "*_linux.conf" ! -name "*fallback*" ! -name "*zen*" | head -1)
-	local lts_entry=$(find "$entries_dir" -name "*_linux-lts.conf" ! -name "*fallback*" ! -name "*zen*" | head -1)
+	local linux_entry=$(find "$entries_dir" -name "*linux.conf" ! -name "*fallback*" ! -name "*zen*" | head -1)
+	local lts_entry=$(find "$entries_dir" -name "*linux-lts.conf" ! -name "*fallback*" ! -name "*zen*" | head -1)
 	
 	ui_info "Found linux entry: $linux_entry"
 	ui_info "Found LTS entry: $lts_entry"
@@ -187,11 +154,10 @@ configure_systemd_boot_zen() {
 		local options=$(grep "^options " "$existing_entry" | sed 's/^options //')
 		local machine_id=$(grep "^machine-id " "$existing_entry" | sed 's/^machine-id //' || echo "")
 		
-		# Create date-prefixed filename like archinstall does
-		local date_prefix=$(date +%Y-%m-%d)
-		local zen_entry_file="$entries_dir/${date_prefix}_linux-zen.conf"
+		# Always use simple filename: linux-zen.conf
+		local zen_entry_file="$entries_dir/linux-zen.conf"
 		
-		ui_info "Creating ${date_prefix}_linux-zen.conf with parameters from $(basename "$existing_entry")"
+		ui_info "Creating linux-zen.conf with parameters from $(basename "$existing_entry")"
 		
 		# Create Zen kernel entry with EXACT same parameters, just changing kernel files
 		sudo tee "$zen_entry_file" > /dev/null << EOF
@@ -209,12 +175,63 @@ EOF
 		log_success "Created systemd-boot entry for Zen Kernel with exact same parameters as $(basename "$existing_entry")"
 		ui_info "Zen kernel entry created: $zen_entry_file"
 		
-		# Return the full path for use in loader.conf
+		# Don't sync options - respect current configuration (including Plymouth splash)
+		log_info "Respecting current kernel options (including Plymouth configuration)"
+		
+		# Return the full path for verification
 		echo "$zen_entry_file"
 		return 0
 	else
 		log_warning "Could not find existing boot entry to copy parameters from"
 		return 1
+	fi
+}
+
+# Sync kernel options across all kernel entries to ensure consistency
+sync_kernel_options() {
+	local standard_options="$1"
+	local entries_dir="/boot/loader/entries"
+	
+	ui_info "Syncing kernel options across all kernel entries..."
+	
+	# Find all kernel entries (excluding fallback)
+	local kernel_entries=()
+	while IFS= read -r -d $'\0' entry; do
+		kernel_entries+=("$entry")
+	done < <(find "$entries_dir" -name "*.conf" ! -name "*fallback*" -print0)
+	
+	local updated_count=0
+	
+	for entry in "${kernel_entries[@]}"; do
+		local entry_name=$(basename "$entry")
+		
+		# Extract current options from the entry
+		local current_options=$(grep "^options " "$entry" | sed 's/^options //' || echo "")
+		
+		# Only update if options are different
+		if [[ "$current_options" != "$standard_options" ]]; then
+			# Create a temporary file with updated options
+			local temp_file=$(mktemp)
+			
+			# Copy all lines except options, then add new options
+			grep -v "^options " "$entry" > "$temp_file"
+			echo "options $standard_options" >> "$temp_file"
+			
+			# Replace the original file
+			sudo mv "$temp_file" "$entry"
+			
+			log_success "Updated options in $entry_name"
+			((updated_count++))
+		else
+			log_info "Options already consistent in $entry_name"
+		fi
+	done
+	
+	if [[ $updated_count -gt 0 ]]; then
+		log_success "Synced kernel options in $updated_count entries"
+		ui_info "All kernel entries now have identical options"
+	else
+		log_info "All kernel entries already have consistent options"
 	fi
 }
 
@@ -257,11 +274,6 @@ configure_grub_zen() {
 # Configure Limine bootloader for Zen Kernel with Plymouth support
 configure_limine_zen() {
 	local limine_config="/boot/limine.conf"
-	
-	# Backup existing configuration
-	if [[ -f "$limine_config" ]]; then
-		sudo cp "$limine_config" "${limine_config}.backup.$(date +%Y%m%d_%H%M%S)"
-	fi
 	
 	# Get root filesystem information
 	local root_uuid=""

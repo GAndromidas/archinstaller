@@ -195,16 +195,6 @@ setup_kde_shortcuts() {
     # Only support Plasma 6+ for bleeding edge Arch Linux
     if [ -n "$version_number" ] && [ "$version_number" -ge 6 ]; then
       log_success "KDE Plasma 6+ detected - supported configuration"
-      
-      # Install PyQt6 silently for KDE automation if not already installed
-      if ! pacman -Qi python-pyqt6 &>/dev/null; then
-        log_info "Installing python-pyqt6 for KDE automation..."
-        if sudo pacman -S --noconfirm --needed python-pyqt6 >/dev/null 2>&1; then
-          log_success "python-pyqt6 installed successfully"
-        else
-          log_warning "Failed to install python-pyqt6, some KDE features may not work"
-        fi
-      fi
     else
       log_error "KDE Plasma 5 detected - not supported on bleeding edge Arch Linux"
       log_info "Arch Linux recommends Plasma 6 for latest features and Qt6 support"
@@ -369,168 +359,24 @@ setup_gnome_configs() {
 setup_konsole_fullscreen_rules() {
   log_info "Setting up Konsole fullscreen window rules..."
   
-  local kwin_rules_file="$HOME/.config/kwinrulesrc"
+  local kwin_rules_source="$CONFIGS_DIR/kwinrulesrc"
+  local kwin_rules_dest="$HOME/.config/kwinrulesrc"
+  
+  # Create .config directory if it doesn't exist
+  mkdir -p "$HOME/.config"
   
   # Backup existing rules if they exist
-  if [ -f "$kwin_rules_file" ]; then
-    cp "$kwin_rules_file" "${kwin_rules_file}.backup.$(date +%Y%m%d_%H%M%S)"
+  if [ -f "$kwin_rules_dest" ]; then
+    cp "$kwin_rules_dest" "${kwin_rules_dest}.backup.$(date +%Y%m%d_%H%M%S)"
   fi
   
-  # Create or update kwinrulesrc with Konsole fullscreen rule
-  if [ ! -f "$kwin_rules_file" ]; then
-    # Create new file with Konsole rule
-    cat > "$kwin_rules_file" << 'EOF'
-[General]
-count=1
-rules=1
-
-[1]
-Description=Konsole Fullscreen - No Titlebar
-Description=
-clientMachine=
-clientMachineMatch=true
-types=1
-types=0
-title=.*
-titlematch=2
-windowclass=konsole
-windowclassmatch=2
-windowrole=
-windowrolematch=0
-clientmachine=
-clientmachinematch=0
-resourceclass=konsole
-resourceclassmatch=2
-resource=
-resourcematch=0
-position=0,0
-positionrule=0
-size=0,0
-sizerule=0
-minsize=0,0
-minsizerule=0
-maxsize=0,0
-maxsizerule=0
-opacity=100
-opacityrule=0
-opacityactive=100
-opacityactiverule=0
-fullscreen=true
-fullscreenrule=1
-minimize=false
-minimizerule=0
-shade=false
-shaderule=0
-skiptaskbar=false
-skiptaskbarrule=0
-skippager=false
-skippagerrule=0
-above=false
-aboverule=0
-below=false
-belowrule=0
-noborder=true
-noborderrule=1
-screenclass=0
-screenrule=0
-desktop=0
-desktoprule=0
-type=0
-typerule=0
-maxvert=true
-maxvertrule=0
-maxhoriz=true
-maxhorizrule=0
-layer=0
-layerrule=0
-placement=0
-placementrule=0
-shortcut=
-shortcutrule=0
-EOF
+  # Copy the pre-configured kwinrulesrc
+  if [ -f "$kwin_rules_source" ]; then
+    cp "$kwin_rules_source" "$kwin_rules_dest"
+    log_success "Konsole fullscreen window rules configured"
   else
-    # Add Konsole rule to existing file if not already present
-    if ! grep -q "Description=Konsole Fullscreen" "$kwin_rules_file"; then
-      local rule_count=$(grep "^\[General\]" -A 5 "$kwin_rules_file" | grep "^count=" | cut -d'=' -f2)
-      local new_rule_num=$((rule_count + 1))
-      
-      # Update count
-      sed -i "s/^count=.*/count=$new_rule_num/" "$kwin_rules_file"
-      sed -i "s/^rules=.*/rules=$new_rule_num/" "$kwin_rules_file"
-      
-      # Add new rule section
-      cat >> "$kwin_rules_file" << EOF
-
-[$new_rule_num]
-Description=Konsole Fullscreen
-Description=
-clientMachine=
-clientMachineMatch=true
-types=1
-types=0
-title=konsole
-titlematch=0
-windowclass=konsole
-windowclassmatch=0
-windowrole=
-windowrolematch=0
-clientmachine=
-clientmachinematch=0
-resourceclass=konsole
-resourceclassmatch=0
-resource=
-resourcematch=0
-position=0,0
-positionrule=0
-size=0,0
-sizerule=0
-minsize=0,0
-minsizerule=0
-maxsize=0,0
-maxsizerule=0
-opacity=100
-opacityrule=0
-opacityactive=100
-opacityactiverule=0
-fullscreen=false
-fullscreenrule=2
-minimize=false
-minimizerule=0
-shade=false
-shaderule=0
-skiptaskbar=false
-skiptaskbarrule=0
-skippager=false
-skippagerrule=0
-above=false
-aboverule=0
-below=false
-belowrule=0
-noborder=false
-noborderrule=0
-screenclass=0
-screenrule=0
-fullscreen=true
-fullscreenrule=1
-desktop=0
-desktoprule=0
-type=0
-typerule=0
-maxvert=true
-maxvertrule=0
-maxhoriz=true
-maxhorizrule=0
-layer=0
-layerrule=0
-placement=0
-placementrule=0
-shortcut=
-shortcutrule=0
-EOF
-    fi
+    log_warning "KDE window rules configuration file not found at $kwin_rules_source"
   fi
-  
-  log_success "Konsole fullscreen window rules configured"
 }
 
 # Function to setup Konsole fullscreen launcher
@@ -576,28 +422,8 @@ EOF
   log_success "Created Konsole fullscreen launcher at $launcher_script"
 }
 
-# Function to cleanup temporary PyQt6 after KDE configuration
-cleanup_kde_dependencies() {
-  # Check if python-pyqt6 was installed as helper utility and remove it
-  if pacman -Q python-pyqt6 &>/dev/null; then
-    log_to_file "Cleaning up temporary python-pyqt6 (no longer needed after KDE configuration)"
-    # Temporarily disable snapper hooks for completely silent removal
-    if command -v snapper >/dev/null 2>&1; then
-      # Disable snapper hooks temporarily
-      sudo snapper --config root set-config "SYNC_ACLS" "no" >/dev/null 2>&1 || true
-      sudo pacman -Rns --noconfirm --disable-download-timeout python-pyqt6 >/dev/null 2>&1 || {
-        log_to_file "Failed to remove python-pyqt6, will keep installed"
-      }
-      # Re-enable snapper hooks
-      sudo snapper --config root set-config "SYNC_ACLS" "yes" >/dev/null 2>&1 || true
-    else
-      # No snapper, just remove normally
-      sudo pacman -Rns --noconfirm --disable-download-timeout python-pyqt6 >/dev/null 2>&1 || {
-        log_to_file "Failed to remove python-pyqt6, will keep installed"
-      }
-    fi
-  fi
-}
+# PyQt6 is now installed as a permanent package through programs.yaml
+# No cleanup needed since it's a useful tool for KDE automation
 
 # Function to reload KDE configuration
 reload_kde_config() {

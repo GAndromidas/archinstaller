@@ -161,6 +161,7 @@ desktop_environments:
       - plasma-pa
       - plasma-systemmonitor
       - powerdevil
+      - python-pyqt6
       - qbittorrent
       - spectacle
       - xdg-desktop-portal-kde

@@ -1,0 +1,13 @@
+[General]
+count=1
+rules=b7c6e3ea-bdc9-47e0-85ef-85e350b9fb55
+
+[b7c6e3ea-bdc9-47e0-85ef-85e350b9fb55]
+Description=Window settings for org.kde.konsole
+noborder=true
+noborderrule=2
+title=~ : zsh ~ Konsole
+types=1
+wmclass=konsole org.kde.konsole
+wmclasscomplete=true
+wmclassmatch=1

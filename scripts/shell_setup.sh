@@ -221,9 +221,6 @@ setup_kde_shortcuts() {
     # Setup Konsole fullscreen window rules
     setup_konsole_fullscreen_rules
 
-    # Setup Konsole fullscreen launcher
-    setup_konsole_launcher
-
     # Reload KDE configuration
     reload_kde_config
 
@@ -377,48 +374,7 @@ setup_konsole_fullscreen_rules() {
   fi
 }
 
-# Function to setup Konsole fullscreen launcher
-setup_konsole_launcher() {
-  log_info "Setting up Konsole fullscreen launcher..."
-  
-  # Install xdotool if not present
-  if ! pacman -Q xdotool &>/dev/null; then
-    log_info "Installing xdotool for Konsole launcher..."
-    sudo pacman -S --noconfirm xdotool || {
-      log_warning "Failed to install xdotool, Konsole launcher may not work properly"
-    }
-  fi
-  
-  # Create launcher script
-  local launcher_dir="$HOME/.local/bin"
-  mkdir -p "$launcher_dir"
-  
-  local launcher_script="$launcher_dir/konsole-fullscreen"
-  
-  cat > "$launcher_script" << 'EOF'
-#!/bin/bash
-# Konsole Fullscreen Launcher
-
-# Check if Konsole is already running
-if pgrep -f "konsole" > /dev/null; then
-  # If running, bring to front and toggle fullscreen
-  qdbus org.kde.konsole /MainApplication org.kde.MainApplication.raise
-  qdbus org.kde.konsole /MainApplication org.kde.MainApplication.activate
-  sleep 0.5
-  # Send F11 to toggle fullscreen
-  xdotool key F11
-else
-  # Start new Konsole instance
-  konsole &
-  sleep 1
-  # Force fullscreen
-  xdotool key F11
-fi
-EOF
-  
-  chmod +x "$launcher_script"
-  log_success "Created Konsole fullscreen launcher at $launcher_script"
-}
+# Konsole launcher not needed - window rules handle fullscreen automatically
 
 # PyQt6 is now installed as a permanent package through programs.yaml
 # No cleanup needed since it's a useful tool for KDE automation

@@ -3,10 +3,13 @@ count=1
 rules=b7c6e3ea-bdc9-47e0-85ef-85e350b9fb55
 
 [b7c6e3ea-bdc9-47e0-85ef-85e350b9fb55]
-Description=Window settings for org.kde.konsole
+Description=Konsole Fullscreen - No Titlebar
 noborder=true
 noborderrule=2
-title=~ : zsh ~ Konsole
+fullscreen=true
+fullscreenrule=2
+title=.*
+titlematch=2
 types=1
 wmclass=konsole org.kde.konsole
 wmclasscomplete=true

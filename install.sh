@@ -238,6 +238,170 @@ fi
 
 export INSTALL_MODE
 
+# Enhanced resume functionality with partial failure handling and error recovery
+show_resume_menu() {
+  # Validate state file first
+  if ! validate_state_file; then
+    return 0
+  fi
+  
+  if [ -f "$STATE_FILE" ] && [ -s "$STATE_FILE" ]; then
+    echo ""
+    ui_info "Previous installation detected. Checking installation status..."
+
+    local completed_steps=()
+    local step_status=()
+    local has_failures=false
+    local last_completed_step=""
+
+    # Read and parse state file
+    while IFS= read -r step; do
+      completed_steps+=("$step")
+      # Check if step was marked as completed
+      if [[ "$step" =~ ^COMPLETED: ]]; then
+        step_status+=("completed")
+        last_completed_step="${step#*: }"
+      elif [[ "$step" =~ ^FAILED: ]]; then
+        step_status+=("failed")
+        has_failures=true
+      else
+        # Legacy format - assume completed
+        step_status+=("completed")
+        last_completed_step="$step"
+      fi
+    done < "$STATE_FILE"
+
+    if [ ${#completed_steps[@]} -eq 0 ]; then
+      ui_info "No completed steps found in state file"
+      return 0
+    fi
+
+    echo ""
+    if supports_gum; then
+      gum style --foreground 220 "Installation Progress Summary"
+      echo ""
+      for i in "${!completed_steps[@]}"; do
+        local step="${completed_steps[$i]}"
+        local status="${step_status[$i]}"
+        local display_step="${step#*: }"
+        
+        case "$status" in
+          "completed")
+            gum format --template "  {{green}}[COMPLETED]{{}} {{white}}$display_step{{}}" >/dev/null
+            ;;
+          "failed")
+            gum format --template "  {{red}}[FAILED]{{}} {{white}}$display_step{{}}" >/dev/null
+            ;;
+        esac
+      done
+      echo ""
+      
+      if [ "$has_failures" = true ]; then
+        if gum confirm --default=true "Found failed steps. Retry failed steps first?"; then
+          ui_info "Will retry failed steps during installation"
+          return 0
+        elif gum confirm --default=false "Resume from last completed step?"; then
+          ui_success "Resuming installation from last completed step..."
+          return 0
+        else
+          if gum confirm --default=false "Start fresh installation (this will clear previous progress)?"; then
+            rm -f "$STATE_FILE" 2>/dev/null || true
+            ui_info "Starting fresh installation..."
+            return 0
+          else
+            ui_info "Installation cancelled by user"
+            exit 0
+          fi
+        fi
+      else
+        if gum confirm --default=true "Resume installation from where you left off?"; then
+          ui_success "Resuming installation..."
+          return 0
+        else
+          if gum confirm --default=false "Start fresh installation (this will clear previous progress)?"; then
+            rm -f "$STATE_FILE" 2>/dev/null || true
+            ui_info "Starting fresh installation..."
+            return 0
+          else
+            ui_info "Installation cancelled by user"
+            exit 0
+          fi
+        fi
+      fi
+    else
+      # Fallback for systems without gum
+      echo ""
+      for i in "${!completed_steps[@]}"; do
+        local step="${completed_steps[$i]}"
+        local status="${step_status[$i]}"
+        local display_step="${step#*: }"
+        
+        case "$status" in
+          "completed")
+            echo -e "${GREEN}[COMPLETED]${RESET} $display_step"
+            ;;
+          "failed")
+            echo -e "${RED}[FAILED]${RESET} $display_step"
+            ;;
+        esac
+      done
+      echo ""
+      
+      if [ "$has_failures" = true ]; then
+        echo "Found failed steps. Options:"
+        echo "1. Retry failed steps first"
+        echo "2. Resume from last completed step"
+        echo "3. Start fresh installation"
+        echo "4. Cancel"
+        echo ""
+        read -p "Choose an option (1-4): " choice
+        
+        case "$choice" in
+          1)
+            ui_info "Will retry failed steps during installation"
+            return 0
+            ;;
+          2)
+            ui_success "Resuming installation from last completed step..."
+            return 0
+            ;;
+          3)
+            rm -f "$STATE_FILE" 2>/dev/null || true
+            ui_info "Starting fresh installation..."
+            return 0
+            ;;
+          4)
+            ui_info "Installation cancelled by user"
+            exit 0
+            ;;
+          *)
+            ui_warn "Invalid option. Resuming installation..."
+            return 0
+            ;;
+        esac
+      else
+        echo "Resume installation from where you left off? (y/n)"
+        read -r response
+        if [[ "$response" =~ ^[Yy]$ ]]; then
+          ui_success "Resuming installation..."
+          return 0
+        else
+          echo "Start fresh installation? (y/n)"
+          read -r fresh_response
+          if [[ "$fresh_response" =~ ^[Yy]$ ]]; then
+            rm -f "$STATE_FILE" 2>/dev/null || true
+            ui_info "Starting fresh installation..."
+            return 0
+          else
+            ui_info "Installation cancelled by user"
+            exit 0
+          fi
+        fi
+      fi
+    fi
+  fi
+}
+
 # Show resume menu if previous installation detected
 if [ -f "$STATE_FILE" ] && [ -s "$STATE_FILE" ]; then
   show_resume_menu
@@ -288,7 +452,7 @@ mark_step_complete() {
   local temp_state_file="$STATE_FILE.tmp.$$"
   (
     flock -x 200
-    echo "$step_name" >> "$STATE_FILE"
+    echo "$step_name" >> "$temp_state_file"
   ) 200>"$temp_state_file" && mv "$temp_state_file" "$STATE_FILE" 2>/dev/null || {
     log_error "Failed to update state file for step: $step_name"
     return 1
@@ -316,159 +480,7 @@ validate_state_file() {
   return 0
 }
 
-# Enhanced resume functionality with partial failure handling and error recovery
-show_resume_menu() {
-  # Validate state file first
-  if ! validate_state_file; then
-    return 0
-  fi
-  
-  if [ -f "$STATE_FILE" ] && [ -s "$STATE_FILE" ]; then
-    echo ""
-    ui_info "Previous installation detected. Checking installation status..."
-
-    local completed_steps=()
-    local step_status=()
-    local has_failures=false
-    local last_completed_step=""
-
-    # Read and parse state file
-    while IFS= read -r step; do
-      completed_steps+=("$step")
-      # Check if step was marked as completed
-      if [[ "$step" =~ ^COMPLETED: ]]; then
-        step_status+=("completed")
-        last_completed_step="${step#*: }"
-      elif [[ "$step" =~ ^FAILED: ]]; then
-        step_status+=("failed")
-        has_failures=true
-      else
-        # Legacy format - assume completed
-        step_status+=("completed")
-        last_completed_step="$step"
-      fi
-    done < "$STATE_FILE"
-
-    # Validate state file integrity
-    if [ ${#completed_steps[@]} -eq 0 ]; then
-      log_warning "State file exists but is empty or corrupted. Starting fresh installation."
-      rm -f "$STATE_FILE" 2>/dev/null || true
-      ui_info "Starting fresh installation..."
-      return 0
-    fi
-
-    if supports_gum; then
-      echo ""
-      gum style --margin "0 2" --foreground 15 "Installation Status:"
-
-      for i in "${!completed_steps[@]}"; do
-        local step="${completed_steps[$i]}"
-        local status="${step_status[$i]}"
-        local display_step="${step#*: }"
-
-        if [ "$status" = "completed" ]; then
-          gum style --margin "0 4" --foreground 10 "✓ $display_step"
-        else
-          gum style --margin "0 4" --foreground 196 "✗ $display_step (FAILED)"
-        fi
-      done
-
-      echo ""
-      if [ "$has_failures" = true ]; then
-        if gum confirm --default=true "Found failed steps. Retry failed steps first?"; then
-          ui_info "Will retry failed steps during installation"
-          return 0
-        elif gum confirm --default=false "Resume from last completed step?"; then
-          ui_success "Resuming installation from last completed step..."
-          return 0
-        else
-          if gum confirm --default=false "Start fresh installation (this will clear previous progress)?"; then
-            rm -f "$STATE_FILE" 2>/dev/null || true
-            ui_info "Starting fresh installation..."
-            return 0
-          else
-            ui_info "Installation cancelled by user"
-            exit 0
-          fi
-        fi
-      else
-        if gum confirm --default=true "Resume installation from where you left off?"; then
-          ui_success "Resuming installation..."
-          return 0
-        else
-          if gum confirm --default=false "Start fresh installation (this will clear previous progress)?"; then
-            rm -f "$STATE_FILE" 2>/dev/null || true
-            ui_info "Starting fresh installation..."
-            return 0
-          else
-            ui_info "Installation cancelled by user"
-            exit 0
-          fi
-        fi
-      fi
-    else
-      # Fallback for systems without gum
-      echo ""
-      for i in "${!completed_steps[@]}"; do
-        local step="${completed_steps[$i]}"
-        local status="${step_status[$i]}"
-        local display_step="${step#*: }"
-
-        if [ "$status" = "completed" ]; then
-          echo -e "  ${GREEN}✓${RESET} $display_step"
-        else
-          echo -e "  ${RED}✗${RESET} $display_step (FAILED)"
-        fi
-      done
-
-      echo ""
-      if [ "$has_failures" = true ]; then
-        read -r -p "Found failed steps. Retry failed steps first? [Y/n]: " response
-        response=${response,,}
-        if [[ "$response" == "n" || "$response" == "no" ]]; then
-          read -r -p "Resume from last completed step? [y/N]: " response
-          response=${response,,}
-          if [[ "$response" == "y" || "$response" == "yes" ]]; then
-            ui_success "Resuming installation from last completed step..."
-            return 0
-          else
-            read -r -p "Start fresh installation? [y/N]: " response
-            response=${response,,}
-            if [[ "$response" == "y" || "$response" == "yes" ]]; then
-              rm -f "$STATE_FILE" 2>/dev/null || true
-              ui_info "Starting fresh installation..."
-              return 0
-            else
-              ui_info "Installation cancelled by user"
-              exit 0
-            fi
-          fi
-        else
-          ui_info "Will retry failed steps during installation"
-          return 0
-        fi
-      else
-        read -r -p "Resume installation? [Y/n]: " response
-        response=${response,,}
-        if [[ "$response" == "n" || "$response" == "no" ]]; then
-          read -r -p "Start fresh installation? [y/N]: " response
-          response=${response,,}
-          if [[ "$response" == "y" || "$response" == "yes" ]]; then
-            rm -f "$STATE_FILE" 2>/dev/null || true
-            ui_info "Starting fresh installation..."
-            return 0
-          else
-            ui_info "Installation cancelled by user"
-            exit 0
-          fi
-        else
-          ui_success "Resuming installation..."
-          return 0
-        fi
-      fi
-    fi
-  fi
-}
+# Duplicate show_resume_menu function removed - moved to beginning
 
 # Enhanced step completion with status tracking and error recovery
 # Tracks both completed and failed steps with detailed progress reporting

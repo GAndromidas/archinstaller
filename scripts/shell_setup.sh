@@ -181,21 +181,26 @@ setup_shell() {
 setup_kde_shortcuts() {
   step "Setting up KDE global shortcuts and Konsole fullscreen"
 
-  # Check for KDE Plasma installation (works during installation too)
+  # Check for KDE Plasma 6+ installation (works during installation too)
   local kde_detected=false
+  local plasma_version=""
+  
+  # Check for Plasma 6+ specifically
   if [[ "$XDG_CURRENT_DESKTOP" == "KDE" ]]; then
     kde_detected=true
+    # Get Plasma version
+    plasma_version=$(plasmashell --version 2>/dev/null | head -1 || echo "6.0")
   elif pacman -Q plasma-workspace >/dev/null 2>&1; then
     kde_detected=true
+    # Get installed version
+    plasma_version=$(pacman -Qi plasma-workspace | grep Version | awk '{print $2}' | cut -d'-' -f1)
   elif [[ -d "/usr/share/plasma" ]] || [[ -d "/usr/lib/plasma" ]]; then
     kde_detected=true
+    plasma_version="6.0"  # Assume Plasma 6+ if directory exists
   fi
 
+  # Only proceed if Plasma 6+ is detected
   if [[ "$kde_detected" == true ]]; then
-    # Get full Plasma version
-    local plasma_version
-    plasma_version=$(get_desktop_version "KDE")
-
     log_info "KDE Plasma detected: $plasma_version"
     
     # Extract version number for validation
@@ -222,26 +227,39 @@ setup_kde_shortcuts() {
       cp "$kde_shortcuts_source" "$kde_shortcuts_dest"
       log_success "KDE global shortcuts configuration copied successfully"
       log_info "KDE shortcuts will be active after next login or KDE restart"
-      log_info "Custom shortcuts: Meta+Q (Close Window), Meta+Return (Konsole)"
+      log_info "Custom shortcuts: Meta+Q & Alt+F4 (Close Window), Meta+Return (Konsole)"
       
       # Verify the file was copied correctly
       if [ -f "$kde_shortcuts_dest" ]; then
         log_success "KDE shortcuts file verified at $kde_shortcuts_dest"
-        # Check for Window Close shortcut (Meta+Q)
-        if grep -q "Window Close=Meta+Q" "$kde_shortcuts_dest"; then
-          log_success "Meta+Q (Window Close) shortcut found"
-          # Also verify Alt+F4 is not set as secondary
-          if grep -q "Window Close=.*Alt+F4" "$kde_shortcuts_dest"; then
-            log_warning "Alt+F4 still present as secondary shortcut - may conflict with Meta+Q"
-          else
-            log_success "Meta+Q is the exclusive Window Close shortcut"
-          fi
+        
+        # Show file permissions and ownership
+        log_info "File permissions: $(ls -la "$kde_shortcuts_dest")"
+        
+        # Check for Window Close shortcut (both Meta+Q and Alt+F4)
+        if grep -q "Window Close=Meta+Q.*Alt+F4" "$kde_shortcuts_dest"; then
+          log_success "Both Meta+Q and Alt+F4 (Window Close) shortcuts found"
+          
+          # Show the exact line for debugging
+          local close_line=$(grep "Window Close=" "$kde_shortcuts_dest")
+          log_info "Window Close line: $close_line"
+        elif grep -q "Window Close=Meta+Q" "$kde_shortcuts_dest"; then
+          log_warning "Meta+Q (Window Close) shortcut found but Alt+F4 missing"
+          local close_line=$(grep "Window Close=" "$kde_shortcuts_dest")
+          log_info "Window Close line: $close_line"
         else
-          log_warning "Meta+Q (Window Close) shortcut not found in configuration"
+          log_warning "Window Close shortcuts not found in configuration"
+          # Show what's actually there
+          log_info "Available Window Close shortcuts:"
+          grep "Window Close=" "$kde_shortcuts_dest" || log_info "No Window Close shortcuts found"
         fi
+        
         # Check for Konsole shortcut
         if grep -q "konsole" "$kde_shortcuts_dest"; then
           log_success "Konsole shortcut found in configuration"
+          # Show Konsole shortcut line
+          local konsole_line=$(grep "konsole" "$kde_shortcuts_dest")
+          log_info "Konsole shortcut line: $konsole_line"
         else
           log_warning "Konsole shortcut not found in configuration file"
         fi
@@ -249,6 +267,83 @@ setup_kde_shortcuts() {
         # Set proper permissions
         chmod 644 "$kde_shortcuts_dest"
         log_success "Set proper permissions on KDE shortcuts file"
+        
+        # Try to reload KDE Plasma 6 shortcuts for Wayland compatibility
+        log_info "Attempting to reload KDE Plasma 6 shortcuts for Wayland..."
+        
+        # Method 1: Reload kglobalaccel daemon (Plasma 6)
+        if command -v kquitapp6 >/dev/null 2>&1; then
+          if kquitapp6 kglobalaccel6 && kstart6 kglobalaccel6 >/dev/null 2>&1; then
+            log_success "Reloaded kglobalaccel daemon for Plasma 6 Wayland"
+          else
+            log_warning "Failed to reload kglobalaccel daemon"
+          fi
+        elif command -v kquitapp5 >/dev/null 2>&1; then
+          # Fallback to Plasma 5 commands if Plasma 6 not available
+          if kquitapp5 kglobalaccel5 && kstart5 kglobalaccel5 >/dev/null 2>&1; then
+            log_success "Reloaded kglobalaccel daemon for Wayland"
+          else
+            log_warning "Failed to reload kglobalaccel daemon"
+          fi
+        fi
+        
+        # Method 2: Use dbus to reload shortcuts (Plasma 6 compatible)
+        if command -v qdbus6 >/dev/null 2>&1; then
+          log_info "Trying dbus6 method to reload shortcuts..."
+          qdbus6 org.kde.kglobalaccel /Component/org.kde.kwin reconfigure >/dev/null 2>&1 || true
+          qdbus6 org.kde.kglobalaccel /Component/org.kde.kwin rereadConfig >/dev/null 2>&1 || true
+        elif command -v qdbus >/dev/null 2>&1; then
+          log_info "Trying dbus method to reload shortcuts..."
+          qdbus org.kde.kglobalaccel /Component/org.kde.kwin reconfigure >/dev/null 2>&1 || true
+          qdbus org.kde.kglobalaccel /Component/org.kde.kwin rereadConfig >/dev/null 2>&1 || true
+        fi
+        
+        # Method 3: Force reload all components (Plasma 6)
+        if command -v kquitapp6 >/dev/null 2>&1; then
+          log_info "Force reloading all KDE Plasma 6 components..."
+          kquitapp6 plasmashell >/dev/null 2>&1 || true
+          sleep 2
+          kstart6 plasmashell >/dev/null 2>&1 || true
+        elif command -v kquitapp5 >/dev/null 2>&1; then
+          log_info "Force reloading all KDE components..."
+          kquitapp5 plasmashell >/dev/null 2>&1 || true
+          sleep 2
+          kstart5 plasmashell >/dev/null 2>&1 || true
+        fi
+        
+        # Method 4: Use kconfig commands for direct Wayland configuration (Plasma 6)
+        if command -v kwriteconfig6 >/dev/null 2>&1; then
+          log_info "Using kconfig6 commands for direct Plasma 6 Wayland configuration..."
+          
+          # Set Window Close shortcut directly (both Meta+Q and Alt+F4)
+          kwriteconfig6 --file kglobalshortcutsrc --group "kwin" --key "Window Close" "Meta+Q,Alt+F4,Close Window"
+          
+          # Set Konsole shortcut directly
+          kwriteconfig6 --file kglobalshortcutsrc --group "services][org.kde.konsole.desktop" --key "_launch" "Meta+Return"
+          
+          log_success "Applied shortcuts directly using kconfig6 commands"
+        elif command -v kwriteconfig5 >/dev/null 2>&1; then
+          log_info "Using kconfig commands for direct Wayland configuration..."
+          
+          # Set Window Close shortcut directly (both Meta+Q and Alt+F4)
+          kwriteconfig5 --file kglobalshortcutsrc --group "kwin" --key "Window Close" "Meta+Q,Alt+F4,Close Window"
+          
+          # Set Konsole shortcut directly
+          kwriteconfig5 --file kglobalshortcutsrc --group "services][org.kde.konsole.desktop" --key "_launch" "Meta+Return"
+          
+          log_success "Applied shortcuts directly using kconfig commands"
+        fi
+        
+        # Method 5: Use kglobalshortcut command if available (Plasma 6)
+        if command -v kglobalshortcut6 >/dev/null 2>&1; then
+          log_info "Using kglobalshortcut6 command for Plasma 6 Wayland..."
+          kglobalshortcut6 --list | grep -i close || true
+        elif command -v kglobalshortcut5 >/dev/null 2>&1; then
+          log_info "Using kglobalshortcut command for Wayland..."
+          kglobalshortcut5 --list | grep -i close || true
+        fi
+        
+        log_info "KDE shortcuts reload completed. You may need to restart Plasma or log out/in for changes to take effect."
       else
         log_error "KDE shortcuts file was not copied successfully"
       fi

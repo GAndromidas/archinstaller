@@ -301,38 +301,6 @@ EOF
 	fi
 }
 
-# Configure AMD P-state for optimal performance
-configure_amd_pstate() {
-	if ! check_amd_pstate; then
-		ui_info "AMD CPU not detected. Skipping P-state configuration."
-			ui_warn "Multilib repository section not found in /etc/pacman.conf. Adding it..."
-			if ! grep -q "^\[multilib\]" /etc/pacman.conf; then
-				echo -e "\n[multilib]\nInclude = /etc/pacman.d/mirrorlist" | sudo tee -a /etc/pacman.conf >/dev/null
-				log_success "Enabled multilib repository for gaming mode"
-			else
-				log_success "Multilib repository already enabled"
-			fi
-			needs_sync=true
-		fi
-	fi
-
-	# 2. Check if the database file exists
-	if [[ ! -f "/var/lib/pacman/sync/multilib.db" ]]; then
-		ui_info "Multilib database not found. Syncing repositories..."
-		needs_sync=true
-	fi
-
-	# 3. Sync if needed
-	if [[ "$needs_sync" == "true" ]]; then
-		if sudo pacman -Sy; then
-			log_success "Repositories synchronized successfully"
-		else
-			log_error "Failed to synchronize repositories"
-			return 1
-		fi
-	fi
-}
-
 # ===== YAML Parsing Functions =====
 
 ensure_yq() {

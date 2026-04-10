@@ -303,10 +303,10 @@ show_resume_menu() {
         
         case "$status" in
           "completed")
-            gum format --template "  {{green}}[COMPLETED]{{}} {{white}}$display_step{{}}" >/dev/null
+            gum style --foreground 10 "  [COMPLETED] $display_step" >/dev/null
             ;;
           "failed")
-            gum format --template "  {{red}}[FAILED]{{}} {{white}}$display_step{{}}" >/dev/null
+            gum style --foreground 196 "  [FAILED] $display_step" >/dev/null
             ;;
         esac
       done

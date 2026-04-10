@@ -385,22 +385,22 @@ count=1
 rules=1
 
 [1]
-Description=Konsole Fullscreen
+Description=Konsole Fullscreen - No Titlebar
 Description=
 clientMachine=
 clientMachineMatch=true
 types=1
 types=0
-title=konsole
-titlematch=0
+title=.*
+titlematch=2
 windowclass=konsole
-windowclassmatch=0
+windowclassmatch=2
 windowrole=
 windowrolematch=0
 clientmachine=
 clientmachinematch=0
 resourceclass=konsole
-resourceclassmatch=0
+resourceclassmatch=2
 resource=
 resourcematch=0
 position=0,0
@@ -415,8 +415,8 @@ opacity=100
 opacityrule=0
 opacityactive=100
 opacityactiverule=0
-fullscreen=false
-fullscreenrule=2
+fullscreen=true
+fullscreenrule=1
 minimize=false
 minimizerule=0
 shade=false
@@ -429,12 +429,10 @@ above=false
 aboverule=0
 below=false
 belowrule=0
-noborder=false
-noborderrule=0
+noborder=true
+noborderrule=1
 screenclass=0
 screenrule=0
-fullscreen=true
-fullscreenrule=1
 desktop=0
 desktoprule=0
 type=0
@@ -612,13 +610,20 @@ reload_kde_config() {
     return 0
   fi
   
-  # Reload KWin rules
+  # Force reload KWin rules and configuration
   if pgrep -x "kwin_x11" > /dev/null || pgrep -x "kwin_wayland" > /dev/null; then
+    # Reconfigure KWin to apply new window rules
     if qdbus org.kde.KWin /KWin reconfigure >/dev/null 2>&1; then
       log_success "KWin configuration reloaded"
     else
       log_info "KWin configuration will apply on next login"
     fi
+    
+    # Also try to reload KWin scripting if available
+    qdbus org.kde.KWin /KWin loadScript /dev/null 2>&1 || true
+    
+    # Force KWin to re-evaluate all windows
+    qdbus org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
   else
     log_info "KWin not running, will apply on next login"
   fi
@@ -628,6 +633,16 @@ reload_kde_config() {
     log_success "Global shortcuts reloaded"
   else
     log_info "Global shortcuts will apply on next login"
+  fi
+  
+  # Additional: Force KDE config sync
+  if command -v kquitapp5 >/dev/null 2>&1; then
+    # Don't actually quit, just sync config
+    kquitapp5 kwin 2>/dev/null || true
+    sleep 1
+    # Restart KWin if it quit
+    kwin_x11 --replace >/dev/null 2>&1 &
+    sleep 2
   fi
 }
 

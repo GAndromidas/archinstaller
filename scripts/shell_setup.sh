@@ -221,9 +221,6 @@ setup_kde_shortcuts() {
     # Setup Konsole fullscreen window rules
     setup_konsole_fullscreen_rules
 
-    # Reload KDE configuration
-    reload_kde_config
-
   else
     log_info "KDE Plasma not detected. Skipping KDE shortcuts configuration"
   fi
@@ -371,58 +368,6 @@ setup_konsole_fullscreen_rules() {
     log_info "Konsole will automatically go fullscreen without titlebar"
   else
     log_warning "KDE window rules configuration file not found at $kwin_rules_source"
-  fi
-}
-
-# Konsole launcher not needed - window rules handle fullscreen automatically
-
-# PyQt6 is now installed as a permanent package through programs.yaml
-# No cleanup needed since it's a useful tool for KDE automation
-
-# Function to reload KDE configuration
-reload_kde_config() {
-  log_info "Reloading KDE configuration..."
-  
-  # Check if qdbus is available
-  if ! command -v qdbus >/dev/null 2>&1; then
-    log_info "qdbus command not found, KDE configuration will apply on next login"
-    log_info "This is normal - qdbus is part of qt6-tools and may not be installed"
-    return 0
-  fi
-  
-  # Force reload KWin rules and configuration
-  if pgrep -x "kwin_x11" > /dev/null || pgrep -x "kwin_wayland" > /dev/null; then
-    # Reconfigure KWin to apply new window rules
-    if qdbus org.kde.KWin /KWin reconfigure >/dev/null 2>&1; then
-      log_success "KWin configuration reloaded"
-    else
-      log_info "KWin configuration will apply on next login"
-    fi
-    
-    # Also try to reload KWin scripting if available
-    qdbus org.kde.KWin /KWin loadScript /dev/null 2>&1 || true
-    
-    # Force KWin to re-evaluate all windows
-    qdbus org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
-  else
-    log_info "KWin not running, will apply on next login"
-  fi
-  
-  # Reload global shortcuts
-  if qdbus org.kde.kglobalaccel /kglobalaccel reconfigure >/dev/null 2>&1; then
-    log_success "Global shortcuts reloaded"
-  else
-    log_info "Global shortcuts will apply on next login"
-  fi
-  
-  # Additional: Force KDE config sync
-  if command -v kquitapp5 >/dev/null 2>&1; then
-    # Don't actually quit, just sync config
-    kquitapp5 kwin 2>/dev/null || true
-    sleep 1
-    # Restart KWin if it quit
-    kwin_x11 --replace >/dev/null 2>&1 &
-    sleep 2
   fi
 }
 

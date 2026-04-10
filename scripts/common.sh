@@ -42,7 +42,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"  # Script directory
 CONFIGS_DIR="$SCRIPT_DIR/../configs"                           # Config files directory
 SCRIPTS_DIR="$SCRIPT_DIR"                                      # Scripts directory
 
-# : "${INSTALL_MODE:=default}"
 
 # Distribution detection
 IS_ARCH=false
@@ -88,9 +87,6 @@ log_to_file() {
 # ============================================================================
 # SECTION 2: LOGGING FUNCTIONS
 # ============================================================================
-clear_line() {
-  echo -ne "\r\033[K"
-}
 
 
 # ============================================================================
@@ -233,53 +229,7 @@ check_system_compatibility() {
 # ============================================================================
 # SECTION 4: TERMINAL OUTPUT & UI FUNCTIONS
 # ============================================================================
-print_progress() {
-  local current="$1"
-  local total="$2"
-  local description="$3"
-  local max_width=$((TERM_WIDTH - 25))  # Leave space for progress indicator
 
-  # Truncate description if too long
-  if [ ${#description} -gt $max_width ]; then
-    description="${description:0:$((max_width-3))}..."
-  fi
-
-  clear_line
-
-  local percentage=$((current * 100 / total))
-  printf "${CYAN}[%d/%d] %s: %d%%${RESET}" "$current" "$total" "$description" "$percentage"
-}
-
-# Enhanced progress bar for long operations with speed indicator
-show_progress_bar() {
-  local current="$1"
-  local total="$2"
-  local description="$3"
-  local speed="${4:-}"
-  local max_width=$((TERM_WIDTH - 30))
-
-  # Truncate description if too long
-  if [ ${#description} -gt $max_width ]; then
-    description="${description:0:$((max_width-3))}..."
-  fi
-
-  clear_line
-
-  local percentage=$((current * 100 / total))
-  printf "${CYAN}[%d/%d] %s: %d%%" "$current" "$total" "$description" "$percentage"
-
-  if [ -n "$speed" ]; then
-    printf " ${GREEN}%s${RESET}" "$speed"
-  fi
-
-  printf "${RESET}"
-}
-
-print_status() {
-  local status="$1"
-  local color="$2"
-  echo -e "$color$status${RESET}"
-}
 
 # Format time display helper function
 format_time() {
@@ -327,43 +277,6 @@ end_step_timer() {
 }
 
 # Enhanced step header with time estimation
-print_step_header_with_timing() {
-  local step_num="$1"
-  local total="$2"
-  local title="$3"
-
-  CURRENT_STEP=$step_num
-  start_step_timer
-
-  if supports_gum; then
-    echo ""
-    gum style --margin "1 2" --border thick --padding "1 2" --foreground 15 "Step $step_num of $total: $title"
-
-    # Show estimated remaining time
-    if [ ${#STEP_TIMES[@]} -gt 0 ]; then
-      local total_time=0
-      for time in "${STEP_TIMES[@]}"; do
-        total_time=$((total_time + time))
-      done
-      local avg_time=$((total_time / ${#STEP_TIMES[@]}))
-      local remaining_steps=$((TOTAL_STEPS - step_num + 1))
-      local estimated_remaining=$((remaining_steps * avg_time))
-
-      if [ $estimated_remaining -lt 60 ]; then
-        gum style --margin "0 2" --foreground 226 "Estimated remaining time: ${estimated_remaining}s"
-      elif [ $estimated_remaining -lt 3600 ]; then
-        local minutes=$((estimated_remaining / 60))
-        gum style --margin "0 2" --foreground 226 "Estimated remaining time: ${minutes}m"
-      else
-        local hours=$((estimated_remaining / 3600))
-        local minutes=$(((estimated_remaining % 3600) / 60))
-        gum style --margin "0 2" --foreground 226 "Estimated remaining time: ${hours}h ${minutes}m"
-      fi
-    fi
-  else
-    print_step_header "$step_num" "$total" "$title"
-  fi
-}
 
 # Unified styling functions for consistent UI across all scripts
 print_unified_step_header() {
@@ -928,15 +841,10 @@ configure_plymouth_hook_and_initramfs() {
     local success_count=0
 
     for kernel in "${kernel_types[@]}"; do
-      ((current++))
-      print_progress "$current" "$total" "Rebuilding initramfs for $kernel (for Plymouth)"
-
       if sudo mkinitcpio -p "$kernel" >/dev/null 2>&1; then
-        print_status " [OK]" "$GREEN"
         log_success "Rebuilt initramfs for $kernel"
         ((success_count++))
       else
-        print_status " [FAIL]" "$RED"
         log_error "Failed to rebuild initramfs for $kernel (for Plymouth)" "Run 'sudo mkinitcpio -p $kernel' manually to see detailed error"
       fi
     done
@@ -1046,11 +954,8 @@ install_package_generic() {
     esac
 
     if [ "$already_installed" = true ]; then
-      $VERBOSE && ui_info "[$current/$total] $pkg [SKIP] Already installed"
       continue
     fi
-
-    $VERBOSE && ui_info "[$current/$total] Installing $pkg..."
 
     local install_cmd
     case "$pkg_manager" in
@@ -1067,17 +972,16 @@ install_package_generic() {
 
     # Dry-run mode: simulate installation
     if [ "${DRY_RUN:-false}" = true ]; then
-      ui_info "[$current/$total] $pkg [DRY-RUN]"
+      ui_info "Dry-run: Would install $pkg"
       ui_info "  Would execute: $install_cmd"
       INSTALLED_PACKAGES+=("$pkg")
     else
       # Capture both stdout and stderr for better error diagnostics
       local error_output
       if error_output=$(eval "$install_cmd" 2>&1); then
-        $VERBOSE && ui_success "[$current/$total] $pkg [OK]"
         INSTALLED_PACKAGES+=("$pkg")
       else
-        ui_error "[$current/$total] $pkg [FAIL]"
+        ui_error "Failed to install $pkg"
         FAILED_PACKAGES+=("$pkg")
         log_error "Failed to install $pkg via $manager_name" "Check network connection and package availability"
         # Log the actual error for debugging
@@ -1093,10 +997,10 @@ install_package_generic() {
   done
 
   if [ $failed -eq 0 ]; then
-    ui_success "Package installation completed (${current}/${total} packages processed)"
+    ui_success "Package installation completed"
     return 0
   else
-    ui_warn "Package installation completed with $failed failures (${current}/${total} packages processed)" "Failed packages: ${FAILED_PACKAGES[*]}"
+    ui_warn "Package installation completed with $failed failures" "Failed packages: ${FAILED_PACKAGES[*]}"
     return 1
   fi
 }

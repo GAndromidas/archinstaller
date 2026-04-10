@@ -6,16 +6,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
 # Override progress bar to be minimalist, showing only the percentage.
-print_progress() {
-  local current="$1"
-  local total="$2"
-  local description="$3"
-  local percentage=$((current * 100 / total))
-
-  # Use printf to avoid a newline, allowing print_status to append to it.
-  # \r and \033[K ensure the line is overwritten on each update.
-  printf "\r\033[K${CYAN}[%3d%%]${RESET} %s..." "$percentage" "$description"
-}
 
 # Use different variable names to avoid conflicts
 PLYMOUTH_ERRORS=()
@@ -100,20 +90,15 @@ add_kernel_parameters() {
       local current=0
       local modified_count=0
       for entry in "${boot_entries[@]}"; do
-        ((current++))
         local entry_name=$(basename "$entry")
-        print_progress "$current" "$total" "Adding splash to $entry_name"
         if ! grep -q "splash" "$entry"; then
           if sudo sed -i '/^options / s/$/ splash/' "$entry"; then
-            print_status " [OK]" "$GREEN"
             log_success "Added 'splash' to $entry_name"
             ((modified_count++))
           else
-            print_status " [FAIL]" "$RED"
             log_error "Failed to add 'splash' to $entry_name"
           fi
         else
-          print_status " [SKIP] Already has splash" "$YELLOW"
           log_warning "'splash' already set in $entry_name"
         fi
       done

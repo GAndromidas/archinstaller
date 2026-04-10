@@ -233,7 +233,21 @@ setup_kde_shortcuts() {
       if mv "$kde_shortcuts_source" "$kde_shortcuts_dest"; then
         log_success "KDE shortcuts file moved successfully"
         log_info "Shortcuts: Meta+Q & Alt+F4 (Close Window), Meta+Return (Konsole)"
+        
+        # Verify Meta+Q shortcut is properly configured
+        if grep -q "Window Close=Meta+Q" "$kde_shortcuts_dest"; then
+          log_success "Meta+Q shortcut found in configuration"
+        else
+          log_warning "Meta+Q shortcut not found in configuration file"
+        fi
+        
+        # Verify conflicting shortcuts are disabled
+        if grep -q "Walk Through Windows of Current Application=none" "$kde_shortcuts_dest"; then
+          log_success "Conflicting Meta+ shortcuts disabled for Meta+Q to work"
+        fi
+        
         log_info "Changes will take effect after Plasma restart or logout/login"
+        log_info "Note: Disabled conflicting shortcuts to ensure Meta+Q works for window closing"
       else
         log_error "Failed to move kglobalshortcutsrc file"
         return 1

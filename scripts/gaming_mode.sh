@@ -19,38 +19,35 @@ flatpak_gaming_programs=()
 
 # ===== Local Helper Functions =====
 
-# Check if CPU supports AMD P-state
-check_amd_pstate() {
-	local cpu_vendor=$(grep -m1 'vendor_id' /proc/cpuinfo | awk '{print $3}')
-	local cpu_model=$(grep -m1 'model name' /proc/cpuinfo | cut -d':' -f2- | sed 's/^[ \t]*//')
-	
-	if [[ "$cpu_vendor" == "AuthenticAMD" ]]; then
-		ui_info "AMD CPU detected but P-state support not confirmed: $cpu_model"
-		# Still return 0 for AMD CPUs as Zen kernel can enable P-state support
-		return 0
+# Enable multilib repository for gaming packages
+check_and_enable_multilib() {
+	# Enable multilib if not already enabled
+	if ! grep -q "^\[multilib\]" /etc/pacman.conf; then
+		echo -e "\n[multilib]\nInclude = /etc/pacman.d/mirrorlist" | sudo tee -a /etc/pacman.conf >/dev/null
+		log_success "Enabled multilib repository for gaming mode"
+	else
+		log_success "Multilib repository already enabled"
 	fi
 	
-	ui_info "Non-AMD CPU detected: $cpu_model (Zen Kernel not required for Gaming Mode)"
-	return 1
+	# Sync repositories to ensure multilib is available
+	if sudo pacman -Sy; then
+		log_success "Repositories synchronized successfully"
+	else
+		log_error "Failed to synchronize repositories"
+		return 1
+	fi
 }
 
-# Install Zen Kernel for AMD systems
+
+# Install Zen Kernel for optimal gaming performance
 install_zen_kernel() {
 	# Check if Zen kernel is already installed
 	if pacman -Qi linux-zen &>/dev/null; then
 		ui_info "Zen Kernel is already installed. Skipping installation."
-		# AMD P-State will be configured by system_services.sh
 		return 0
 	fi
 	
-	# Check for AMD P-state support
-	if ! check_amd_pstate; then
-		ui_info "AMD CPU with P-state support not detected. Skipping Zen Kernel installation."
-		ui_info "Other gaming optimizations will still be installed."
-		return 0
-	fi
-	
-	ui_info "Installing Zen Kernel for optimal AMD P-state performance..."
+	ui_info "Installing Zen Kernel for optimal gaming performance..."
 	
 	if pacman_install_single "linux-zen" true; then
 		GAMING_INSTALLED+=("linux-zen")
@@ -61,7 +58,6 @@ install_zen_kernel() {
 			GAMING_INSTALLED+=("linux-zen-headers")
 		fi
 		
-		# AMD P-State will be configured by system_services.sh
 		# Set Zen Kernel as default in bootloader
 		configure_zen_kernel_default
 		return 0
@@ -108,9 +104,6 @@ configure_systemd_boot_zen_default() {
 		log_warning "loader.conf not found, cannot set default kernel"
 		return 1
 	fi
-	
-	# Create backup before making changes
-	cp "$loader_config" "${loader_config}.backup.$(date +%Y%m%d_%H%M%S)" || true
 	
 	# Remove existing default line and add Zen kernel as default
 	sudo sed -i '/^default /d' "$loader_config"
@@ -444,7 +437,7 @@ main() {
 	# Crucial: Ensure multilib is actually working before attempting to install steam/wine
 	check_and_enable_multilib
 
-	# Install Zen Kernel for AMD systems with P-state support
+	# Install Zen Kernel for optimal gaming performance
 	install_zen_kernel
 
 	install_pacman_packages

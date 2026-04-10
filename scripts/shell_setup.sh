@@ -179,7 +179,7 @@ setup_shell() {
 }
 
 setup_kde_shortcuts() {
-  step "Setting up KDE global shortcuts"
+  step "Setting up KDE global shortcuts and Konsole fullscreen"
 
   # Only proceed if KDE Plasma is detected
   if [[ "$XDG_CURRENT_DESKTOP" == "KDE" ]]; then
@@ -191,6 +191,7 @@ setup_kde_shortcuts() {
 
     local kde_shortcuts_source="$CONFIGS_DIR/kglobalshortcutsrc"
     local kde_shortcuts_dest="$HOME/.config/kglobalshortcutsrc"
+    local kwin_rules_file="$HOME/.config/kwinrulesrc"
 
     if [ -f "$kde_shortcuts_source" ]; then
       # Create .config directory if it doesn't exist
@@ -204,6 +205,16 @@ setup_kde_shortcuts() {
     else
       log_warning "KDE shortcuts configuration file not found at $kde_shortcuts_source"
     fi
+
+    # Setup Konsole fullscreen window rules
+    setup_konsole_fullscreen_rules
+
+    # Setup Konsole fullscreen launcher
+    setup_konsole_launcher
+
+    # Reload KDE configuration
+    reload_kde_config
+
   else
     log_info "KDE Plasma not detected. Skipping KDE shortcuts configuration"
   fi
@@ -329,6 +340,237 @@ setup_gnome_configs() {
   fi
 }
 
+# Function to setup Konsole fullscreen window rules
+setup_konsole_fullscreen_rules() {
+  log_info "Setting up Konsole fullscreen window rules..."
+  
+  local kwin_rules_file="$HOME/.config/kwinrulesrc"
+  
+  # Backup existing rules if they exist
+  if [ -f "$kwin_rules_file" ]; then
+    cp "$kwin_rules_file" "${kwin_rules_file}.backup.$(date +%Y%m%d_%H%M%S)"
+  fi
+  
+  # Create or update kwinrulesrc with Konsole fullscreen rule
+  if [ ! -f "$kwin_rules_file" ]; then
+    # Create new file with Konsole rule
+    cat > "$kwin_rules_file" << 'EOF'
+[General]
+count=1
+rules=1
+
+[1]
+Description=Konsole Fullscreen
+Description=
+clientMachine=
+clientMachineMatch=true
+types=1
+types=0
+title=konsole
+titlematch=0
+windowclass=konsole
+windowclassmatch=0
+windowrole=
+windowrolematch=0
+clientmachine=
+clientmachinematch=0
+resourceclass=konsole
+resourceclassmatch=0
+resource=
+resourcematch=0
+position=0,0
+positionrule=0
+size=0,0
+sizerule=0
+minsize=0,0
+minsizerule=0
+maxsize=0,0
+maxsizerule=0
+opacity=100
+opacityrule=0
+opacityactive=100
+opacityactiverule=0
+fullscreen=false
+fullscreenrule=2
+minimize=false
+minimizerule=0
+shade=false
+shaderule=0
+skiptaskbar=false
+skiptaskbarrule=0
+skippager=false
+skippagerrule=0
+above=false
+aboverule=0
+below=false
+belowrule=0
+noborder=false
+noborderrule=0
+screenclass=0
+screenrule=0
+fullscreen=true
+fullscreenrule=1
+desktop=0
+desktoprule=0
+type=0
+typerule=0
+maxvert=true
+maxvertrule=0
+maxhoriz=true
+maxhorizrule=0
+layer=0
+layerrule=0
+placement=0
+placementrule=0
+shortcut=
+shortcutrule=0
+EOF
+  else
+    # Add Konsole rule to existing file if not already present
+    if ! grep -q "Description=Konsole Fullscreen" "$kwin_rules_file"; then
+      local rule_count=$(grep "^\[General\]" -A 5 "$kwin_rules_file" | grep "^count=" | cut -d'=' -f2)
+      local new_rule_num=$((rule_count + 1))
+      
+      # Update count
+      sed -i "s/^count=.*/count=$new_rule_num/" "$kwin_rules_file"
+      sed -i "s/^rules=.*/rules=$new_rule_num/" "$kwin_rules_file"
+      
+      # Add new rule section
+      cat >> "$kwin_rules_file" << EOF
+
+[$new_rule_num]
+Description=Konsole Fullscreen
+Description=
+clientMachine=
+clientMachineMatch=true
+types=1
+types=0
+title=konsole
+titlematch=0
+windowclass=konsole
+windowclassmatch=0
+windowrole=
+windowrolematch=0
+clientmachine=
+clientmachinematch=0
+resourceclass=konsole
+resourceclassmatch=0
+resource=
+resourcematch=0
+position=0,0
+positionrule=0
+size=0,0
+sizerule=0
+minsize=0,0
+minsizerule=0
+maxsize=0,0
+maxsizerule=0
+opacity=100
+opacityrule=0
+opacityactive=100
+opacityactiverule=0
+fullscreen=false
+fullscreenrule=2
+minimize=false
+minimizerule=0
+shade=false
+shaderule=0
+skiptaskbar=false
+skiptaskbarrule=0
+skippager=false
+skippagerrule=0
+above=false
+aboverule=0
+below=false
+belowrule=0
+noborder=false
+noborderrule=0
+screenclass=0
+screenrule=0
+fullscreen=true
+fullscreenrule=1
+desktop=0
+desktoprule=0
+type=0
+typerule=0
+maxvert=true
+maxvertrule=0
+maxhoriz=true
+maxhorizrule=0
+layer=0
+layerrule=0
+placement=0
+placementrule=0
+shortcut=
+shortcutrule=0
+EOF
+    fi
+  fi
+  
+  log_success "Konsole fullscreen window rules configured"
+}
+
+# Function to setup Konsole fullscreen launcher
+setup_konsole_launcher() {
+  log_info "Setting up Konsole fullscreen launcher..."
+  
+  # Install xdotool if not present
+  if ! pacman -Q xdotool &>/dev/null; then
+    log_info "Installing xdotool for Konsole launcher..."
+    sudo pacman -S --noconfirm xdotool || {
+      log_warning "Failed to install xdotool, Konsole launcher may not work properly"
+    }
+  fi
+  
+  # Create launcher script
+  local launcher_dir="$HOME/.local/bin"
+  mkdir -p "$launcher_dir"
+  
+  local launcher_script="$launcher_dir/konsole-fullscreen"
+  
+  cat > "$launcher_script" << 'EOF'
+#!/bin/bash
+# Konsole Fullscreen Launcher
+
+# Check if Konsole is already running
+if pgrep -f "konsole" > /dev/null; then
+  # If running, bring to front and toggle fullscreen
+  qdbus org.kde.konsole /MainApplication org.kde.MainApplication.raise
+  qdbus org.kde.konsole /MainApplication org.kde.MainApplication.activate
+  sleep 0.5
+  # Send F11 to toggle fullscreen
+  xdotool key F11
+else
+  # Start new Konsole instance
+  konsole &
+  sleep 1
+  # Force fullscreen
+  xdotool key F11
+fi
+EOF
+  
+  chmod +x "$launcher_script"
+  log_success "Created Konsole fullscreen launcher at $launcher_script"
+}
+
+# Function to reload KDE configuration
+reload_kde_config() {
+  log_info "Reloading KDE configuration..."
+  
+  # Reload KWin rules
+  if pgrep -x "kwin_x11" > /dev/null || pgrep -x "kwin_wayland" > /dev/null; then
+    qdbus org.kde.KWin /KWin reconfigure || true
+    log_success "KWin configuration reloaded"
+  else
+    log_info "KWin not running, will apply on next login"
+  fi
+  
+  # Reload global shortcuts
+  qdbus org.kde.kglobalaccel /kglobalaccel reconfigure || true
+  log_success "Global shortcuts reloaded"
+}
+
+# Main execution
 setup_shell
 setup_kde_shortcuts
 setup_gnome_configs

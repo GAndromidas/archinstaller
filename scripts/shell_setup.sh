@@ -582,10 +582,22 @@ EOF
 cleanup_kde_dependencies() {
   # Check if python-pyqt6 was installed as helper utility and remove it
   if pacman -Q python-pyqt6 &>/dev/null; then
-    log_info "Cleaning up temporary python-pyqt6 (no longer needed after KDE configuration)"
-    sudo pacman -Rns --noconfirm python-pyqt6 || {
-      log_warning "Failed to remove python-pyqt6, will keep installed"
-    }
+    log_to_file "Cleaning up temporary python-pyqt6 (no longer needed after KDE configuration)"
+    # Temporarily disable snapper hooks for completely silent removal
+    if command -v snapper >/dev/null 2>&1; then
+      # Disable snapper hooks temporarily
+      sudo snapper --config root set-config "SYNC_ACLS" "no" >/dev/null 2>&1 || true
+      sudo pacman -Rns --noconfirm --disable-download-timeout python-pyqt6 >/dev/null 2>&1 || {
+        log_to_file "Failed to remove python-pyqt6, will keep installed"
+      }
+      # Re-enable snapper hooks
+      sudo snapper --config root set-config "SYNC_ACLS" "yes" >/dev/null 2>&1 || true
+    else
+      # No snapper, just remove normally
+      sudo pacman -Rns --noconfirm --disable-download-timeout python-pyqt6 >/dev/null 2>&1 || {
+        log_to_file "Failed to remove python-pyqt6, will keep installed"
+      }
+    fi
   fi
 }
 

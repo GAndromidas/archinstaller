@@ -63,8 +63,6 @@ essential:
   default:
     - name: filezilla
       description: "FTP client for file transfers"
-    - name: gimp
-      description: "GNU Image Manipulation Program"
     - name: kdenlive
       description: "Video editor for KDE"
     - name: libreoffice-fresh
@@ -131,6 +129,8 @@ aur:
       description: "Cloud storage and file synchronization"
     - name: rustdesk-bin
       description: "Remote desktop software"
+    - name: windsurf
+      description: "AI-powered development environment"
     - name: ventoy-bin
       description: "Bootable USB creation tool"
   minimal:
@@ -194,8 +194,6 @@ desktop_environments:
 flatpak:
   kde:
     default:
-      - name: io.github.shiftey.Desktop
-        description: "Shiftey Desktop application"
       - name: it.mijorus.gearlever
         description: "Graphical package manager for Flatpak"
     minimal:
@@ -205,8 +203,6 @@ flatpak:
     default:
       - name: com.mattjakeman.ExtensionManager
         description: "GNOME Shell extension manager"
-      - name: io.github.shiftey.Desktop
-        description: "Shiftey Desktop application"
       - name: it.mijorus.gearlever
         description: "Graphical package manager for Flatpak"
     minimal:
@@ -216,8 +212,6 @@ flatpak:
         description: "Graphical package manager for Flatpak"
   cosmic:
     default:
-      - name: io.github.shiftey.Desktop
-        description: "Shiftey Desktop application"
       - name: dev.edfloreshz.CosmicTweaks
         description: "Tweaks and customization for Cosmic desktop"
       - name: it.mijorus.gearlever
@@ -253,25 +247,21 @@ custom:
       description: "Office suite for document editing"
     - name: rustdesk-bin
       description: "Remote desktop software"
+    - name: windsurf
+      description: "AI-powered development environment"
     - name: ventoy-bin
       description: "Bootable USB creation tool"
   flatpak:
     kde:
-      - name: io.github.shiftey.Desktop
-        description: "Shiftey Desktop application"
       - name: it.mijorus.gearlever
         description: "Graphical package manager for Flatpak"
     gnome:
       - name: com.mattjakeman.ExtensionManager
         description: "GNOME Shell extension manager"
-      - name: io.github.shiftey.Desktop
-        description: "Shiftey Desktop application"
       - name: it.mijorus.gearlever
         description: "Graphical package manager for Flatpak"
     cosmic:
       - name: dev.edfloreshz.CosmicTweaks
         description: "Tweaks and customization for Cosmic desktop"
-      - name: io.github.shiftey.Desktop
-        description: "Shiftey Desktop application"
       - name: it.mijorus.gearlever
         description: "Graphical package manager for Flatpak"

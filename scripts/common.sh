@@ -82,11 +82,11 @@ add_kde_pyqt6_if_needed() {
         
         # Only support Plasma 6+ for bleeding edge Arch Linux
         if [ -n "$plasma_version" ] && [ "$plasma_version" -ge 6 ]; then
-            log_info "KDE Plasma 6+ detected: Adding python-pyqt6 for KDE automation"
+            log_to_file "KDE Plasma 6+ detected: Adding python-pyqt6 for KDE automation"
             HELPER_UTILS+=("python-pyqt6")
         else
-            log_error "KDE Plasma 5 detected - not supported on bleeding edge Arch Linux"
-            log_info "Arch Linux recommends Plasma 6 for latest features and Qt6 support"
+            log_to_file "KDE Plasma 5 detected - not supported on bleeding edge Arch Linux"
+            log_to_file "Arch Linux recommends Plasma 6 for latest features and Qt6 support"
             # Don't add PyQt6 for unsupported versions
         fi
     fi

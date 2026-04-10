@@ -59,6 +59,7 @@ EOF
   exit 0
 }
 
+
 # Clear terminal for clean interface
 clear
 
@@ -75,11 +76,11 @@ source "$SCRIPTS_DIR/common.sh"
 
 # Install gum silently for enhanced UI experience
 if ! command -v gum >/dev/null 2>&1; then
-  ui_info "Installing gum for enhanced UI experience..."
+  log_to_file "Installing gum for enhanced UI experience..."
   if sudo pacman -S --noconfirm gum >/dev/null 2>&1; then
-    ui_success "Gum installed successfully"
+    log_to_file "Gum installed successfully"
   else
-    ui_warn "Failed to install gum, falling back to basic UI"
+    log_to_file "Failed to install gum, falling back to basic UI"
   fi
 fi
 
@@ -151,7 +152,7 @@ check_system_requirements() {
   local bootloader=$(detect_bootloader 2>/dev/null || echo "unknown")
   case "$bootloader" in
     "grub"|"systemd-boot"|"limine")
-      log_info "Detected bootloader: $bootloader"
+      log_to_file "Detected bootloader: $bootloader"
       ;;
     "unknown")
       hardware_issues+=("Unsupported or unknown bootloader detected")
@@ -160,9 +161,9 @@ check_system_requirements() {
   
   # Check for UEFI vs BIOS mode
   if [ -d /sys/firmware/efi ]; then
-    log_info "UEFI boot mode detected"
+    log_to_file "UEFI boot mode detected"
   else
-    log_info "BIOS/Legacy boot mode detected"
+    log_to_file "BIOS/Legacy boot mode detected"
     hardware_issues+=("Legacy BIOS mode detected - some features may not work optimally")
   fi
   
@@ -171,16 +172,16 @@ check_system_requirements() {
     local gpu_vendor=$(lspci | grep -i vga | head -1 | awk '{print $1}' | cut -d: -f2)
     case "$gpu_vendor" in
       *"Intel"*)
-        log_info "Intel GPU detected - mesa drivers will be configured"
+        log_to_file "Intel GPU detected - mesa drivers will be configured"
         ;;
       *"NVIDIA"*)
-        log_info "NVIDIA GPU detected - proprietary drivers will be configured"
+        log_to_file "NVIDIA GPU detected - proprietary drivers will be configured"
         ;;
       *"AMD"*)
-        log_info "AMD GPU detected - open-source drivers will be configured"
+        log_to_file "AMD GPU detected - open-source drivers will be configured"
         ;;
       *)
-        log_info "Unknown GPU detected - generic drivers will be used"
+        log_to_file "Unknown GPU detected - generic drivers will be used"
         ;;
     esac
   else
@@ -191,18 +192,24 @@ check_system_requirements() {
   local root_device=$(findmnt -n -o SOURCE / | cut -d'[' -f1 | cut -d'/' -f3)
   if [ -n "$root_device" ]; then
     if echo "$root_device" | grep -q "nvme"; then
-      log_info "NVMe storage detected - NVMe optimizations will be applied"
+      log_to_file "NVMe storage detected - NVMe optimizations will be applied"
     elif [ -b "/dev/$root_device" ] && [ "$(cat /sys/block/${root_device}/queue/rotational 2>/dev/null)" = "0" ]; then
-      log_info "SSD storage detected - SSD optimizations will be applied"
+      log_to_file "SSD storage detected - SSD optimizations will be applied"
     else
-      log_info "HDD storage detected - HDD optimizations will be applied"
+      log_to_file "HDD storage detected - HDD optimizations will be applied"
     fi
+  else
+    hardware_issues+=("Could not determine root storage device")
   fi
   
-  # Check memory for appropriate optimizations
-  local total_memory=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-  local memory_gb=$((total_memory / 1024 / 1024))
-  log_info "System memory: ${memory_gb}GB - appropriate optimizations will be applied"
+  # Check system memory for optimizations
+  local total_mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+  local total_mem_gb=$((total_mem_kb / 1024 / 1024))
+  if [ "$total_mem_gb" -lt 2 ]; then
+    hardware_issues+=("Low memory detected (${total_mem_gb}GB) - at least 2GB recommended")
+  else
+    log_to_file "System memory: ${total_mem_gb}GB - appropriate optimizations will be applied"
+  fi
   
   # Report hardware issues if any
   if [ ${#hardware_issues[@]} -gt 0 ]; then
@@ -217,7 +224,7 @@ check_system_requirements() {
     fi
   fi
   
-  log_success "System requirements and hardware compatibility checks passed"
+  log_to_file "System requirements and hardware compatibility checks passed"
 }
 
 check_system_requirements

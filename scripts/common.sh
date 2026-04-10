@@ -94,7 +94,144 @@ clear_line() {
 
 
 # ============================================================================
-# SECTION 3: TERMINAL OUTPUT & UI FUNCTIONS
+# SECTION 3: CONFIGURATION VALIDATION FUNCTIONS
+# ============================================================================
+
+# Validate configuration file before modification
+validate_config_file() {
+    local config_file="$1"
+    local backup_dir="${2:-/tmp/archinstaller_backups}"
+    
+    # Create backup directory if it doesn't exist
+    sudo mkdir -p "$backup_dir" 2>/dev/null || true
+    
+    if [ -f "$config_file" ]; then
+        # Check if file is readable and not empty
+        if [ ! -r "$config_file" ] || [ ! -s "$config_file" ]; then
+            log_warning "Configuration file $config_file is corrupted or empty"
+            return 1
+        fi
+        
+        # Create backup with timestamp
+        local backup_file="$backup_dir/$(basename "$config_file").backup.$(date +%Y%m%d_%H%M%S)"
+        sudo cp "$config_file" "$backup_file" 2>/dev/null || {
+            log_warning "Failed to backup $config_file"
+            return 1
+        }
+        log_info "Backed up $config_file to $backup_file"
+    fi
+    
+    return 0
+}
+
+# Check if configuration value exists and is valid
+validate_config_value() {
+    local config_file="$1"
+    local key="$2"
+    local expected_pattern="${3:-.*}"
+    
+    if [ ! -f "$config_file" ]; then
+        return 1
+    fi
+    
+    # Check if key exists and matches expected pattern
+    if grep -q "^${key}=" "$config_file" 2>/dev/null; then
+        local value=$(grep "^${key}=" "$config_file" | cut -d'=' -f2-)
+        if [[ "$value" =~ $expected_pattern ]]; then
+            return 0
+        fi
+    fi
+    
+    return 1
+}
+
+# Atomic file write with validation
+atomic_write() {
+    local content="$1"
+    local target_file="$2"
+    local temp_file="${target_file}.tmp.$$"
+    local backup_dir="/tmp/archinstaller_backups"
+    
+    # Validate target directory exists
+    local target_dir=$(dirname "$target_file")
+    if [ ! -d "$target_dir" ]; then
+        log_error "Target directory $target_dir does not exist"
+        return 1
+    fi
+    
+    # Create backup if target exists
+    if [ -f "$target_file" ]; then
+        validate_config_file "$target_file" "$backup_dir"
+    fi
+    
+    # Write to temporary file first
+    if ! echo "$content" > "$temp_file"; then
+        log_error "Failed to write to temporary file $temp_file"
+        return 1
+    fi
+    
+    # Validate temporary file
+    if [ ! -s "$temp_file" ]; then
+        log_error "Temporary file $temp_file is empty"
+        rm -f "$temp_file"
+        return 1
+    fi
+    
+    # Atomic move to target
+    if ! sudo mv "$temp_file" "$target_file"; then
+        log_error "Failed to move $temp_file to $target_file"
+        rm -f "$temp_file"
+        return 1
+    fi
+    
+    log_success "Successfully wrote configuration to $target_file"
+    return 0
+}
+
+# Check system compatibility
+check_system_compatibility() {
+    local issues=()
+    
+    # Check if running as root (should not be)
+    if [[ $EUID -eq 0 ]]; then
+        issues+=("Script should not be run as root")
+    fi
+    
+    # Check if on Arch Linux
+    if [[ ! -f /etc/arch-release ]] && [[ ! -f /etc/endeavouros-release ]]; then
+        issues+=("Not running on Arch Linux or EndeavourOS")
+    fi
+    
+    # Check disk space
+    local available_space=$(df / | awk 'NR==2 {print $4}')
+    if [[ $available_space -lt 2097152 ]]; then
+        issues+=("Insufficient disk space (need 2GB, have $((available_space / 1024 / 1024))GB)")
+    fi
+    
+    # Check internet connection
+    if ! ping -c 1 -W 5 archlinux.org &>/dev/null; then
+        issues+=("No internet connection")
+    fi
+    
+    # Check bootloader compatibility
+    if [ ! -d "/boot" ]; then
+        issues+=("Boot directory not found")
+    fi
+    
+    # Report issues
+    if [ ${#issues[@]} -gt 0 ]; then
+        log_error "System compatibility issues found:"
+        for issue in "${issues[@]}"; do
+            log_error "  - $issue"
+        done
+        return 1
+    fi
+    
+    return 0
+}
+
+# ============================================================================
+# SECTION 4: TERMINAL OUTPUT & UI FUNCTIONS
 # ============================================================================
 print_progress() {
   local current="$1"

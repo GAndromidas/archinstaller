@@ -19,16 +19,31 @@ add_systemd_boot_kernel_params() {
   while IFS= read -r -d $'\0' entry; do
     ((entries_found++))
     local entry_name=$(basename "$entry")
-    if ! grep -q "quiet loglevel=3" "$entry"; then # Check for existing parameters more generically
+    
+    # Check for any of our target parameters to determine if update is needed
+    local needs_update=false
+    if ! grep -q "quiet" "$entry" || ! grep -q "loglevel=3" "$entry" || ! grep -q "systemd.show_status=auto" "$entry" || ! grep -q "rd.udev.log_level=3" "$entry"; then
+      needs_update=true
+    fi
+    
+    if [ "$needs_update" = true ]; then
+      # Backup the entry before modification
+      sudo cp "$entry" "${entry}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
+      
+      # Remove existing parameters if they exist, then add all parameters
+      sudo sed -i 's/quiet//g; s/loglevel=[^ ]*//g; s/systemd\.show_status=[^ ]*//g; s/rd\.udev\.log_level=[^ ]*//g' "$entry"
+      sudo sed -i 's/  */ /g; s/^ *//; s/ *$//' "$entry" # Clean up extra spaces
+      
+      # Add parameters to options line
       if sudo sed -i '/^options / s/$/ quiet loglevel=3 systemd.show_status=auto rd.udev.log_level=3/' "$entry"; then
-        log_success "Added kernel parameters to $entry_name"
+        log_success "Updated kernel parameters in $entry_name"
         ((modified_count++))
       else
         log_error "Failed to add kernel parameters to $entry_name"
         # Continue to try other entries, but log the error
       fi
     else
-      log_info "Kernel parameters already present in $entry_name - skipping."
+      log_info "All kernel parameters already present in $entry_name - skipping."
     fi
   done < <(find "$boot_entries_dir" -name "*.conf" ! -name "*fallback.conf" -print0)
 
@@ -81,6 +96,19 @@ configure_boot() {
 BOOTLOADER=$(detect_bootloader)
 IS_BTRFS=$(is_btrfs_system && echo "true" || echo "false")
 
+# Helper function to safely set GRUB configuration values
+set_grub_config() {
+    local key="$1"
+    local value="$2"
+    local grub_config="/etc/default/grub"
+    
+    if grep -q "^${key}=" "$grub_config" 2>/dev/null; then
+        sudo sed -i "s/^${key}=.*/${key}=${value}/" "$grub_config"
+    else
+        echo "${key}=${value}" | sudo tee -a "$grub_config" >/dev/null
+    fi
+}
+
 # --- GRUB configuration ---
 configure_grub() {
     step "Configuring GRUB"
@@ -89,29 +117,24 @@ configure_grub() {
     if pacman -Qi linux-zen &>/dev/null; then
         step "Configuring GRUB for Zen Kernel"
         # Set zen kernel as default (first entry)
-        sudo sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=0/' /etc/default/grub || echo 'GRUB_DEFAULT=0' | sudo tee -a /etc/default/grub >/dev/null
+        set_grub_config "GRUB_DEFAULT" "0"
         ui_info "Set GRUB to boot first kernel (Zen)"
         # Set timeout to 3 for zen kernel
-        sudo sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=3/' /etc/default/grub || echo 'GRUB_TIMEOUT=3' | sudo tee -a /etc/default/grub >/dev/null
+        set_grub_config "GRUB_TIMEOUT" "3"
     else
         step "Configuring GRUB: set default kernel to 'linux'"
         # Use saved/default behavior for standard mode
-        sudo sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=saved/' /etc/default/grub || echo 'GRUB_DEFAULT=saved' | sudo tee -a /etc/default/grub >/dev/null
+        set_grub_config "GRUB_DEFAULT" "saved"
         # Set timeout to 5 for standard mode
-        sudo sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=5/' /etc/default/grub || echo 'GRUB_TIMEOUT=5' | sudo tee -a /etc/default/grub >/dev/null
+        set_grub_config "GRUB_TIMEOUT" "5"
         ui_info "Using standard GRUB configuration"
     fi
 
-    grep -q '^GRUB_SAVEDEFAULT=' /etc/default/grub && sudo sed -i 's/^GRUB_SAVEDEFAULT=.*/GRUB_SAVEDEFAULT=true/' /etc/default/grub || echo 'GRUB_SAVEDEFAULT=true' | sudo tee -a /etc/default/grub >/dev/null
-    sudo sed -i 's@^GRUB_CMDLINE_LINUX_DEFAULT=.*@GRUB_CMDLINE_LINUX_DEFAULT="quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 plymouth.ignore-serial-consoles"@' /etc/default/grub || \
-        echo 'GRUB_CMDLINE_LINUX_DEFAULT="quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 plymouth.ignore-serial-consoles"' | sudo tee -a /etc/default/grub >/dev/null
-
-    # Enable submenu for additional kernels (linux-lts, linux-zen)
-    grep -q '^GRUB_DISABLE_SUBMENU=' /etc/default/grub && sudo sed -i 's/^GRUB_DISABLE_SUBMENU=.*/GRUB_DISABLE_SUBMENU=notlinux/' /etc/default/grub || \
-        echo 'GRUB_DISABLE_SUBMENU=notlinux' | sudo tee -a /etc/default/grub >/dev/null
-
-    grep -q '^GRUB_GFXMODE=' /etc/default/grub || echo 'GRUB_GFXMODE=auto' | sudo tee -a /etc/default/grub >/dev/null
-    grep -q '^GRUB_GFXPAYLOAD_LINUX=' /etc/default/grub || echo 'GRUB_GFXPAYLOAD_LINUX=keep' | sudo tee -a /etc/default/grub >/dev/null
+    set_grub_config "GRUB_SAVEDEFAULT" "true"
+    set_grub_config "GRUB_CMDLINE_LINUX_DEFAULT" '"quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 plymouth.ignore-serial-consoles"'
+    set_grub_config "GRUB_DISABLE_SUBMENU" "notlinux"
+    set_grub_config "GRUB_GFXMODE" "auto"
+    set_grub_config "GRUB_GFXPAYLOAD_LINUX" "keep"
 
     # Detect installed kernels
     KERNELS=($(ls /boot/vmlinuz-* 2>/dev/null | sed 's|/boot/vmlinuz-||g'))
@@ -142,7 +165,7 @@ configure_grub() {
     fi
 }
 
-# --- Limine Bootloader Configuration (Simple Implementation) ---
+# --- Limine Bootloader Configuration (Idempotent Implementation) ---
 configure_limine_basic() {
   step "Configuring Limine bootloader"
   
@@ -150,7 +173,7 @@ configure_limine_basic() {
   local limine_config="/boot/limine.conf"
   
   # Create simple configuration
-  log_info "Creating simple Limine configuration at: $limine_config"
+  log_info "Creating idempotent Limine configuration at: $limine_config"
   
   # Backup existing configuration
   if [ -f "$limine_config" ]; then
@@ -182,23 +205,26 @@ configure_limine_basic() {
       ;;
   esac
   
-  # Create simple limine.conf
-  cat << EOF | sudo tee "$limine_config" > /dev/null
+  # Create complete limine.conf atomically
+  {
+    cat << EOF
 # Limine Bootloader Configuration
-# Generated by archinstaller
+# Generated by archinstaller on $(date)
+# Root UUID: $root_uuid
+# Filesystem: $root_fstype
 
 timeout: 3
 interface_resolution: 1024x768
 
 EOF
-  
-  # Add kernels in smart order (Zen first if installed)
-  local kernels_added=()
-  
-  # Zen kernel first if installed (from gaming_mode.sh script)
-  if pacman -Qi linux-zen &>/dev/null; then
-    if [[ -f "/boot/vmlinuz-linux-zen" ]] && [[ -f "/boot/initramfs-linux-zen.img" ]]; then
-      cat << EOF | sudo tee -a "$limine_config" > /dev/null
+    
+    # Add kernels in smart order (Zen first if installed)
+    local kernels_added=()
+    
+    # Zen kernel first if installed (from gaming_mode.sh script)
+    if pacman -Qi linux-zen &>/dev/null; then
+      if [[ -f "/boot/vmlinuz-linux-zen" ]] && [[ -f "/boot/initramfs-linux-zen.img" ]]; then
+        cat << EOF
 
 Arch Linux (Zen Kernel)
 protocol: linux
@@ -206,14 +232,14 @@ path: boot():/vmlinuz-linux-zen
 cmdline: $cmdline
 module_path: boot():/initramfs-linux-zen.img
 EOF
-      kernels_added+=("zen")
-      ui_info "Added Zen kernel entry to Limine"
+        kernels_added+=("zen")
+        ui_info "Added Zen kernel entry to Limine"
+      fi
     fi
-  fi
-  
-  # Standard kernel (always added)
-  if [[ -f "/boot/vmlinuz-linux" ]] && [[ -f "/boot/initramfs-linux.img" ]]; then
-    cat << EOF | sudo tee -a "$limine_config" > /dev/null
+    
+    # Standard kernel (always added)
+    if [[ -f "/boot/vmlinuz-linux" ]] && [[ -f "/boot/initramfs-linux.img" ]]; then
+      cat << EOF
 
 Arch Linux
 protocol: linux
@@ -221,13 +247,13 @@ path: boot():/vmlinuz-linux
 cmdline: $cmdline
 module_path: boot():/initramfs-linux.img
 EOF
-    kernels_added+=("standard")
-    ui_info "Added standard kernel entry to Limine"
-  fi
-  
-  # Add LTS kernel entry if available
-  if [[ -f "/boot/vmlinuz-linux-lts" ]] && [[ -f "/boot/initramfs-linux-lts.img" ]]; then
-    cat << EOF | sudo tee -a "$limine_config" > /dev/null
+      kernels_added+=("standard")
+      ui_info "Added standard kernel entry to Limine"
+    fi
+    
+    # Add LTS kernel entry if available
+    if [[ -f "/boot/vmlinuz-linux-lts" ]] && [[ -f "/boot/initramfs-linux-lts.img" ]]; then
+      cat << EOF
 
 Arch Linux (LTS)
 protocol: linux
@@ -235,27 +261,35 @@ path: boot():/vmlinuz-linux-lts
 cmdline: $cmdline
 module_path: boot():/initramfs-linux-lts.img
 EOF
-  fi
-  
-  # Simple Windows detection (no complex logic)
-  for disk in /dev/sda /dev/sdb /dev/nvme0n1p1; do
-    if [ -b "$disk" ] && sudo file -s "$disk" 2>/dev/null | grep -q "NTFS"; then
-      cat << EOF | sudo tee -a "$limine_config" > /dev/null
+    fi
+    
+    # Enhanced Windows detection with more disk paths
+    local windows_found=false
+    for disk in /dev/sda1 /dev/sdb1 /dev/sdc1 /dev/nvme0n1p1 /dev/nvme1n1p1; do
+      if [ -b "$disk" ] && sudo file -s "$disk" 2>/dev/null | grep -q "NTFS"; then
+        cat << EOF
 
 /Windows
 protocol: chainloader
 path: chainloader():$disk
 driver: chainloader
 EOF
-      log_success "Added Windows entry: $disk"
-      break
+        log_success "Added Windows entry: $disk"
+        windows_found=true
+        break
+      fi
+    done
+    
+    if [ "$windows_found" = false ]; then
+      log_info "No Windows partition detected"
     fi
-  done
+    
+  } | sudo tee "$limine_config" > /dev/null
   
   if pacman -Qi linux-zen &>/dev/null; then
     log_success "Limine configured with Zen kernel prioritized"
   else
-    log_success "Simple Limine configuration completed"
+    log_success "Idempotent Limine configuration completed"
   fi
   log_info "Configuration file: $limine_config"
   log_info "Kernels configured: ${kernels_added[*]}"
@@ -267,8 +301,6 @@ setup_console_font() {
   run_step "Installing console font" sudo pacman -S --noconfirm --needed terminus-font
   run_step "Configuring /etc/vconsole.conf" bash -c "(grep -q '^FONT=' /etc/vconsole.conf 2>/dev/null && sudo sed -i 's/^FONT=.*/FONT=ter-v16n/' /etc/vconsole.conf) || echo 'FONT=ter-v16n' | sudo tee -a /etc/vconsole.conf >/dev/null"
   run_step "Rebuilding initramfs" sudo mkinitcpio -P
-    run_step "Configuring /etc/vconsole.conf" bash -c "(grep -q '^FONT=' /etc/vconsole.conf 2>/dev/null && sudo sed -i 's/^FONT=.*/FONT=ter-v16n/' /etc/vconsole.conf) || echo 'FONT=ter-v16n' | sudo tee -a /etc/vconsole.conf >/dev/null"
-    run_step "Rebuilding initramfs" sudo mkinitcpio -P
 }
 
 # --- Main execution ---

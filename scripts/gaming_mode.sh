@@ -172,21 +172,32 @@ EOF
 	fi
 }
 
+# Helper function to safely set GRUB configuration values
+set_grub_config() {
+    local key="$1"
+    local value="$2"
+    local grub_config="/etc/default/grub"
+    
+    if grep -q "^${key}=" "$grub_config" 2>/dev/null; then
+        sudo sed -i "s/^${key}=.*/${key}=${value}/" "$grub_config"
+    else
+        echo "${key}=${value}" | sudo tee -a "$grub_config" >/dev/null
+    fi
+}
+
 # Configure GRUB for Zen Kernel with Plymouth support
 configure_grub_zen() {
 	# GRUB automatically detects installed kernels, but we need to ensure Plymouth parameters are set
 	if [[ -f "/etc/default/grub" ]]; then
 		# Ensure GRUB is configured to save the default
-		sudo sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=saved/' /etc/default/grub
-		sudo sed -i 's/^GRUB_SAVEDEFAULT=.*/GRUB_SAVEDEFAULT=true/' /etc/default/grub
+		set_grub_config "GRUB_DEFAULT" "saved"
+		set_grub_config "GRUB_SAVEDEFAULT" "true"
 		
 		# Ensure Plymouth parameters are set for all kernels including Zen
-		sudo sed -i 's@^GRUB_CMDLINE_LINUX_DEFAULT=.*@GRUB_CMDLINE_LINUX_DEFAULT="quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 plymouth.ignore-serial-consoles"@' /etc/default/grub || \
-			echo 'GRUB_CMDLINE_LINUX_DEFAULT="quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 plymouth.ignore-serial-consoles"' | sudo tee -a /etc/default/grub >/dev/null
+		set_grub_config "GRUB_CMDLINE_LINUX_DEFAULT" '"quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 plymouth.ignore-serial-consoles"'
 		
 		# Enable submenu for additional kernels (linux-lts, linux-zen)
-		grep -q '^GRUB_DISABLE_SUBMENU=' /etc/default/grub && sudo sed -i 's/^GRUB_DISABLE_SUBMENU=.*/GRUB_DISABLE_SUBMENU=notlinux/' /etc/default/grub || \
-			echo 'GRUB_DISABLE_SUBMENU=notlinux' | sudo tee -a /etc/default/grub >/dev/null
+		set_grub_config "GRUB_DISABLE_SUBMENU" "notlinux"
 		
 		# Regenerate GRUB config to include Zen kernel with Plymouth support
 		if sudo grub-mkconfig -o /boot/grub/grub.cfg >/dev/null 2>&1; then
@@ -382,7 +393,12 @@ check_and_enable_multilib() {
 			needs_sync=true
 		else
 			ui_warn "Multilib repository section not found in /etc/pacman.conf. Adding it..."
-			echo -e "\n[multilib]\nInclude = /etc/pacman.d/mirrorlist" | sudo tee -a /etc/pacman.conf >/dev/null
+			if ! grep -q "^\[multilib\]" /etc/pacman.conf; then
+				echo -e "\n[multilib]\nInclude = /etc/pacman.d/mirrorlist" | sudo tee -a /etc/pacman.conf >/dev/null
+				log_success "Enabled multilib repository for gaming mode"
+			else
+				log_success "Multilib repository already enabled"
+			fi
 			needs_sync=true
 		fi
 	fi

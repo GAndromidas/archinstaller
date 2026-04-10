@@ -75,7 +75,12 @@ source "$SCRIPTS_DIR/common.sh"
 
 # Install gum silently for enhanced UI experience
 if ! command -v gum >/dev/null 2>&1; then
-  sudo pacman -S --noconfirm gum >/dev/null 2>&1 || true
+  ui_info "Installing gum for enhanced UI experience..."
+  if sudo pacman -S --noconfirm gum >/dev/null 2>&1; then
+    ui_success "Gum installed successfully"
+  else
+    ui_warn "Failed to install gum, falling back to basic UI"
+  fi
 fi
 
 # Initialize log file
@@ -128,43 +133,91 @@ export START_TIME
 
 arch_ascii
 
-# Check system requirements for new users
+# Enhanced system requirements checking with hardware compatibility
 check_system_requirements() {
   local requirements_failed=false
-
-  # Check if running as root
-  if [[ $EUID -eq 0 ]]; then
-    echo -e "${RED}Error: This script should NOT be run as root!${RESET}"
-    echo -e "${YELLOW}   Please run as a regular user with sudo privileges.${RESET}"
-    echo -e "${YELLOW}   Example: ./install.sh (not sudo ./install.sh)${RESET}"
+  
+  # Use the enhanced compatibility check from common.sh
+  if ! check_system_compatibility; then
+    echo -e "${RED}Error: System compatibility check failed!${RESET}"
+    echo -e "${YELLOW}   Please address the issues listed above before continuing.${RESET}"
     exit 1
   fi
-
-  # Check if we're on Arch Linux
-  if [[ ! -f /etc/arch-release ]] && [[ ! -f /etc/endeavouros-release ]]; then
-    echo -e "${RED}Error: This script is designed for Arch Linux only!${RESET}"
-    echo -e "${YELLOW}   Please run this on a fresh Arch Linux installation.${RESET}"
-    exit 1
+  
+  # Additional hardware-specific checks
+  local hardware_issues=()
+  
+  # Check bootloader type and compatibility
+  local bootloader=$(detect_bootloader 2>/dev/null || echo "unknown")
+  case "$bootloader" in
+    "grub"|"systemd-boot"|"limine")
+      log_info "Detected bootloader: $bootloader"
+      ;;
+    "unknown")
+      hardware_issues+=("Unsupported or unknown bootloader detected")
+      ;;
+  esac
+  
+  # Check for UEFI vs BIOS mode
+  if [ -d /sys/firmware/efi ]; then
+    log_info "UEFI boot mode detected"
+  else
+    log_info "BIOS/Legacy boot mode detected"
+    hardware_issues+=("Legacy BIOS mode detected - some features may not work optimally")
   fi
-
-  # Check internet connection
-  if ! ping -c 1 archlinux.org &>/dev/null; then
-    echo -e "${RED}Error: No internet connection detected!${RESET}"
-    echo -e "${YELLOW}   Please check your network connection and try again.${RESET}"
-    exit 1
+  
+  # Check GPU drivers availability
+  if lspci | grep -qi vga; then
+    local gpu_vendor=$(lspci | grep -i vga | head -1 | awk '{print $1}' | cut -d: -f2)
+    case "$gpu_vendor" in
+      *"Intel"*)
+        log_info "Intel GPU detected - mesa drivers will be configured"
+        ;;
+      *"NVIDIA"*)
+        log_info "NVIDIA GPU detected - proprietary drivers will be configured"
+        ;;
+      *"AMD"*)
+        log_info "AMD GPU detected - open-source drivers will be configured"
+        ;;
+      *)
+        log_info "Unknown GPU detected - generic drivers will be used"
+        ;;
+    esac
+  else
+    hardware_issues+=("No GPU detected - this may be a headless system")
   fi
-
-  # Check available disk space (at least 2GB)
-  local available_space=$(df / | awk 'NR==2 {print $4}')
-  if [[ $available_space -lt 2097152 ]]; then
-    echo -e "${RED}Error: Insufficient disk space!${RESET}"
-    echo -e "${YELLOW}   At least 2GB free space is required.${RESET}"
-    echo -e "${YELLOW}   Available: $((available_space / 1024 / 1024))GB${RESET}"
-    exit 1
+  
+  # Check storage type for optimizations
+  local root_device=$(findmnt -n -o SOURCE / | cut -d'[' -f1 | cut -d'/' -f3)
+  if [ -n "$root_device" ]; then
+    if echo "$root_device" | grep -q "nvme"; then
+      log_info "NVMe storage detected - NVMe optimizations will be applied"
+    elif [ -b "/dev/$root_device" ] && [ "$(cat /sys/block/${root_device}/queue/rotational 2>/dev/null)" = "0" ]; then
+      log_info "SSD storage detected - SSD optimizations will be applied"
+    else
+      log_info "HDD storage detected - HDD optimizations will be applied"
+    fi
   fi
-
-  # Only show success message if we had to check something specific
-  # For now, we'll just silently continue if all requirements are met
+  
+  # Check memory for appropriate optimizations
+  local total_memory=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+  local memory_gb=$((total_memory / 1024 / 1024))
+  log_info "System memory: ${memory_gb}GB - appropriate optimizations will be applied"
+  
+  # Report hardware issues if any
+  if [ ${#hardware_issues[@]} -gt 0 ]; then
+    echo -e "${YELLOW}Warning: Hardware compatibility issues detected:${RESET}"
+    for issue in "${hardware_issues[@]}"; do
+      echo -e "${YELLOW}   - $issue${RESET}"
+    done
+    echo ""
+    if ! gum_confirm "Continue despite hardware compatibility issues?" "Some features may not work optimally."; then
+      ui_info "Installation cancelled by user"
+      exit 0
+    fi
+  fi
+  
+  log_success "System requirements and hardware compatibility checks passed"
 }
 
 check_system_requirements
@@ -208,10 +261,10 @@ fi
 if [ "$DRY_RUN" = false ]; then
   while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
   SUDO_KEEPALIVE_PID=$!
-  # Improved trap to ensure proper cleanup
-  trap 'if [ -n "${SUDO_KEEPALIVE_PID+x}" ]; then kill $SUDO_KEEPALIVE_PID 2>/dev/null; fi; save_log_on_exit' EXIT INT TERM
+  # Enhanced trap with error handling
+  trap 'cleanup_on_error $LINENO; save_log_on_exit' EXIT INT TERM ERR
 else
-  trap 'save_log_on_exit' EXIT INT TERM
+  trap 'cleanup_on_error $LINENO; save_log_on_exit' EXIT INT TERM ERR
 fi
 
 # Function to mark step as completed with atomic write
@@ -224,9 +277,15 @@ mark_step_complete() {
     return 1
   fi
   
-  # Atomic write to prevent corruption
-  local temp_state_file="$STATE_FILE.tmp"
-  echo "$step_name" >> "$temp_state_file" && mv "$temp_state_file" "$STATE_FILE"
+  # Atomic write with file locking to prevent corruption
+  local temp_state_file="$STATE_FILE.tmp.$$"
+  (
+    flock -x 200
+    echo "$step_name" >> "$STATE_FILE"
+  ) 200>"$temp_state_file" && mv "$temp_state_file" "$STATE_FILE" 2>/dev/null || {
+    log_error "Failed to update state file for step: $step_name"
+    return 1
+  }
 }
 
 # Function to check if step was completed
@@ -427,13 +486,60 @@ mark_step_complete_with_progress() {
   # Step status is logged to STATE_FILE for resume functionality
 }
 
+# Enhanced error handling and rollback functions
+cleanup_on_error() {
+  local exit_code=${1:-$?}
+  local error_line=${2:-$LINENO}
+  
+  if [ $exit_code -ne 0 ]; then
+    # Mark installation as failed
+    INSTALLATION_SUCCESS=false
+    
+    log_error "Installation failed with exit code $exit_code at line $error_line"
+    log_error "Check the log file for details: $INSTALL_LOG"
+    
+    # Kill sudo keep-alive if running
+    if [ -n "${SUDO_KEEPALIVE_PID+x}" ]; then
+      kill $SUDO_KEEPALIVE_PID 2>/dev/null || true
+    fi
+    
+    # Offer recovery options
+    echo ""
+    ui_error "Installation encountered an error!"
+    ui_info "Options:"
+    ui_info "1. Run the script again to resume from where it left off"
+    ui_info "2. Check the log file: $INSTALL_LOG"
+    ui_info "3. Start fresh installation: rm -f $STATE_FILE"
+    
+    # Save error state
+    echo "FAILED: Installation failed at line $error_line (exit code: $exit_code)" >> "$STATE_FILE"
+  fi
+}
+
+# Global installation success tracking
+INSTALLATION_SUCCESS=true
+
 # Function to save log on exit
 save_log_on_exit() {
+  # Kill sudo keep-alive if running
+  if [ -n "${SUDO_KEEPALIVE_PID+x}" ]; then
+    kill $SUDO_KEEPALIVE_PID 2>/dev/null || true
+  fi
+  
   {
     echo ""
     echo "=========================================="
     echo "Installation ended: $(date)"
     echo "=========================================="
+    
+    # Add summary if installation completed successfully
+    if [ "$INSTALLATION_SUCCESS" = "true" ]; then
+      echo "Installation completed successfully!"
+      echo "Total installation time: $(($(date +%s) - START_TIME)) seconds"
+    else
+      echo "Installation completed with errors!"
+      echo "Check the log above for details."
+    fi
   } >> "$INSTALL_LOG"
 }
 

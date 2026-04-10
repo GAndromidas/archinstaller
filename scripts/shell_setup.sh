@@ -392,9 +392,9 @@ setup_gnome_configs() {
   fi
 }
 
-# Function to setup Konsole fullscreen window rules
+# Function to setup Konsole maximized window rules
 setup_konsole_fullscreen_rules() {
-  log_info "Setting up Konsole fullscreen window rules..."
+  log_info "Setting up Konsole maximized window rules..."
   
   local kwin_rules_source="$CONFIGS_DIR/kwinrulesrc"
   local kwin_rules_dest="$HOME/.config/kwinrulesrc"
@@ -406,23 +406,23 @@ setup_konsole_fullscreen_rules() {
   if [ -f "$kwin_rules_source" ]; then
     cp "$kwin_rules_source" "$kwin_rules_dest"
     log_success "KDE window rules copied from configs to ~/.config/kwinrulesrc"
-    log_info "Konsole will automatically go fullscreen without titlebar"
+    log_info "Konsole will automatically go maximized without titlebar"
     
     # Verify the file was copied correctly
     if [ -f "$kwin_rules_dest" ]; then
       log_success "KDE window rules file verified at $kwin_rules_dest"
-      # Check for Konsole fullscreen rule
-      if grep -q "Konsole Fullscreen" "$kwin_rules_dest"; then
-        log_success "Konsole fullscreen rule found in configuration"
+      # Check for Konsole maximized rule
+      if grep -q "Konsole Maximized" "$kwin_rules_dest"; then
+        log_success "Konsole maximized rule found in configuration"
       else
-        log_warning "Konsole fullscreen rule not found in configuration file"
+        log_warning "Konsole maximized rule not found in configuration file"
       fi
       
       # Check for specific rule properties
-      if grep -q "noborder=true" "$kwin_rules_dest" && grep -q "fullscreen=true" "$kwin_rules_dest"; then
-        log_success "Konsole no-border and fullscreen rules verified"
+      if grep -q "noborder=true" "$kwin_rules_dest" && grep -q "maximize=true" "$kwin_rules_dest"; then
+        log_success "Konsole no-border and maximized rules verified"
       else
-        log_warning "Konsole border or fullscreen rules not properly configured"
+        log_warning "Konsole border or maximized rules not properly configured"
       fi
       
       # Check for window class matching

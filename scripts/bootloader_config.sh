@@ -105,7 +105,7 @@ set_loader_config() {
     fi
     
     # Create backup before making changes
-    cp "$loader_config" "${loader_config}.backup.$(date +%Y%m%d_%H%M%S)" || true
+    sudo cp "$loader_config" "${loader_config}.backup.$(date +%Y%m%d_%H%M%S)" || true
     
     # Check if key exists (including commented versions)
     if grep -q "^[#]*${key}[[:space:]]" "$loader_config" 2>/dev/null; then

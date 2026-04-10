@@ -65,6 +65,15 @@ Laptop Features:
 | **systemd-boot** | LTS kernel fallback, EFI support | Automatic entry management |
 | **Limine** | Modern UEFI, fast boot | limine-snapper-sync |
 
+#### Advanced Performance Optimization (CachyOS-Inspired)
+
+- **Smart Memory Management**: Dynamic swappiness based on system RAM (1-3GB: 10, 4-7GB: 10, 8-15GB: 5, 16GB+: 1)
+- **Intelligent Storage Optimization**: Automatic I/O scheduler detection (NVMe: none, SSD: deadline, HDD: mq-deadline)
+- **Advanced Kernel Tuning**: Process scheduling, network stack optimization, filesystem-specific tuning
+- **Hardware-Aware Configuration**: NVMe detection, zRAM monitoring, virtualization awareness
+- **Transparent Hugepages**: Disabled for desktop systems to improve performance
+- **Persistent Settings**: All optimizations survive reboots via udev rules and systemd services
+
 #### Performance Optimization
 - **I/O Scheduling**: Automatic selection based on storage type
 - **Kernel Tuning**: `vm.swappiness=10`, `fs.inotify.max_user_watches=524288`
@@ -109,6 +118,23 @@ Sudo:
 - **GUI Management**: btrfs-assistant for easy rollback
 - **Boot Integration**: GRUB/systemd-boot/Limine snapshot entries
 
+### Smart AMD P-State System (NEW)
+
+Intelligent CPU power management that automatically detects your system configuration:
+
+#### Detection Methods
+- **CPU Vendor Detection**: Intel vs AMD identification
+- **P-State Support Validation**: 3-method validation (sysfs, CPU capabilities, kernel version)
+- **Gaming Mode Detection**: 5-indicator system with 50% threshold
+- **Automatic Fallback**: Graceful degradation if configuration fails
+
+#### Configuration Logic
+| System Type | Detection | P-State Configuration | Performance Profile |
+|-------------|------------|---------------------|-------------------|
+| **Gaming Mode** | Zen kernel + gaming tools + services | Maximum performance (performance governor) |
+| **Standard System** | Regular desktop configuration | Balanced performance (power management) |
+| **Unsupported** | Zen 1 CPUs or older systems | ACPI CPUfreq fallback |
+
 ### Gaming Mode (Optional)
 
 Transform your system into a gaming powerhouse with one click:
@@ -122,6 +148,8 @@ Transform your system into a gaming powerhouse with one click:
 | **Goverlay** | MangoHud configuration GUI |
 | **GameMode** | Automatic performance tuning |
 | **Wine** | Windows compatibility layer |
+| **Zen Kernel** | Optimized for gaming performance |
+| **Note**: AMD P-State handled automatically by system_services.sh |
 
 ### Smart Peripheral Detection
 
@@ -324,9 +352,20 @@ custom:          # Optional additions
 |-----------|--------|
 | **Core Functionality** | Production Ready |
 | **Hardware Detection** | Stable |
+| **Smart AMD P-State** | ✅ Implemented |
+| **Advanced Optimizations** | ✅ CachyOS-Inspired |
 | **Gaming Mode** | Tested |
 | **Security Hardening** | Active |
 | **Documentation** | Complete |
+
+### Recent Major Improvements
+
+#### Advanced Performance & Smart CPU Management
+- **🚀 CachyOS-Inspired Optimizations**: Advanced memory management, intelligent storage optimization, hardware-aware configuration
+- **🧠 Smart AMD P-State System**: Automatic gaming vs system detection with 3-method validation and fallback mechanisms
+- **📊 Dynamic Resource Management**: RAM-based swappiness, storage-type I/O scheduling, filesystem-specific tuning
+- **🛡️ Robust Error Handling**: Automatic fallbacks and graceful degradation for unsupported systems
+- **⚡ Persistent Configuration**: All optimizations survive reboots via udev rules and systemd services
 
 ---
 

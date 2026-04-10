@@ -62,29 +62,13 @@ configure_boot() {
   run_step "Adding kernel parameters to systemd-boot entries" add_systemd_boot_kernel_params
 
   if [ -f "/boot/loader/loader.conf" ]; then
-    # Check if zen kernel is installed (from gaming_mode.sh script)
-    if pacman -Qi linux-zen &>/dev/null; then
-      ui_info "Zen kernel detected - setting as default"
-      sudo sed -i \
-        -e '/^default /d' \
-        -e '1i default linux-zen.conf' \
-        /boot/loader/loader.conf
-      # Set timeout 3 and console-mode max for zen kernel
-      sudo sed -i \
-        -e 's/^timeout.*/timeout 3/' \
-        -e 's/^[#]*console-mode[[:space:]]\+.*/console-mode max/' \
-        /boot/loader/loader.conf
-      ui_info "Set timeout to 3s and console-mode to max for zen kernel"
-    else
-      # Keep original behavior for standard mode
-      sudo sed -i \
-        -e '/^default /d' \
-        -e '1i default @saved' \
-        -e 's/^timeout.*/timeout 5/' \
-        -e 's/^[#]*console-mode[[:space:]]\+.*/console-mode keep/' \
-        /boot/loader/loader.conf
-      ui_info "Using standard bootloader configuration"
-    fi
+    # Always apply optimal timeout and console-mode settings (independent of kernel choice)
+    set_loader_config "timeout" "3"
+    set_loader_config "console-mode" "max"
+    ui_info "Set timeout to 3s and console-mode to max (optimal settings)"
+    
+    # Note: Default kernel setting is handled by gaming_mode.sh when Zen kernel is installed
+    ui_info "Default kernel setting managed by gaming mode configuration"
   else
     log_warning "loader.conf not found. Skipping loader.conf configuration for systemd-boot."
   fi
@@ -109,26 +93,43 @@ set_grub_config() {
     fi
 }
 
+# Helper function to safely set systemd-boot loader.conf values
+set_loader_config() {
+    local key="$1"
+    local value="$2"
+    local loader_config="/boot/loader/loader.conf"
+    
+    if [ ! -f "$loader_config" ]; then
+        log_warning "loader.conf not found, cannot set configuration"
+        return 1
+    fi
+    
+    # Create backup before making changes
+    cp "$loader_config" "${loader_config}.backup.$(date +%Y%m%d_%H%M%S)" || true
+    
+    # Check if key exists (including commented versions)
+    if grep -q "^[#]*${key}[[:space:]]" "$loader_config" 2>/dev/null; then
+        # Replace existing key (whether commented or not)
+        sudo sed -i "s/^[#]*${key}[[:space:]].*/${key} ${value}/" "$loader_config"
+    else
+        # Add new key at the end
+        echo "${key} ${value}" | sudo tee -a "$loader_config" >/dev/null
+    fi
+}
+
 # --- GRUB configuration ---
 configure_grub() {
     step "Configuring GRUB"
 
-    # Check if zen kernel is installed (from gaming_mode.sh script)
-    if pacman -Qi linux-zen &>/dev/null; then
-        step "Configuring GRUB for Zen Kernel"
-        # Set zen kernel as default (first entry)
-        set_grub_config "GRUB_DEFAULT" "0"
-        ui_info "Set GRUB to boot first kernel (Zen)"
-        # Set timeout to 3 for zen kernel
-        set_grub_config "GRUB_TIMEOUT" "3"
-    else
-        step "Configuring GRUB: set default kernel to 'linux'"
-        # Use saved/default behavior for standard mode
-        set_grub_config "GRUB_DEFAULT" "saved"
-        # Set timeout to 5 for standard mode
-        set_grub_config "GRUB_TIMEOUT" "5"
-        ui_info "Using standard GRUB configuration"
-    fi
+    # Always set optimal timeout regardless of kernel choice
+    set_grub_config "GRUB_TIMEOUT" "3"
+    ui_info "Set GRUB timeout to 3 seconds (optimal setting)"
+    
+    # Always use saved entry behavior (kernel default handled by gaming_mode.sh)
+    step "Configuring GRUB: set saved entry as default"
+    set_grub_config "GRUB_DEFAULT" "saved"
+    ui_info "Set saved entry as default boot entry"
+    ui_info "Note: Zen kernel default setting handled by gaming mode when installed"
 
     set_grub_config "GRUB_SAVEDEFAULT" "true"
     set_grub_config "GRUB_CMDLINE_LINUX_DEFAULT" '"quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 plymouth.ignore-serial-consoles"'
@@ -155,8 +156,33 @@ configure_grub() {
     # Remove fallback/recovery kernels
     sudo rm -f /boot/initramfs-*-fallback.img /boot/vmlinuz-*-fallback 2>/dev/null || true
 
-    # Regenerate grub.cfg
-    sudo grub-mkconfig -o /boot/grub/grub.cfg >/dev/null 2>&1 || { log_error "grub-mkconfig failed"; return 1; }
+    # Regenerate grub.cfg only if changes were made
+    local grub_config="/etc/default/grub"
+    local grub_cfg="/boot/grub/grub.cfg"
+    local backup_grub_config="${grub_config}.backup.$(date +%Y%m%d_%H%M%S)"
+    
+    # Create backup before regenerating
+    if [ -f "$grub_config" ]; then
+        cp "$grub_config" "$backup_grub_config" || true
+    fi
+    
+    # Only regenerate if grub config exists
+    if [ -f "$grub_config" ]; then
+        ui_info "Regenerating GRUB configuration..."
+        if sudo grub-mkconfig -o "$grub_cfg" >/dev/null 2>&1; then
+            log_success "GRUB configuration regenerated successfully"
+        else
+            log_error "grub-mkconfig failed"
+            # Restore backup if regeneration failed
+            if [ -f "$backup_grub_config" ]; then
+                sudo mv "$backup_grub_config" "$grub_config" || true
+            fi
+            return 1
+        fi
+    else
+        log_warning "GRUB config file not found, skipping regeneration"
+        return 1
+    fi
 
     if pacman -Qi linux-zen &>/dev/null; then
         log_success "GRUB configured with Zen kernel as default"

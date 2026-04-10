@@ -92,15 +92,15 @@ configure_zen_kernel_default() {
 		return 0
 	fi
 	
-	step "Configuring Zen Kernel boot entry"
+	step "Configuring Zen Kernel as default boot entry"
 	
 	# Detect bootloader type using the same detection logic as bootloader_config.sh
 	local BOOTLOADER=$(detect_bootloader)
 	ui_info "Detected bootloader: $BOOTLOADER"
 	
 	if [[ "$BOOTLOADER" = "systemd-boot" ]]; then
-		ui_info "Creating systemd-boot entry for Zen kernel..."
-		configure_systemd_boot_zen
+		ui_info "Setting Zen kernel as default in systemd-boot..."
+		configure_systemd_boot_zen_default
 	elif [[ "$BOOTLOADER" = "grub" ]]; then
 		ui_info "Configuring GRUB for Zen kernel..."
 		configure_grub_zen
@@ -110,8 +110,26 @@ configure_zen_kernel_default() {
 	else
 		ui_warn "No supported bootloader detected. Manual configuration may be required."
 	fi
+}
+
+# Configure systemd-boot to set Zen kernel as default in loader.conf
+configure_systemd_boot_zen_default() {
+	local loader_config="/boot/loader/loader.conf"
 	
-	ui_info "Note: Zen kernel entry created. You may need to manually set it as default in your bootloader."
+	if [ ! -f "$loader_config" ]; then
+		log_warning "loader.conf not found, cannot set default kernel"
+		return 1
+	fi
+	
+	# Create backup before making changes
+	cp "$loader_config" "${loader_config}.backup.$(date +%Y%m%d_%H%M%S)" || true
+	
+	# Remove existing default line and add Zen kernel as default
+	sudo sed -i '/^default /d' "$loader_config"
+	echo "default linux-zen.conf" | sudo tee -a "$loader_config" >/dev/null
+	
+	log_success "Set Zen kernel as default in systemd-boot loader.conf"
+	ui_info "Zen kernel will be used as default boot entry"
 }
 
 # Configure systemd-boot for Zen Kernel

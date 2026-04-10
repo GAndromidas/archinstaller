@@ -92,9 +92,6 @@ add_kde_pyqt6_if_needed() {
     fi
 }
 
-# Call the function to add PyQt6 if needed
-add_kde_pyqt6_if_needed
-
 # Ensure critical variables are defined
 : "${HOME:=/home/$USER}"
 : "${USER:=$(whoami)}"
@@ -985,6 +982,9 @@ log_info() {
   echo -e "${CYAN}$1${RESET}"
   log_to_file "INFO: $1"
 }
+
+# Call the function to add PyQt6 if needed (now that logging functions are available)
+add_kde_pyqt6_if_needed
 
 # Function: run_step
 # Description: Runs a command with step logging and error handling

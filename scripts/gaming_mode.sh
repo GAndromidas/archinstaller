@@ -39,19 +39,19 @@ check_and_enable_multilib() {
 }
 
 
-# Install Zen Kernel for optimal gaming performance
+# Install Arch Linux (linux-zen) for optimal gaming performance
 install_zen_kernel() {
-	# Check if Zen kernel is already installed
+	# Check if Arch Linux (linux-zen) is already installed
 	if pacman -Qi linux-zen &>/dev/null; then
-		ui_info "Zen Kernel is already installed. Skipping installation."
+		ui_info "Arch Linux (linux-zen) is already installed. Skipping installation."
 		return 0
 	fi
 	
-	ui_info "Installing Zen Kernel for optimal gaming performance..."
+	ui_info "Installing Arch Linux (linux-zen) for optimal gaming performance..."
 	
 	if pacman_install_single "linux-zen" true; then
 		GAMING_INSTALLED+=("linux-zen")
-		log_success "Zen Kernel installed successfully"
+		log_success "Arch Linux (linux-zen) installed successfully"
 		
 		# Install headers for module compilation
 		if pacman_install_single "linux-zen-headers" true; then
@@ -62,34 +62,34 @@ install_zen_kernel() {
 		configure_zen_kernel_default
 		return 0
 	else
-		log_error "Failed to install Zen Kernel"
+		log_error "Failed to install Arch Linux (linux-zen)"
 		GAMING_ERRORS+=("linux-zen")
 		return 1
 	fi
 }
 
-# Configure bootloader to use Zen Kernel as default
+# Configure bootloader to use Arch Linux (linux-zen) as default
 configure_zen_kernel_default() {
-	# First check if Zen kernel is actually installed
+	# First check if Arch Linux (linux-zen) is actually installed
 	if ! pacman -Qi linux-zen &>/dev/null; then
-		ui_info "Zen kernel not installed. Skipping bootloader configuration."
+		ui_info "Arch Linux (linux-zen) not installed. Skipping bootloader configuration."
 		return 0
 	fi
 	
-	step "Configuring Zen Kernel as default boot entry"
+	step "Configuring Arch Linux (linux-zen) as default boot entry"
 	
 	# Detect bootloader type using the same detection logic as bootloader_config.sh
 	local BOOTLOADER=$(detect_bootloader)
 	ui_info "Detected bootloader: $BOOTLOADER"
 	
 	if [[ "$BOOTLOADER" = "systemd-boot" ]]; then
-		ui_info "Setting Zen kernel as default in systemd-boot..."
+		ui_info "Setting Arch Linux (linux-zen) as default in systemd-boot..."
 		configure_systemd_boot_zen_default
 	elif [[ "$BOOTLOADER" = "grub" ]]; then
-		ui_info "Configuring GRUB for Zen kernel..."
+		ui_info "Configuring GRUB for Arch Linux (linux-zen)..."
 		configure_grub_zen
 	elif [[ "$BOOTLOADER" = "limine" ]]; then
-		ui_info "Configuring Limine for Zen kernel..."
+		ui_info "Configuring Limine for Arch Linux (linux-zen)..."
 		configure_limine_zen
 	else
 		ui_warn "No supported bootloader detected. Manual configuration may be required."
@@ -108,7 +108,7 @@ configure_systemd_boot_zen_default() {
 	# Always create or update simple linux-zen.conf entry
 	local zen_entry=$(configure_systemd_boot_zen)
 	if [[ $? -ne 0 ]] || [[ -z "$zen_entry" ]]; then
-		log_error "Failed to create Zen kernel entry"
+		log_error "Failed to create Arch Linux (linux-zen) entry"
 		return 1
 	fi
 	
@@ -116,15 +116,15 @@ configure_systemd_boot_zen_default() {
 	sudo sed -i '/^default /d' "$loader_config"
 	echo "default linux-zen.conf" | sudo tee -a "$loader_config" >/dev/null
 	
-	log_success "Set Zen kernel as default in systemd-boot loader.conf"
-	ui_info "Zen kernel will be used as default boot entry: linux-zen.conf"
+	log_success "Set Arch Linux (linux-zen) as default in systemd-boot loader.conf"
+	ui_info "Arch Linux (linux-zen) will be used as default boot entry: linux-zen.conf"
 }
 
-# Configure systemd-boot for Zen Kernel
+# Configure systemd-boot for Arch Linux (linux-zen)
 configure_systemd_boot_zen() {
 	local entries_dir="/boot/loader/entries"
 	
-	ui_info "Creating Zen kernel entry in: $entries_dir"
+	ui_info "Creating Arch Linux (linux-zen) entry in: $entries_dir"
 	
 	# Find the best existing entry to copy from (handle both dated and simple names)
 	local existing_entry=""
@@ -159,9 +159,9 @@ configure_systemd_boot_zen() {
 		
 		ui_info "Creating linux-zen.conf with parameters from $(basename "$existing_entry")"
 		
-		# Create Zen kernel entry with EXACT same parameters, just changing kernel files
+		# Create Arch Linux (linux-zen) entry with EXACT same parameters, just changing kernel files
 		sudo tee "$zen_entry_file" > /dev/null << EOF
-title   Arch Linux (Zen Kernel)
+title   Arch Linux (linux-zen)
 linux   /vmlinuz-linux-zen
 initrd  /initramfs-linux-zen.img
 options $options
@@ -172,8 +172,8 @@ EOF
 			echo "machine-id $machine_id" | sudo tee -a "$zen_entry_file" > /dev/null
 		fi
 		
-		log_success "Created systemd-boot entry for Zen Kernel with exact same parameters as $(basename "$existing_entry")"
-		ui_info "Zen kernel entry created: $zen_entry_file"
+		log_success "Created systemd-boot entry for Arch Linux (linux-zen) with exact same parameters as $(basename "$existing_entry")"
+		ui_info "Arch Linux (linux-zen) entry created: $zen_entry_file"
 		
 		# Don't sync options - respect current configuration (including Plymouth splash)
 		log_info "Respecting current kernel options (including Plymouth configuration)"
@@ -248,7 +248,7 @@ set_grub_config() {
     fi
 }
 
-# Configure GRUB for Zen Kernel with Plymouth support
+# Configure GRUB for Arch Linux (linux-zen) with Plymouth support
 configure_grub_zen() {
 	# GRUB automatically detects installed kernels, but we need to ensure Plymouth parameters are set
 	if [[ -f "/etc/default/grub" ]]; then
@@ -256,7 +256,7 @@ configure_grub_zen() {
 		set_grub_config "GRUB_DEFAULT" "saved"
 		set_grub_config "GRUB_SAVEDEFAULT" "true"
 		
-		# Ensure Plymouth parameters are set for all kernels including Zen
+		# Ensure Plymouth parameters are set for all kernels including Arch Linux (linux-zen)
 		set_grub_config "GRUB_CMDLINE_LINUX_DEFAULT" '"quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 plymouth.ignore-serial-consoles"'
 		
 		# Enable submenu for additional kernels (linux-lts, linux-zen)
@@ -264,14 +264,14 @@ configure_grub_zen() {
 		
 		# Regenerate GRUB config to include Zen kernel with Plymouth support
 		if sudo grub-mkconfig -o /boot/grub/grub.cfg >/dev/null 2>&1; then
-			log_success "GRUB configured for Zen Kernel with Plymouth support"
+			log_success "GRUB configured for Arch Linux (linux-zen) with Plymouth support"
 		else
 			log_error "Failed to regenerate GRUB configuration"
 		fi
 	fi
 }
 
-# Configure Limine bootloader for Zen Kernel with Plymouth support
+# Configure Limine bootloader for Arch Linux (linux-zen) with Plymouth support
 configure_limine_zen() {
 	local limine_config="/boot/limine.conf"
 	
@@ -299,17 +299,17 @@ configure_limine_zen() {
 			;;
 	esac
 	
-	# Check if Zen kernel is installed
+	# Check if Arch Linux (linux-zen) is installed
 	if [[ -f "/boot/vmlinuz-linux-zen" ]] && [[ -f "/boot/initramfs-linux-zen.img" ]]; then
-		# Add Zen kernel entry to existing or new limine.conf
+		# Add Arch Linux (linux-zen) entry to existing or new limine.conf
 		if [[ -f "$limine_config" ]]; then
-			# Check if Zen entry already exists
+			# Check if Arch Linux (linux-zen) entry already exists
 			if grep -q "vmlinuz-linux-zen" "$limine_config"; then
-				log_info "Zen kernel entry already exists in limine.conf"
+				log_info "Arch Linux (linux-zen) entry already exists in limine.conf"
 				return 0
 			fi
 			
-			# Append Zen kernel entry to existing config
+			# Append Arch Linux (linux-zen) entry to existing config
 			cat << EOF | sudo tee -a "$limine_config" > /dev/null
 
 /Arch Linux (Zen Kernel)
@@ -319,7 +319,7 @@ cmdline: $cmdline
 module_path: boot():/initramfs-linux-zen.img
 EOF
 		else
-			# Create new limine.conf with Zen kernel as default
+			# Create new limine.conf with Arch Linux (linux-zen) as default
 			cat << EOF | sudo tee "$limine_config" > /dev/null
 # Limine Bootloader Configuration
 # Generated by archinstaller
@@ -335,7 +335,7 @@ module_path: boot():/initramfs-linux-zen.img
 
 EOF
 			
-			# Add standard kernel entry as fallback
+			# Add Arch Linux kernel entry as fallback
 			if [[ -f "/boot/vmlinuz-linux" ]] && [[ -f "/boot/initramfs-linux.img" ]]; then
 				cat << EOF | sudo tee -a "$limine_config" > /dev/null
 /Arch Linux
@@ -347,9 +347,9 @@ EOF
 			fi
 		fi
 		
-		log_success "Added Zen Kernel entry to Limine bootloader with Plymouth support"
+		log_success "Added Arch Linux (linux-zen) entry to Limine bootloader with Plymouth support"
 	else
-		log_warning "Zen kernel not found in /boot. Skipping Limine Zen configuration."
+		log_warning "Arch Linux (linux-zen) not found in /boot. Skipping Limine Arch Linux (linux-zen) configuration."
 	fi
 }
 
@@ -502,10 +502,21 @@ main() {
 	install_pacman_packages
 	install_flatpak_packages
 	configure_mangohud
-	enable_gamemode
+	encase "$kernel_type" in
+    "Arch Linux (linux-zen)")
+      # Gaming/desktop optimizations already in place
+      log_info "Arch Linux (linux-zen) already optimized for low latency"
+      ;;
+    linux-hardened)
+      # Security-focused - minimal changes
+      ;;
+    *)
+      # Standard kernel - apply gaming optimizations
+      ;;
+	esac
 	
 	ui_success "Gaming Mode installation complete!"
-	ui_info "Your system is now optimized for gaming with Zen kernel (if installed), GameMode, and gaming tools."
+	ui_info "Your system is now optimized for gaming with Arch Linux (linux-zen) (if installed), GameMode, and gaming tools."
 }
 
 main

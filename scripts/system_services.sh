@@ -734,7 +734,7 @@ detect_kernel_type() {
     log_success "Running linux-lts kernel (Long Term Support)"
     log_info "LTS kernel focuses on stability"
   elif [[ "$kernel" == *"-zen"* ]]; then
-    kernel_type="linux-zen"
+    kernel_type="Arch Linux (linux-zen)"
     log_success "Running linux-zen kernel (Performance)"
     log_info "Zen kernel optimized for desktop/gaming performance"
   elif [[ "$kernel" == *"-hardened"* ]]; then
@@ -748,9 +748,9 @@ detect_kernel_type() {
 
   # Apply kernel-specific optimizations
   case "$kernel_type" in
-    linux-zen)
+    "Arch Linux (linux-zen)")
       # Gaming/desktop optimizations already in place
-      log_info "Zen kernel already optimized for low latency"
+      log_info "Arch Linux (linux-zen) already optimized for low latency"
       ;;
     linux-hardened)
       # Security-focused - minimal changes

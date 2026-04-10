@@ -70,7 +70,7 @@ configure_boot() {
     set_loader_config "console-mode" "max"
     ui_info "Set timeout to 3s and console-mode to max (optimal settings)"
     
-    # Note: Default kernel setting is handled by gaming_mode.sh when Zen kernel is installed
+    # Note: Default kernel setting is handled by gaming_mode.sh when Arch Linux (linux-zen) is installed
     ui_info "Default kernel setting managed by gaming mode configuration"
   else
     log_warning "loader.conf not found. Skipping loader.conf configuration for systemd-boot."
@@ -424,7 +424,7 @@ configure_grub() {
     step "Configuring GRUB: set saved entry as default"
     set_grub_config "GRUB_DEFAULT" "saved"
     ui_info "Set saved entry as default boot entry"
-    ui_info "Note: Zen kernel default setting handled by gaming mode when installed"
+    ui_info "Note: Arch Linux (linux-zen) default setting handled by gaming mode when installed"
 
     set_grub_config "GRUB_SAVEDEFAULT" "true"
     set_grub_config "GRUB_CMDLINE_LINUX_DEFAULT" '"quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 plymouth.ignore-serial-consoles"'
@@ -480,7 +480,7 @@ configure_grub() {
     fi
 
     if pacman -Qi linux-zen &>/dev/null; then
-        log_success "GRUB configured with Zen kernel as default"
+        log_success "GRUB configured with Arch Linux (linux-zen) as default"
     else
         log_success "GRUB configured to remember the last chosen boot entry."
     fi
@@ -539,22 +539,22 @@ interface_resolution: 1024x768
 
 EOF
     
-    # Add kernels in smart order (Zen first if installed)
+    # Add kernels in smart order (Arch Linux (linux-zen) first if installed)
     local kernels_added=()
     
-    # Zen kernel first if installed (from gaming_mode.sh script)
+    # Arch Linux (linux-zen) first if installed (from gaming_mode.sh script)
     if pacman -Qi linux-zen &>/dev/null; then
       if [[ -f "/boot/vmlinuz-linux-zen" ]] && [[ -f "/boot/initramfs-linux-zen.img" ]]; then
         cat << EOF
 
-Arch Linux (Zen Kernel)
+Arch Linux (linux-zen)
 protocol: linux
 path: boot():/vmlinuz-linux-zen
 cmdline: $cmdline
 module_path: boot():/initramfs-linux-zen.img
 EOF
         kernels_added+=("zen")
-        ui_info "Added Zen kernel entry to Limine"
+        ui_info "Added Arch Linux (linux-zen) entry to Limine"
       fi
     fi
     
@@ -608,7 +608,7 @@ EOF
   } | sudo tee "$limine_config" > /dev/null
   
   if pacman -Qi linux-zen &>/dev/null; then
-    log_success "Limine configured with Zen kernel prioritized"
+    log_success "Limine configured with Arch Linux (linux-zen) prioritized"
   else
     log_success "Idempotent Limine configuration completed"
   fi

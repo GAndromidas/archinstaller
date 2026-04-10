@@ -195,10 +195,20 @@ setup_kde_shortcuts() {
     # Only support Plasma 6+ for bleeding edge Arch Linux
     if [ -n "$version_number" ] && [ "$version_number" -ge 6 ]; then
       log_success "KDE Plasma 6+ detected - supported configuration"
+      
+      # Install PyQt6 silently for KDE automation if not already installed
+      if ! pacman -Qi python-pyqt6 &>/dev/null; then
+        log_info "Installing python-pyqt6 for KDE automation..."
+        if sudo pacman -S --noconfirm --needed python-pyqt6 >/dev/null 2>&1; then
+          log_success "python-pyqt6 installed successfully"
+        else
+          log_warning "Failed to install python-pyqt6, some KDE features may not work"
+        fi
+      fi
     else
       log_error "KDE Plasma 5 detected - not supported on bleeding edge Arch Linux"
-      log_info "Please upgrade to Plasma 6 for full compatibility"
-      return 1
+      log_info "Arch Linux recommends Plasma 6 for latest features and Qt6 support"
+      return 0
     fi
 
     local kde_shortcuts_source="$CONFIGS_DIR/kglobalshortcutsrc"
@@ -583,17 +593,30 @@ cleanup_kde_dependencies() {
 reload_kde_config() {
   log_info "Reloading KDE configuration..."
   
+  # Check if qdbus is available
+  if ! command -v qdbus >/dev/null 2>&1; then
+    log_info "qdbus command not found, KDE configuration will apply on next login"
+    log_info "This is normal - qdbus is part of qt6-tools and may not be installed"
+    return 0
+  fi
+  
   # Reload KWin rules
   if pgrep -x "kwin_x11" > /dev/null || pgrep -x "kwin_wayland" > /dev/null; then
-    qdbus org.kde.KWin /KWin reconfigure || true
-    log_success "KWin configuration reloaded"
+    if qdbus org.kde.KWin /KWin reconfigure >/dev/null 2>&1; then
+      log_success "KWin configuration reloaded"
+    else
+      log_info "KWin configuration will apply on next login"
+    fi
   else
     log_info "KWin not running, will apply on next login"
   fi
   
   # Reload global shortcuts
-  qdbus org.kde.kglobalaccel /kglobalaccel reconfigure || true
-  log_success "Global shortcuts reloaded"
+  if qdbus org.kde.kglobalaccel /kglobalaccel reconfigure >/dev/null 2>&1; then
+    log_success "Global shortcuts reloaded"
+  else
+    log_info "Global shortcuts will apply on next login"
+  fi
 }
 
 # Main execution

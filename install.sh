@@ -238,6 +238,22 @@ fi
 
 export INSTALL_MODE
 
+# Function to validate state file integrity
+validate_state_file() {
+  if [ ! -f "$STATE_FILE" ]; then
+    return 0  # No file is valid
+  fi
+  
+  # Check if file is readable and not empty
+  if [ ! -r "$STATE_FILE" ] || [ ! -s "$STATE_FILE" ]; then
+    log_warning "State file is corrupted or empty. Starting fresh installation."
+    rm -f "$STATE_FILE" 2>/dev/null || true
+    return 1
+  fi
+  
+  return 0
+}
+
 # Enhanced resume functionality with partial failure handling and error recovery
 show_resume_menu() {
   # Validate state file first
@@ -464,23 +480,6 @@ is_step_complete() {
   [ -f "$STATE_FILE" ] && grep -q "^$1$" "$STATE_FILE"
 }
 
-# Function to validate state file integrity
-validate_state_file() {
-  if [ ! -f "$STATE_FILE" ]; then
-    return 0  # No file is valid
-  fi
-  
-  # Check if file is readable and not empty
-  if [ ! -r "$STATE_FILE" ] || [ ! -s "$STATE_FILE" ]; then
-    log_warning "State file is corrupted or empty. Starting fresh installation."
-    rm -f "$STATE_FILE" 2>/dev/null || true
-    return 1
-  fi
-  
-  return 0
-}
-
-# Duplicate show_resume_menu function removed - moved to beginning
 
 # Enhanced step completion with status tracking and error recovery
 # Tracks both completed and failed steps with detailed progress reporting
@@ -500,9 +499,6 @@ mark_step_complete_with_progress() {
   else
     echo "FAILED: $step_name" >> "$STATE_FILE"
   fi
-
-  # Progress tracking removed - was causing arithmetic syntax errors
-  # Step status is logged to STATE_FILE for resume functionality
 }
 
 # Enhanced error handling and rollback functions

@@ -246,8 +246,13 @@ setup_kde_shortcuts() {
           log_success "Conflicting Meta+ shortcuts disabled for Meta+Q to work"
         fi
         
+        # Verify activity switcher moved to Ctrl+Q
+        if grep -q "manage activities=Ctrl+Q" "$kde_shortcuts_dest"; then
+          log_success "Activity switcher moved to Ctrl+Q to free Meta+Q for window closing"
+        fi
+        
         log_info "Changes will take effect after Plasma restart or logout/login"
-        log_info "Note: Disabled conflicting shortcuts to ensure Meta+Q works for window closing"
+        log_info "Note: Meta+Q now closes windows, Ctrl+Q opens activity switcher"
       else
         log_error "Failed to move kglobalshortcutsrc file"
         return 1

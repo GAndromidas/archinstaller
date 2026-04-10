@@ -502,18 +502,16 @@ main() {
 	install_pacman_packages
 	install_flatpak_packages
 	configure_mangohud
-	case "$kernel_type" in
-    "Arch Linux (linux-zen)")
-      # Gaming/desktop optimizations already in place
-      log_info "Arch Linux (linux-zen) already optimized for low latency"
-      ;;
-    linux-hardened)
-      # Security-focused - minimal changes
-      ;;
-    *)
-      # Standard kernel - apply gaming optimizations
-      ;;
-	esac
+	
+	# Check if running Zen kernel for optimizations
+	local kernel=$(uname -r)
+	
+	if [[ "$kernel" == *"-zen"* ]]; then
+		log_info "Arch Linux (linux-zen) already optimized for low latency"
+		log_info "Zen kernel optimizations already active"
+	else
+		log_info "Standard kernel detected - gaming optimizations applied via GameMode"
+	fi
 	
 	ui_success "Gaming Mode installation complete!"
 	ui_info "Your system is now optimized for gaming with Arch Linux (linux-zen) (if installed), GameMode, and gaming tools."

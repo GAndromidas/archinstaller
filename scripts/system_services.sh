@@ -992,17 +992,197 @@ setup_intel_laptop_optimizations() {
 setup_amd_laptop_optimizations() {
   step "Configuring AMD-specific laptop optimizations"
 
-  # Check for AMD P-State driver
-  if [ -d /sys/devices/system/cpu/amd_pstate ]; then
-    log_success "AMD P-State driver detected - kernel will manage CPU power efficiently"
-    log_info "Modern Ryzen CPUs (5000+ series) have excellent power management built-in"
-  else
-    log_info "AMD P-State driver not available (using ACPI CPUfreq driver)"
-    log_info "This is normal for Ryzen 1st-3rd gen mobile CPUs (2000-3000 series)"
-    log_success "Kernel ACPI CPUfreq driver will handle power management"
-  fi
+  # Configure smart AMD P-State based on gaming mode presence
+  configure_smart_amd_pstate
 
   log_success "AMD-specific optimizations completed"
+}
+
+# Function to configure smart AMD P-State with robust detection and validation
+configure_smart_amd_pstate() {
+  local cpu_vendor=$(grep -m1 'vendor_id' /proc/cpuinfo | awk '{print $3}')
+  
+  if [[ "$cpu_vendor" != "AuthenticAMD" ]]; then
+    log_info "Non-AMD CPU detected - skipping AMD P-State configuration"
+    return 0
+  fi
+
+  # Validate AMD P-State support
+  if ! validate_amd_pstate_support; then
+    log_warning "AMD CPU detected but P-State not supported - using ACPI CPUfreq"
+    return 1
+  fi
+
+  # Robust gaming mode detection
+  local gaming_mode_detected=false
+  gaming_mode_detected=$(detect_gaming_mode_presence)
+  
+  log_info "AMD CPU detected with P-State support - configuring driver"
+  
+  # Apply configuration with error handling
+  if [ "$gaming_mode_detected" = true ]; then
+    log_info "Gaming mode detected - applying gaming P-State configuration"
+    if configure_amd_pstate_gaming; then
+      log_success "AMD P-State gaming configuration applied successfully"
+    else
+      log_warning "Gaming P-State failed - falling back to system configuration"
+      configure_amd_pstate_system
+    fi
+  else
+    log_info "Standard system detected - applying balanced P-State configuration"
+    configure_amd_pstate_system
+  fi
+}
+
+# Validate AMD P-State support with multiple checks
+validate_amd_pstate_support() {
+  local support_detected=false
+  
+  # Method 1: Check for AMD P-State driver in sysfs
+  if [ -d /sys/devices/system/cpu/amd_pstate ]; then
+    support_detected=true
+    log_info "AMD P-State driver found in sysfs"
+  fi
+  
+  # Method 2: Check for P-State in CPU capabilities
+  if grep -q "amd_pstate" /proc/cpuinfo 2>/dev/null; then
+    support_detected=true
+    log_info "AMD P-State capability found in /proc/cpuinfo"
+  fi
+  
+  # Method 3: Check kernel version (5.19+ has better support)
+  local kernel_version=$(uname -r | cut -d. -f1-2)
+  if [ "$(printf '%s\n' "5.19" "$kernel_version" | sort -V | head -n1)" = "5.19" ]; then
+    support_detected=true
+    log_info "Modern kernel ($kernel_version) with AMD P-State support"
+  fi
+  
+  if [ "$support_detected" = true ]; then
+    return 0  # P-State supported
+  else
+    return 1  # P-State not supported
+  fi
+}
+
+# Robust gaming mode detection with multiple indicators
+detect_gaming_mode_presence() {
+  local gaming_indicators=0
+  local total_checks=0
+  
+  # Check 1: Gaming-specific services
+  ((total_checks++))
+  if [ -f /etc/systemd/system/gaming-mode.service ] || [ -f /etc/systemd/user/gaming-mode.service ]; then
+    ((gaming_indicators++))
+    log_info "Found gaming-mode service"
+  fi
+  
+  # Check 2: Gaming packages (more specific than just Steam)
+  ((total_checks++))
+  if pacman -Q "linux-zen" >/dev/null 2>&1; then
+    ((gaming_indicators++))
+    log_info "Found Zen kernel (gaming optimization)"
+  fi
+  
+  # Check 3: Gaming tools (not just Steam)
+  ((total_checks++))
+  if pacman -Q "mangohud" "gamemode" >/dev/null 2>&1; then
+    ((gaming_indicators++))
+    log_info "Found gaming tools (MangoHud/GameMode)"
+  fi
+  
+  # Check 4: Gaming desktop entries
+  ((total_checks++))
+  if [ -f /usr/share/applications/steam.desktop ] || [ -f /usr/share/applications/lutris.desktop ] || [ -f /usr/share/applications/heroic.desktop ]; then
+    ((gaming_indicators++))
+    log_info "Found gaming applications"
+  fi
+  
+  # Check 5: Gaming configuration files
+  ((total_checks++))
+  if [ -d /etc/gaming-mode ] || [ -f /etc/default/gaming-mode ]; then
+    ((gaming_indicators++))
+    log_info "Found gaming mode configuration"
+  fi
+  
+  # Determine if gaming mode is present (50% threshold)
+  local threshold=$((total_checks / 2))
+  if [ $gaming_indicators -ge $threshold ]; then
+    log_info "Gaming mode detected ($gaming_indicators/$total_checks indicators)"
+    return 0  # Gaming mode detected
+  else
+    log_info "Standard system detected ($gaming_indicators/$total_checks gaming indicators)"
+    return 1  # Standard system
+  fi
+}
+
+# Configure AMD P-State for gaming performance
+configure_amd_pstate_gaming() {
+  local pstate_conf="/etc/modprobe.d/amd-pstate.conf"
+  local pstate_service="/etc/systemd/system/amd-pstate-gaming.service"
+  
+  # Create gaming P-State configuration
+  sudo tee "$pstate_conf" > /dev/null << EOF
+# AMD P-state configuration for optimal gaming performance
+# Modern kernels (5.19+) handle pstate=active automatically in boot loaders
+# This ensures compatibility with systemd-boot and GRUB
+options amd_pstate=active
+EOF
+  
+  # Create gaming-specific systemd service
+  sudo tee "$pstate_service" > /dev/null << EOF
+[Unit]
+Description=Set AMD P-state gaming performance governor
+Wants=systemd-udev-settle.service
+After=amd-pstate-setup.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/cpupower frequency-set -g performance
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  
+  # Enable the gaming service
+  if sudo systemctl daemon-reload && sudo systemctl enable amd-pstate-gaming.service; then
+    log_success "AMD P-state gaming performance service enabled"
+  else
+    log_warning "Failed to enable AMD P-state gaming performance service"
+  fi
+  
+  # Update initramfs if needed
+  if command -v mkinitcpio >/dev/null 2>&1; then
+    sudo mkinitcpio -P linux-zen linux-lts 2>/dev/null && log_success "Initramfs updated for gaming P-State"
+  fi
+  
+  log_success "AMD P-State gaming configuration applied"
+}
+
+# Configure AMD P-State for balanced system performance
+configure_amd_pstate_system() {
+  local pstate_conf="/etc/modprobe.d/amd-pstate.conf"
+  
+  # Create balanced P-State configuration
+  sudo tee "$pstate_conf" > /dev/null << EOF
+# AMD P-state configuration for balanced system performance
+# Modern kernels (5.19+) handle pstate=active automatically in boot loaders
+# This ensures compatibility with systemd-boot and GRUB
+options amd_pstate=active
+EOF
+  
+  # Enable AMD P-State driver for better power management
+  if ! grep -q "amd_pstate" /etc/modules-load.d/*.conf 2>/dev/null; then
+    echo "amd_pstate" | sudo tee -a /etc/modules-load.d/amd-pstate.conf >/dev/null
+    log_success "AMD P-State driver enabled for next boot"
+  fi
+  
+  # Update initramfs if needed
+  if command -v mkinitcpio >/dev/null 2>&1; then
+    sudo mkinitcpio -P linux linux-lts 2>/dev/null && log_success "Initramfs updated for system P-State"
+  fi
+  
+  log_success "AMD P-State system configuration applied"
 }
 
 # Function to setup laptop optimizations
@@ -1317,6 +1497,11 @@ EOF
       echo ""
     fi
   fi
+}
+
+# Apply advanced system optimizations (CachyOS-style)
+setup_advanced_optimizations() {
+  setup_advanced_optimizations
 }
 
 # Continue setup_laptop_optimizations function

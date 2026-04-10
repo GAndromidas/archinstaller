@@ -25,18 +25,9 @@ check_amd_pstate() {
 	local cpu_model=$(grep -m1 'model name' /proc/cpuinfo | cut -d':' -f2- | sed 's/^[ \t]*//')
 	
 	if [[ "$cpu_vendor" == "AuthenticAMD" ]]; then
-		# Check if AMD P-state driver is available or supported
-		if [[ -d "/sys/devices/system/cpu/cpufreq" ]] && grep -q "amd_pstate" /sys/devices/system/cpu/cpufreq/policy*/scaling_driver 2>/dev/null; then
-			ui_info "AMD CPU with P-state support detected: $cpu_model"
-			return 0
-		elif [[ -f "/sys/devices/system/cpu/amd_pstate/status" ]] || grep -q "amd_pstate" /proc/cpuinfo 2>/dev/null; then
-			ui_info "AMD CPU with P-state support detected: $cpu_model"
-			return 0
-		else
-			ui_info "AMD CPU detected but P-state support not confirmed: $cpu_model"
-			# Still return 0 for AMD CPUs as Zen kernel can enable P-state support
-			return 0
-		fi
+		ui_info "AMD CPU detected but P-state support not confirmed: $cpu_model"
+		# Still return 0 for AMD CPUs as Zen kernel can enable P-state support
+		return 0
 	fi
 	
 	ui_info "Non-AMD CPU detected: $cpu_model (Zen Kernel not required for Gaming Mode)"
@@ -48,8 +39,7 @@ install_zen_kernel() {
 	# Check if Zen kernel is already installed
 	if pacman -Qi linux-zen &>/dev/null; then
 		ui_info "Zen Kernel is already installed. Skipping installation."
-		# Still configure P-state even if Zen is already installed
-		configure_amd_pstate
+		# AMD P-State will be configured by system_services.sh
 		return 0
 	fi
 	
@@ -71,9 +61,7 @@ install_zen_kernel() {
 			GAMING_INSTALLED+=("linux-zen-headers")
 		fi
 		
-		# Configure AMD P-state after Zen kernel installation
-		configure_amd_pstate
-		
+		# AMD P-State will be configured by system_services.sh
 		# Set Zen Kernel as default in bootloader
 		configure_zen_kernel_default
 		return 0
@@ -317,99 +305,6 @@ EOF
 configure_amd_pstate() {
 	if ! check_amd_pstate; then
 		ui_info "AMD CPU not detected. Skipping P-state configuration."
-		return 0
-	fi
-	
-	ui_info "Configuring AMD P-state for optimal gaming performance..."
-	
-	# Check if Zen kernel is installed
-	if ! pacman -Qi linux-zen &>/dev/null; then
-		ui_info "Zen kernel not installed. P-state configuration requires Zen kernel."
-		return 0
-	fi
-	
-	# Create AMD P-state configuration
-	local pstate_conf="/etc/modprobe.d/amd-pstate.conf"
-	local pstate_defaults="/etc/default/amd-pstate"
-	
-	# Configure kernel parameters for AMD P-state
-	sudo tee "$pstate_conf" > /dev/null << EOF
-# AMD P-state configuration for optimal performance
-options amd_pstate=active
-EOF
-	
-	# Create systemd configuration for P-state
-	sudo mkdir -p "/etc/default"
-	sudo tee "$pstate_defaults" > /dev/null << EOF
-# AMD P-state default configuration
-# Set performance governor for gaming
-AMD_PSTATE_GOVERNOR="performance"
-
-# Enable P-state driver
-AMD_PSTATE_DRIVER="active"
-EOF
-	
-	# Update initramfs to include P-state configuration
-	if sudo mkinitcpio -P >/dev/null 2>&1; then
-		log_success "AMD P-state configuration applied and initramfs updated"
-	else
-		log_warning "Failed to update initramfs for P-state configuration"
-	fi
-	
-	# Configure CPU governor for current session
-	if command -v cpupower >/dev/null 2>&1; then
-		if sudo cpupower frequency-set -g performance >/dev/null 2>&1; then
-			log_success "CPU governor set to performance mode"
-		else
-			log_warning "Failed to set CPU governor to performance mode"
-		fi
-	else
-		ui_info "cpupower not available. Installing for CPU frequency control..."
-		if pacman_install_single "cpupower" true; then
-			if sudo cpupower frequency-set -g performance >/dev/null 2>&1; then
-				log_success "CPU governor set to performance mode"
-			fi
-		fi
-	fi
-	
-	# Create systemd service to set performance governor on boot
-	local pstate_service="/etc/systemd/system/amd-pstate-performance.service"
-	sudo tee "$pstate_service" > /dev/null << EOF
-[Unit]
-Description=Set AMD P-state performance governor
-After=multi-user.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/cpupower frequency-set -g performance
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-	
-	# Enable the service
-	if sudo systemctl daemon-reload && sudo systemctl enable amd-pstate-performance.service; then
-		log_success "AMD P-state performance service enabled"
-	else
-		log_warning "Failed to enable AMD P-state performance service"
-	fi
-	
-	ui_info "AMD P-state configured for optimal gaming performance"
-	ui_info "A reboot may be required to apply all P-state changes"
-}
-
-check_and_enable_multilib() {
-	local needs_sync=false
-
-	# 1. Check if multilib is configured in pacman.conf
-	if ! grep -q "^\[multilib\]" /etc/pacman.conf; then
-		if grep -q "^#\[multilib\]" /etc/pacman.conf; then
-			ui_info "Enabling multilib repository in /etc/pacman.conf..."
-			# Uncomment [multilib] and the following Include line
-			sudo sed -i "/\[multilib\]/,/Include/"'s/^#//' /etc/pacman.conf
-			needs_sync=true
-		else
 			ui_warn "Multilib repository section not found in /etc/pacman.conf. Adding it..."
 			if ! grep -q "^\[multilib\]" /etc/pacman.conf; then
 				echo -e "\n[multilib]\nInclude = /etc/pacman.d/mirrorlist" | sudo tee -a /etc/pacman.conf >/dev/null
@@ -430,15 +325,12 @@ check_and_enable_multilib() {
 	# 3. Sync if needed
 	if [[ "$needs_sync" == "true" ]]; then
 		if sudo pacman -Sy; then
-			log_success "Repositories synced successfully."
+			log_success "Repositories synchronized successfully"
 		else
-			log_error "Failed to sync repositories. 'wine' and other 32-bit packages might fail."
+			log_error "Failed to synchronize repositories"
 			return 1
 		fi
-	else
-		log_success "Multilib repository is enabled and synced."
 	fi
-	return 0
 }
 
 # ===== YAML Parsing Functions =====

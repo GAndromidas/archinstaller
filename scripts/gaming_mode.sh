@@ -502,7 +502,7 @@ main() {
 	install_pacman_packages
 	install_flatpak_packages
 	configure_mangohud
-	encase "$kernel_type" in
+	case "$kernel_type" in
     "Arch Linux (linux-zen)")
       # Gaming/desktop optimizations already in place
       log_info "Arch Linux (linux-zen) already optimized for low latency"

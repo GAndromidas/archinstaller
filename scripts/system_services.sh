@@ -889,13 +889,51 @@ check_battery_status() {
   fi
 }
 
-# Function to detect bluetooth hardware
+# Function to detect bluetooth hardware with comprehensive scanning
 detect_bluetooth_hardware() {
   step "Detecting Bluetooth hardware"
 
-  if lsusb | grep -qi bluetooth || lspci | grep -qi bluetooth || [ -d /sys/class/bluetooth ]; then
-    log_success "Bluetooth hardware detected"
+  local bluetooth_detected=false
+  local detection_methods=()
+  
+  # Method 1: Check sysfs (kernel-level detection)
+  if [ -d /sys/class/bluetooth ] && [ "$(ls /sys/class/bluetooth 2>/dev/null | wc -l)" -gt 0 ]; then
+    bluetooth_detected=true
+    detection_methods+=("kernel sysfs")
+  fi
+  
+  # Method 2: USB devices (external dongles, built-in USB controllers)
+  if command -v lsusb >/dev/null 2>&1; then
+    if lsusb 2>/dev/null | grep -iE "(bluetooth|broadcom|intel|realtek).*bluetooth" >/dev/null 2>&1; then
+      bluetooth_detected=true
+      detection_methods+=("USB device")
+    fi
+  fi
+  
+  # Method 3: PCI devices (internal cards, PCIe adapters)
+  if command -v lspci >/dev/null 2>&1; then
+    if lspci 2>/dev/null | grep -iE "(bluetooth|broadcom|intel|realtek).*bluetooth" >/dev/null 2>&1; then
+      bluetooth_detected=true
+      detection_methods+=("PCI device")
+    fi
+  fi
+  
+  # Method 4: Check for bluetooth kernel modules
+  if lsmod 2>/dev/null | grep -iE "(btusb|bluetooth)" >/dev/null 2>&1; then
+    bluetooth_detected=true
+    detection_methods+=("kernel module")
+  fi
+  
+  # Method 5: Check for bluetooth adapters in /dev
+  if [ -e /dev/rfkill ] || find /dev -name "*bluetooth*" 2>/dev/null | head -1 | grep -q .; then
+    bluetooth_detected=true
+    detection_methods+=("device node")
+  fi
 
+  if [ "$bluetooth_detected" = true ]; then
+    local detection_info=$(IFS=', '; echo "${detection_methods[*]}")
+    log_success "Bluetooth hardware detected (${detection_info})"
+    
     # Check if bluetooth service is enabled
     if ! systemctl is-enabled bluetooth.service &>/dev/null; then
       log_info "Bluetooth hardware present - service will be enabled"
@@ -903,8 +941,22 @@ detect_bluetooth_hardware() {
       log_info "Bluetooth service already enabled"
     fi
   else
-    log_info "No Bluetooth hardware detected"
-    log_info "Bluetooth packages installed but service will not be started"
+    # Professional red UI message for no Bluetooth
+    if supports_gum; then
+      echo ""
+      gum style --foreground 196 --border thick --padding "1 2" \
+        "  No Bluetooth hardware detected in your system" \
+        "  Check if Bluetooth adapter is properly connected" \
+        "  Bluetooth packages installed but service will not be started"
+      echo ""
+    else
+      echo ""
+      echo -e "${RED}  No Bluetooth hardware detected in your system${RESET}"
+      echo -e "${RED}  Check if Bluetooth adapter is properly connected${RESET}"
+      echo -e "${RED}  Bluetooth packages installed but service will not be started${RESET}"
+      echo ""
+    fi
+    log_warning "No Bluetooth hardware detected - service will not be started"
   fi
 }
 

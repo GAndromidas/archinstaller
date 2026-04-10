@@ -55,7 +55,7 @@ elif [[ -f /etc/arch-release ]]; then
 fi
 
 # Dynamic helper utilities based on distribution
-BASE_HELPER_UTILS=(base-devel bc bluez-utils cronie curl eza fastfetch flatpak fzf git openssh pacman-contrib plymouth rate-mirrors rsync zoxide)
+BASE_HELPER_UTILS=(base-devel bc bluez-utils cronie curl eza fastfetch flatpak fzf git openssh pacman-contrib plymouth rate-mirrors rsync usbutils zoxide)
 FIREWALL_UTILS=(ufw)  # For Arch Linux
 
 # Build final HELPER_UTILS array

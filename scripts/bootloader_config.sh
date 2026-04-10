@@ -27,8 +27,7 @@ add_systemd_boot_kernel_params() {
     fi
     
     if [ "$needs_update" = true ]; then
-      # Backup the entry before modification
-      sudo cp "$entry" "${entry}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
+      # Update entry without backup
       
       # Remove existing parameters if they exist, then add all parameters
       sudo sed -i 's/quiet//g; s/loglevel=[^ ]*//g; s/systemd\.show_status=[^ ]*//g; s/rd\.udev\.log_level=[^ ]*//g' "$entry"

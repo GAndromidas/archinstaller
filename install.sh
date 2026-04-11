@@ -7,7 +7,7 @@ INSTALL_LOG="$HOME/.archinstaller.log"
 # Function to show help
 show_help() {
   cat << EOF
-Archinstaller - Comprehensive Arch Linux Post-Installation Script
+ArchInstaller - Arch Linux Post-Installation Automation
 
 USAGE:
     ./install.sh [OPTIONS]
@@ -19,41 +19,65 @@ OPTIONS:
     -d, --dry-run   Preview what will be installed without making changes
 
 DESCRIPTION:
-    Archinstaller transforms a fresh Arch Linux installation into a fully
-    configured, optimized system. It installs essential packages, configures
-    desktop environment, sets up security features, and applies performance
-    optimizations.
+    ArchInstaller transforms a fresh Arch Linux installation into a fully
+    configured, optimized system with intelligent hardware detection and 
+    tailored optimizations. It applies targeted optimizations rather than 
+    one-size-fits-all settings, ensuring optimal performance for your 
+    specific configuration.
 
 INSTALLATION MODES:
-    Standard        Complete setup with all recommended packages
-    Minimal         Essential tools only for lightweight installations
-    Custom          Interactive selection of packages to install
+    Standard        Complete setup with all recommended packages (intermediate users)
+    Minimal         Essential tools only for lightweight installations (new users)
+    Server          Headless configuration (Docker, SSH, server utilities)
+    Custom          Interactive selection of packages to install (advanced users)
+    Gaming          Gaming-optimized setup with Steam, Heroic Games Launcher, 
+                    Faugus Launcher, and performance tools
 
 FEATURES:
-    - Desktop environment detection and optimization (KDE, GNOME, Cosmic)
-    - Security hardening (Fail2ban, Firewall)
-    - Performance tuning (Plymouth boot screen)
-    - Optional gaming mode with performance optimizations
-    - Btrfs snapshot support with automatic configuration
+    - Hardware-aware CPU detection (Intel/AMD with microcode updates)
+    - Automatic GPU driver detection and installation (NVIDIA/AMD/Intel)
+    - Storage optimization (NVMe/SSD/HDD with I/O scheduling)
+    - Desktop environment detection and optimization (KDE Plasma 6+, GNOME 46+, Cosmic)
+    - Security hardening (UFW/Firewalld + Fail2ban with SSH protection)
+    - Advanced performance tuning (CachyOS-inspired optimizations)
+    - Smart AMD P-State system with gaming mode detection
+    - Btrfs snapshot system with Snapper + bootloader integration
+    - Smart peripheral detection (Logitech, Keychron, Razer, gaming devices)
+    - Plymouth boot screen configuration
+    - Zsh shell with Oh-My-Zsh and Starship prompt
+    - Resume functionality for interrupted installations
 
-    - Automatic GPU driver detection and installation
+SYSTEM INTELLIGENCE:
+    - Dynamic memory management (RAM-based swappiness)
+    - Intelligent storage optimization (storage-type I/O scheduling)
+    - Hardware-aware configuration (NVMe detection, zRAM monitoring)
+    - Transparent hugepages optimization for desktop systems
+    - Persistent settings via udev rules and systemd services
+
+BOOTLOADER SUPPORT:
+    - GRUB with snapshot entries and timeout optimization
+    - systemd-boot with LTS kernel fallback and EFI support
+    - Limine with modern UEFI and fast boot support
 
 REQUIREMENTS:
-    - Fresh Arch Linux installation
+    - Fresh Arch Linux or EndeavourOS installation
     - Active internet connection
     - Regular user account with sudo privileges
     - Minimum 2GB free disk space
+    - Supported bootloader (GRUB/systemd-boot/Limine)
 
 EXAMPLES:
     ./install.sh                Run installer with interactive prompts
     ./install.sh --verbose      Run with detailed package installation output
+    ./install.sh --dry-run      Preview changes without making them
     ./install.sh --help         Show this help message
 
-LOG FILE:
-    Installation log saved to: ~/.archinstaller.log
+LOG FILES:
+    Installation log: ~/.archinstaller.log
+    Progress tracking: ~/.archinstaller.state
 
 MORE INFO:
-    https://github.com/gandromidas/archinstaller
+    https://github.com/GAndromidas/archinstaller
 
 EOF
   exit 0

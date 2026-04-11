@@ -1,5 +1,5 @@
 # =============================================================================
-# ZSH Configuration for Archinstaller
+# ZSH Configuration
 # =============================================================================
 
 # Path to your oh-my-zsh installation

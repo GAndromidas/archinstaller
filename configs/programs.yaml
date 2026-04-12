@@ -129,8 +129,6 @@ aur:
       description: "Cloud storage and file synchronization"
     - name: rustdesk-bin
       description: "Remote desktop software"
-    - name: windsurf
-      description: "AI-powered development environment"
     - name: ventoy-bin
       description: "Bootable USB creation tool"
   minimal:
@@ -247,8 +245,6 @@ custom:
       description: "Office suite for document editing"
     - name: rustdesk-bin
       description: "Remote desktop software"
-    - name: windsurf
-      description: "AI-powered development environment"
     - name: ventoy-bin
       description: "Bootable USB creation tool"
   flatpak:

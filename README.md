@@ -54,8 +54,11 @@ Storage Optimization:
   HDD: CFQ scheduler + readahead settings
   
 Laptop Features:
+  Manufacturer-specific optimizations (15+ brands)
+  Gaming laptop detection + gaming features
   Power management + thermal throttling
   Battery optimization + suspend/resume
+  Function keys + hotkeys support
 ```
 
 #### Bootloader Detection & Configuration
@@ -292,6 +295,7 @@ custom:          # Optional additions
 | **GPU** | NVIDIA, AMD, Intel | Driver auto-detection |
 | **Storage** | NVMe, SSD, HDD | I/O scheduler optimization |
 | **Form Factor** | Desktop, Laptop, VM | Power management + thermal |
+| **Laptop Brands** | 15+ Manufacturers | Brand-specific optimizations |
 
 ### Bootloader Support
 
@@ -304,6 +308,94 @@ custom:          # Optional additions
 - **KDE Plasma** 6.x (Qt6-based) - bleeding edge only
 - **GNOME** 46+ (latest stable)
 - **Cosmic** (experimental, latest builds)
+
+---
+
+## Laptop Optimizations
+
+### Intelligent Laptop Detection & Optimization
+
+Archinstaller provides **manufacturer-specific optimizations** for 15+ laptop brands with automatic detection and tailored configuration.
+
+#### Supported Manufacturers
+
+| Brand | Gaming Detection | Special Features |
+|-------|------------------|-----------------|
+| **Lenovo** | Legion, ThinkPad Gaming | thinkpad_acpi, lenovo-legion-tool, thinkfan |
+| **HP** | Omen, Pavilion Gaming | hp-wmi, omen-monitors, elitebook support |
+| **Dell** | Alienware, XPS Gaming | dell-wmi, dell-xps-firmware, alienware tools |
+| **Acer** | Predator, Nitro Gaming | acer-wmi, acer-nitro-optimizer, swift support |
+| **ASUS** | ROG, TUF Gaming | asus-wmi, asusctl, supergfxctl, zenbook support |
+| **MSI** | GE, GT, GL Gaming | msi-wmi, msi-ec, msi-per-keyboard, creator support |
+| **Razer** | Blade Gaming | razer-specific optimizations |
+| **LG** | Gram Ultra-light | lg-specific power management |
+| **Samsung** | Galaxy Book | samsung-specific optimizations |
+| **Huawei** | MateBook | huawei-specific features |
+| **Xiaomi** | Mi/RedmiBook | xiaomi-specific optimizations |
+| **Framework** | Modular Laptops | framework-specific features |
+| **System76** | Linux-native | system76 firmware support |
+| **Microsoft** | Surface | surface pen/touch support |
+
+#### Automatic Features
+
+**Gaming Laptop Detection:**
+- Automatic identification of gaming variants
+- Gaming-specific thermal management
+- Performance profile optimization
+- RGB lighting support (where applicable)
+
+**Power Management:**
+- Intel: thermald + Intel P-State driver
+- AMD: AMD P-State configuration
+- Universal: power-profiles-daemon or tuned-ppd
+
+**Function Keys & Hotkeys:**
+- Manufacturer-specific WMI module loading
+- Brightness, volume, WiFi toggle support
+- Special function key mapping
+
+#### Usage
+
+**Interactive Mode:**
+```bash
+./install.sh
+# Script will detect your laptop and show available optimizations
+```
+
+**Automatic Mode:**
+```bash
+export AUTO_LAPTOP_OPTS=true
+./install.sh
+# Automatically applies all detected optimizations
+```
+
+**Check Detection:**
+```bash
+# Test laptop detection before running
+bash -c 'source scripts/system_services.sh && detect_laptop_manufacturer && get_laptop_model'
+```
+
+#### What Gets Optimized
+
+1. **Power Profile Management**
+   - power-profiles-daemon (preferred) or tuned-ppd
+   - Automatic power mode switching
+   - Battery vs AC power optimization
+
+2. **CPU-Specific Optimizations**
+   - Intel: thermald for thermal management
+   - AMD: P-State driver configuration
+   - CPU frequency scaling
+
+3. **Manufacturer-Specific Tools**
+   - Brand-specific function key support
+   - Gaming laptop optimizations (when detected)
+   - ACPI event handling
+
+4. **System Integration**
+   - ACPI daemon for hardware events
+   - Battery monitoring and management
+   - Suspend/resume functionality
 
 ---
 

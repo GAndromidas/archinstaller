@@ -120,7 +120,7 @@ configure_virt_manager_guest_integration() {
 configure_user_groups() {
   step "Configuring user groups"
 
-  local groups=("wheel" "input" "video" "storage" "optical" "scanner" "lp" "rfkill")
+  local groups=("wheel" "video" "storage" "optical" "scanner" "lp" "rfkill")
 
   for group in "${groups[@]}"; do
     if getent group "$group" >/dev/null; then
@@ -502,6 +502,223 @@ detect_cpu_vendor() {
   else
     echo "unknown"
   fi
+}
+
+# Function to detect laptop manufacturer
+detect_laptop_manufacturer() {
+  local manufacturer="unknown"
+  
+  # Try DMI product name first
+  if [ -f /sys/class/dmi/id/product_name ]; then
+    local product_name=$(cat /sys/class/dmi/id/product_name 2>/dev/null | tr '[:upper:]' '[:lower:]')
+    
+    case "$product_name" in
+      *lenovo*|*thinkpad*|*ideapad*|*legion*|*yoga*|*thinkbook*) manufacturer="lenovo" ;;
+      *hp*|*hewlett*|*compaq*|*omen*|*pavilion*|*elitebook*|*spectre*|*envy*) manufacturer="hp" ;;
+      *dell*|*latitude*|*precision*|*inspiron*|*xps*|*alienware*|*vostro*) manufacturer="dell" ;;
+      *acer*|*aspire*|*predator*|*nitro*|*swift*|*spin*|*travelmate*) manufacturer="acer" ;;
+      *asus*|*rog*|*zenbook*|*vivobook*|*tuf*|*proart*|*expertbook*) manufacturer="asus" ;;
+      *msi*|*micro-star*|*ge*|*gt*|*gl*|*gf*|*creator*) manufacturer="msi" ;;
+      *surface*|*microsoft*) manufacturer="microsoft" ;;
+      *razer*|*blade*|*razer*) manufacturer="razer" ;;
+      *lg*|*gram*) manufacturer="lg" ;;
+      *samsung*|*galaxy*|*book*) manufacturer="samsung" ;;
+      *huawei*|*matebook*) manufacturer="huawei" ;;
+      *xiaomi*|*mi*|*redmibook*) manufacturer="xiaomi" ;;
+      *framework*|*framework*) manufacturer="framework" ;;
+      *system76*|*oryp*|*galago*|*lemur*) manufacturer="system76" ;;
+    esac
+  fi
+  
+  # Fallback to DMI sys_vendor if product_name didn't work
+  if [ "$manufacturer" = "unknown" ] && [ -f /sys/class/dmi/id/sys_vendor ]; then
+    local sys_vendor=$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null | tr '[:upper:]' '[:lower:]')
+    
+    case "$sys_vendor" in
+      *lenovo*) manufacturer="lenovo" ;;
+      *hp*|*hewlett*) manufacturer="hp" ;;
+      *dell*) manufacturer="dell" ;;
+      *acer*) manufacturer="acer" ;;
+      *asus*|*asustek*) manufacturer="asus" ;;
+      *msi*|*micro-star*) manufacturer="msi" ;;
+      *microsoft*) manufacturer="microsoft" ;;
+      *razer*) manufacturer="razer" ;;
+      *lg*) manufacturer="lg" ;;
+      *samsung*) manufacturer="samsung" ;;
+      *huawei*) manufacturer="huawei" ;;
+      *xiaomi*) manufacturer="xiaomi" ;;
+      *framework*) manufacturer="framework" ;;
+      *system76*) manufacturer="system76" ;;
+    esac
+  fi
+  
+  echo "$manufacturer"
+}
+
+# Function to detect if this is a gaming laptop
+detect_gaming_laptop() {
+  local manufacturer="$1"
+  local is_gaming=false
+  
+  if [ -f /sys/class/dmi/id/product_name ]; then
+    local product_name=$(cat /sys/class/dmi/id/product_name 2>/dev/null | tr '[:upper:]' '[:lower:]')
+    
+    case "$product_name" in
+      *legion*|*omen*|*predator*|*nitro*|*rog*|*tuf*|*alienware*|*ge*|*gt*|*gl*|*razer*|*blade*) is_gaming=true ;;
+    esac
+  fi
+  
+  echo "$is_gaming"
+}
+
+# Function to get laptop model information
+get_laptop_model() {
+  local model="unknown"
+  
+  if [ -f /sys/class/dmi/id/product_name ]; then
+    model=$(cat /sys/class/dmi/id/product_name 2>/dev/null)
+  elif [ -f /sys/class/dmi/id/product_version ]; then
+    model=$(cat /sys/class/dmi/id/product_version 2>/dev/null)
+  fi
+  
+  echo "$model"
+}
+
+# Function to detect if we should apply automatic optimizations
+should_auto_optimize() {
+  # Auto-optimize if:
+  # 1. AUTO_LAPTOP_OPTS environment variable is set to "true"
+  # 2. We're running in non-interactive mode (no gum available)
+  # 3. User has previously enabled optimizations
+  
+  if [ "${AUTO_LAPTOP_OPTS:-false}" = "true" ]; then
+    echo "true"
+    return
+  fi
+  
+  if ! command -v gum >/dev/null 2>&1; then
+    # In non-interactive mode, ask once and remember the choice
+    local config_file="$HOME/.config/archinstaller-laptop-opts"
+    if [ -f "$config_file" ]; then
+      echo "$(cat "$config_file" 2>/dev/null)"
+    else
+      echo "false"  # Default to false in pure non-interactive mode
+    fi
+  else
+    echo "false"  # Interactive mode - let user choose
+  fi
+}
+
+# Function to get manufacturer-specific optimizations
+get_manufacturer_optimizations() {
+  local manufacturer="$1"
+  local is_gaming=$(detect_gaming_laptop "$manufacturer")
+  local optimizations=()
+  
+  case "$manufacturer" in
+    lenovo)
+      if [ "$is_gaming" = "true" ]; then
+        optimizations+=("Lenovo Legion gaming optimizations")
+        optimizations+=("Lenovo Vantage alternative (lenovo-legion-tool)")
+      else
+        optimizations+=("ThinkPad function keys support")
+        optimizations+=("Lenovo power management tweaks")
+      fi
+      optimizations+=("Lenovo ACPI support")
+      ;;
+    hp)
+      if [ "$is_gaming" = "true" ]; then
+        optimizations+=("HP Omen gaming optimizations")
+      else
+        optimizations+=("HP Pavilion/EliteBook optimizations")
+      fi
+      optimizations+=("HP function keys and hotkeys")
+      optimizations+=("HP power management")
+      ;;
+    dell)
+      if [ "$is_gaming" = "true" ]; then
+        optimizations+=("Dell Alienware gaming features")
+      else
+        optimizations+=("Dell XPS performance tweaks")
+      fi
+      optimizations+=("Dell function keys support")
+      optimizations+=("Dell power management")
+      ;;
+    acer)
+      if [ "$is_gaming" = "true" ]; then
+        optimizations+=("Acer Predator/Nitro gaming optimizations")
+      else
+        optimizations+=("Acer Swift/Spin optimizations")
+      fi
+      optimizations+=("Acer function keys")
+      optimizations+=("Acer power management")
+      ;;
+    asus)
+      if [ "$is_gaming" = "true" ]; then
+        optimizations+=("ASUS ROG/TUF gaming features")
+      else
+        optimizations+=("ASUS ZenBook/VivoBook optimizations")
+      fi
+      optimizations+=("ASUS function keys support")
+      optimizations+=("ASUS power management")
+      ;;
+    msi)
+      if [ "$is_gaming" = "true" ]; then
+        optimizations+=("MSI GE/GT/GL gaming optimizations")
+      else
+        optimizations+=("MSI Creator series optimizations")
+      fi
+      optimizations+=("MSI function keys")
+      optimizations+=("MSI Dragon Center alternative")
+      ;;
+    razer)
+      optimizations+=("Razer Blade gaming optimizations")
+      optimizations+=("Razer Synapse alternative")
+      optimizations+=("Razer function keys")
+      ;;
+    lg)
+      optimizations+=("LG Gram ultra-light optimizations")
+      optimizations+=("LG function keys")
+      optimizations+=("LG power management")
+      ;;
+    samsung)
+      optimizations+=("Samsung Galaxy Book optimizations")
+      optimizations+=("Samsung function keys")
+      optimizations+=("Samsung power management")
+      ;;
+    huawei)
+      optimizations+=("Huawei MateBook optimizations")
+      optimizations+=("Huawei function keys")
+      optimizations+=("Huawei power management")
+      ;;
+    xiaomi)
+      optimizations+=("Xiaomi Mi/RedmiBook optimizations")
+      optimizations+=("Xiaomi function keys")
+      optimizations+=("Xiaomi power management")
+      ;;
+    framework)
+      optimizations+=("Framework laptop modular optimizations")
+      optimizations+=("Framework function keys")
+      optimizations+=("Framework power management")
+      ;;
+    system76)
+      optimizations+=("System76 firmware optimizations")
+      optimizations+=("System76 function keys")
+      optimizations+=("System76 power management")
+      ;;
+    microsoft)
+      optimizations+=("Microsoft Surface optimizations")
+      optimizations+=("Surface pen and touch support")
+      optimizations+=("Surface power management")
+      ;;
+    *)
+      optimizations+=("Generic laptop optimizations")
+      optimizations+=("Standard ACPI support")
+      optimizations+=("Universal power management")
+      ;;
+  esac
+  
+  printf '%s\n' "${optimizations[@]}"
 }
 
 # Function to detect RAM size and make adaptive decisions
@@ -988,6 +1205,199 @@ setup_intel_laptop_optimizations() {
   log_success "Intel-specific optimizations completed"
 }
 
+# Function to setup Lenovo-specific optimizations
+setup_lenovo_optimizations() {
+  step "Configuring Lenovo-specific optimizations"
+
+  # Install Lenovo-specific tools
+  if command -v yay >/dev/null 2>&1; then
+    log_info "Installing lenovo-legion-tool for Lenovo laptops..."
+    install_aur_quietly lenovo-legion-tool
+    
+    # Install ThinkPad firmware tools if detected
+    if grep -qi "thinkpad" /sys/class/dmi/id/product_name 2>/dev/null; then
+      log_info "Installing ThinkPad-specific tools..."
+      install_packages_quietly acpi_call
+      install_aur_quietly thinkfan
+      install_aur_quietly tlp
+    fi
+  else
+    log_info "Installing basic ACPI tools for Lenovo..."
+    install_packages_quietly acpi acpid
+  fi
+
+  # Configure Lenovo function keys
+  log_info "Configuring Lenovo function keys..."
+  if [ -f /sys/devices/platform/thinkpad_acpi/hotkey_all_mask ]; then
+    sudo modprobe thinkpad_acpi 2>/dev/null
+    log_success "ThinkPad ACPI driver loaded"
+  fi
+
+  # Enable services
+  sudo systemctl enable acpid.service 2>/dev/null
+  sudo systemctl start acpid.service 2>/dev/null
+
+  log_success "Lenovo optimizations completed"
+}
+
+# Function to setup HP-specific optimizations
+setup_hp_optimizations() {
+  step "Configuring HP-specific optimizations"
+
+  # Install HP-specific packages
+  log_info "Installing HP-specific tools..."
+  install_packages_quietly acpi acpid
+  
+  if command -v yay >/dev/null 2>&1; then
+    # Install HP Omen gaming tools if detected
+    if grep -qi "omen" /sys/class/dmi/id/product_name 2>/dev/null; then
+      log_info "Installing HP Omen gaming optimizations..."
+      install_aur_quietly omen-monitors
+    fi
+  fi
+
+  # Configure HP function keys
+  sudo modprobe hp-wmi 2>/dev/null
+  if lsmod | grep -q hp_wmi; then
+    log_success "HP WMI module loaded for function key support"
+  else
+    log_warning "HP WMI module not available - function keys may not work properly"
+  fi
+
+  # Enable ACPI services
+  sudo systemctl enable acpid.service 2>/dev/null
+  sudo systemctl start acpid.service 2>/dev/null
+
+  log_success "HP optimizations completed"
+}
+
+# Function to setup Dell-specific optimizations
+setup_dell_optimizations() {
+  step "Configuring Dell-specific optimizations"
+
+  # Install Dell-specific packages
+  log_info "Installing Dell-specific tools..."
+  install_packages_quietly acpi acpid
+  
+  if command -v yay >/dev/null 2>&1; then
+    # Install Dell XPS tools if detected
+    if grep -qi "xps" /sys/class/dmi/id/product_name 2>/dev/null; then
+      log_info "Installing Dell XPS optimizations..."
+      install_aur_quietly dell-xps-firmware
+    fi
+    
+    # Install Dell Command Center alternative
+    install_aur_quietly dell-command-center
+  fi
+
+  # Configure Dell function keys
+  sudo modprobe dell-wmi 2>/dev/null
+  if lsmod | grep -q dell_wmi; then
+    log_success "Dell WMI module loaded for function key support"
+  else
+    log_warning "Dell WMI module not available - function keys may not work properly"
+  fi
+
+  # Enable ACPI services
+  sudo systemctl enable acpid.service 2>/dev/null
+  sudo systemctl start acpid.service 2>/dev/null
+
+  log_success "Dell optimizations completed"
+}
+
+# Function to setup Acer-specific optimizations
+setup_acer_optimizations() {
+  step "Configuring Acer-specific optimizations"
+
+  # Install Acer-specific packages
+  log_info "Installing Acer-specific tools..."
+  install_packages_quietly acpi acpid
+  
+  if command -v yay >/dev/null 2>&1; then
+    # Install Acer Nitro gaming tools if detected
+    if grep -qi "nitro\|predator" /sys/class/dmi/id/product_name 2>/dev/null; then
+      log_info "Installing Acer gaming optimizations..."
+      install_aur_quietly acer-nitro-optimizer
+    fi
+  fi
+
+  # Configure Acer function keys
+  sudo modprobe acer-wmi 2>/dev/null
+  if lsmod | grep -q acer_wmi; then
+    log_success "Acer WMI module loaded for function key support"
+  else
+    log_warning "Acer WMI module not available - function keys may not work properly"
+  fi
+
+  # Enable ACPI services
+  sudo systemctl enable acpid.service 2>/dev/null
+  sudo systemctl start acpid.service 2>/dev/null
+
+  log_success "Acer optimizations completed"
+}
+
+# Function to setup ASUS-specific optimizations
+setup_asus_optimizations() {
+  step "Configuring ASUS-specific optimizations"
+
+  # Install ASUS-specific packages
+  log_info "Installing ASUS-specific tools..."
+  install_packages_quietly acpi acpid
+  
+  if command -v yay >/dev/null 2>&1; then
+    # Install ASUS ROG gaming tools if detected
+    if grep -qi "rog\|zenbook" /sys/class/dmi/id/product_name 2>/dev/null; then
+      log_info "Installing ASUS ROG/ZenBook optimizations..."
+      install_aur_quietly asusctl
+      install_aur_quietly supergfxctl
+    fi
+  fi
+
+  # Configure ASUS function keys
+  sudo modprobe asus-wmi 2>/dev/null
+  if lsmod | grep -q asus_wmi; then
+    log_success "ASUS WMI module loaded for function key support"
+  else
+    log_warning "ASUS WMI module not available - function keys may not work properly"
+  fi
+
+  # Enable ACPI services
+  sudo systemctl enable acpid.service 2>/dev/null
+  sudo systemctl start acpid.service 2>/dev/null
+
+  log_success "ASUS optimizations completed"
+}
+
+# Function to setup MSI-specific optimizations
+setup_msi_optimizations() {
+  step "Configuring MSI-specific optimizations"
+
+  # Install MSI-specific packages
+  log_info "Installing MSI-specific tools..."
+  install_packages_quietly acpi acpid
+  
+  if command -v yay >/dev/null 2>&1; then
+    # Install MSI gaming tools
+    log_info "Installing MSI gaming optimizations..."
+    install_aur_quietly msi-ec
+    install_aur_quietly msi-per-keyboard
+  fi
+
+  # Configure MSI function keys
+  sudo modprobe msi-wmi 2>/dev/null
+  if lsmod | grep -q msi_wmi; then
+    log_success "MSI WMI module loaded for function key support"
+  else
+    log_warning "MSI WMI module not available - function keys may not work properly"
+  fi
+
+  # Enable ACPI services
+  sudo systemctl enable acpid.service 2>/dev/null
+  sudo systemctl start acpid.service 2>/dev/null
+
+  log_success "MSI optimizations completed"
+}
+
 # Function to setup AMD-specific laptop optimizations
 setup_amd_laptop_optimizations() {
   step "Configuring AMD-specific laptop optimizations"
@@ -1195,33 +1605,72 @@ setup_laptop_optimizations() {
   step "Laptop detected - Configuring laptop optimizations"
   log_success "Laptop hardware detected"
 
-  # Detect CPU vendor
+  # Enhanced detection
   local cpu_vendor=$(detect_cpu_vendor)
+  local manufacturer=$(detect_laptop_manufacturer)
+  local laptop_model=$(get_laptop_model)
+  local is_gaming=$(detect_gaming_laptop "$manufacturer")
+  local should_auto=$(should_auto_optimize)
+  
   log_info "CPU Vendor: $(echo $cpu_vendor | tr '[:lower:]' '[:upper:]')"
+  log_info "Laptop Manufacturer: $(echo $manufacturer | tr '[:lower:]' '[:upper:]')"
+  log_info "Laptop Model: $laptop_model"
+  
+  if [ "$is_gaming" = "true" ]; then
+    log_info "Gaming laptop detected - will apply gaming-specific optimizations"
+  fi
 
-  # Ask user if they want laptop optimizations
+  # Get manufacturer-specific optimizations
+  local manufacturer_opts=($(get_manufacturer_optimizations "$manufacturer"))
+
+  # Determine if we should enable optimizations
   local enable_laptop_opts=false
-  if command -v gum >/dev/null 2>&1; then
+  
+  if [ "$should_auto" = "true" ]; then
+    # Automatic mode - enable optimizations without prompting
+    enable_laptop_opts=true
+    log_info "Auto-optimization mode enabled - applying laptop optimizations"
+  elif command -v gum >/dev/null 2>&1; then
+    # Interactive mode with gum
     echo ""
-    gum style --foreground 226 "Laptop-specific optimizations available:"
-    gum style --margin "0 2" --foreground 15 "• Power profile management (tuned-ppd or power-profiles-daemon)"
-    gum style --margin "0 2" --foreground 15 "• Touchpad tap-to-click and gestures"
-    gum style --margin "0 2" --foreground 15 "• CPU-specific optimizations"
+    gum style --foreground 226 "Laptop-specific optimizations available for $(echo $manufacturer | tr '[:lower:]' '[:upper]') $laptop_model:"
+    gum style --margin "0 2" --foreground 15 "Power profile management (tuned-ppd or power-profiles-daemon)"
+    gum style --margin "0 2" --foreground 15 "CPU-specific optimizations ($(echo $cpu_vendor | tr '[:lower:]' '[:upper]'))"
+    
+    # Show manufacturer-specific optimizations
+    for opt in "${manufacturer_opts[@]}"; do
+      gum style --margin "0 2" --foreground 15 "$opt"
+    done
+    
     echo ""
+    gum style --foreground 11 "Tip: Set AUTO_LAPTOP_OPTS=true to skip this prompt in future"
     if gum confirm --default=true "Enable laptop optimizations?"; then
       enable_laptop_opts=true
     fi
   else
+    # Non-interactive mode
     echo ""
-    echo -e "${YELLOW}Laptop-specific optimizations available:${RESET}"
-    echo -e "  • Power profile management (tuned-ppd or power-profiles-daemon)"
-    echo -e "  • Touchpad tap-to-click and gestures"
-    echo -e "  • CPU-specific optimizations"
+    echo -e "${YELLOW}Laptop-specific optimizations available for $(echo $manufacturer | tr '[:lower:]' '[:upper]') $laptop_model:${RESET}"
+    echo -e "  \u2022 Power profile management (tuned-ppd or power-profiles-daemon)"
+    echo -e "  \u2022 CPU-specific optimizations ($(echo $cpu_vendor | tr '[:lower:]' '[:upper]'))"
+    
+    # Show manufacturer-specific optimizations
+    for opt in "${manufacturer_opts[@]}"; do
+      echo -e "  \u2022 $opt"
+    done
+    
     echo ""
+    echo -e "${CYAN}Tip: Set AUTO_LAPTOP_OPTS=true to enable optimizations automatically${RESET}"
     read -r -p "Enable laptop optimizations? [Y/n]: " response
     response=${response,,}
     if [[ "$response" != "n" && "$response" != "no" ]]; then
       enable_laptop_opts=true
+      # Remember the choice for future runs
+      mkdir -p "$HOME/.config"
+      echo "true" > "$HOME/.config/archinstaller-laptop-opts"
+    else
+      mkdir -p "$HOME/.config"
+      echo "false" > "$HOME/.config/archinstaller-laptop-opts"
     fi
   fi
 
@@ -1250,253 +1699,36 @@ setup_laptop_optimizations() {
       ;;
   esac
 
-  # Configure touchpad
-  step "Configuring touchpad settings"
-
-  # Create libinput configuration for touchpad
-  sudo mkdir -p /etc/X11/xorg.conf.d
-
-  cat << 'EOF' | sudo tee /etc/X11/xorg.conf.d/30-touchpad.conf >/dev/null
-Section "InputClass"
-    Identifier "touchpad"
-    Driver "libinput"
-    MatchIsTouchpad "on"
-    Option "Tapping" "on"
-    Option "TappingButtonMap" "lrm"
-    Option "NaturalScrolling" "true"
-    Option "ScrollMethod" "twofinger"
-    Option "DisableWhileTyping" "on"
-    Option "ClickMethod" "clickfinger"
-EndSection
-EOF
-
-  log_success "Touchpad configured (tap-to-click, natural scrolling, disable-while-typing)"
-
-  # Install touchpad gestures
-  install_touchpad_gestures
+  # Apply manufacturer-specific optimizations
+  case "$manufacturer" in
+    lenovo)
+      setup_lenovo_optimizations
+      ;;
+    hp)
+      setup_hp_optimizations
+      ;;
+    dell)
+      setup_dell_optimizations
+      ;;
+    acer)
+      setup_acer_optimizations
+      ;;
+    asus)
+      setup_asus_optimizations
+      ;;
+    msi)
+      setup_msi_optimizations
+      ;;
+    *)
+      log_info "Unknown or unsupported manufacturer - applying generic optimizations"
+      install_packages_quietly acpi acpid
+      sudo systemctl enable acpid.service 2>/dev/null
+      sudo systemctl start acpid.service 2>/dev/null
+      ;;
+  esac
 
   # Show summary
   show_laptop_summary
-}
-
-# Function to install touchpad gesture support
-install_touchpad_gestures() {
-  # Detect touchpad type and capabilities before installing gestures
-  step "Detecting touchpad hardware"
-
-  local touchpad_detected=false
-  local touchpad_multitouch=false
-  local touchpad_device=""
-
-  # Check if xinput detects a touchpad
-  if command -v xinput >/dev/null 2>&1; then
-    touchpad_device=$(xinput list --name-only | grep -i touchpad | head -1)
-    if [ -n "$touchpad_device" ]; then
-      touchpad_detected=true
-      log_success "Touchpad detected: $touchpad_device"
-
-      # Check if touchpad supports multi-touch
-      local touch_points=$(xinput list-props "$touchpad_device" 2>/dev/null | grep -i "touch count" | grep -oE '[0-9]+' | tail -1)
-      if [ -n "$touch_points" ] && [ "$touch_points" -ge 3 ]; then
-        touchpad_multitouch=true
-        log_success "Multi-touch supported: $touch_points touch points"
-      else
-        log_warning "Touchpad has limited multi-touch support"
-        log_info "Your touchpad may not support 3-finger gestures"
-      fi
-    else
-      log_warning "No touchpad detected by xinput"
-    fi
-  fi
-
-  # Check if libinput can see the touchpad
-  if command -v libinput >/dev/null 2>&1; then
-    if ! sudo libinput list-devices 2>/dev/null | grep -qi touchpad; then
-      log_warning "Touchpad not detected by libinput driver"
-      log_info "Your touchpad may be using PS/2 (psmouse) driver"
-      log_info "This is common on budget laptops like Lenovo 100S"
-    fi
-  fi
-
-  # Install touchpad gesture support
-  if command -v gum >/dev/null 2>&1; then
-    if [ "$touchpad_detected" = false ]; then
-      log_warning "No touchpad detected. Gesture support may not work on this device."
-      if ! gum confirm --default=false "Install touchpad gesture support anyway (for troubleshooting)?"; then
-        log_info "Touchpad gesture installation skipped"
-        return
-      fi
-    elif [ "$touchpad_multitouch" = false ]; then
-      log_warning "Touchpad has limited multi-touch. 3-finger gestures may not work."
-      log_info "This is common on budget laptops with PS/2 touchpads."
-      if ! gum confirm --default=false "Install touchpad gesture support anyway (2-finger gestures might work)?"; then
-        log_info "Touchpad gesture installation skipped"
-        return
-      fi
-    else
-      if ! gum confirm --default=false "Install touchpad gesture support (3-finger swipe, pinch-to-zoom)?"; then
-        log_info "Touchpad gesture installation skipped"
-        return
-      fi
-    fi
-
-    log_info "Installing libinput-gestures..."
-
-    # Check if yay is available for AUR installation
-    if ! command -v yay &>/dev/null; then
-      log_error "AUR helper (yay) not found. Cannot install libinput-gestures."
-      log_warning "Touchpad gestures require libinput-gestures from AUR"
-      log_info "Please install yay first, then run: yay -S libinput-gestures"
-      log_info "Continuing with installation..."
-      return
-    fi
-
-    # libinput-gestures is in AUR, not official repos
-    if ! install_aur_quietly libinput-gestures; then
-      log_error "Failed to install libinput-gestures from AUR"
-      log_warning "Touchpad gestures will not be available"
-      log_info "You can try manually later with: yay -S libinput-gestures"
-    fi
-
-    # xdotool and wmctrl are in official repos
-    install_packages_quietly xdotool wmctrl
-
-    # Add user to input group
-    sudo usermod -a -G input "$USER"
-
-    # Create default gestures configuration
-    mkdir -p "$HOME/.config"
-    cat << 'EOF' > "$HOME/.config/libinput-gestures.conf"
-# Gestures configuration for libinput-gestures
-# Swipe up with 3 fingers - Show desktop overview
-gesture swipe up 3 xdotool key super+w
-
-# Swipe down with 3 fingers - Show all windows
-gesture swipe down 3 xdotool key super+d
-
-# Swipe left with 3 fingers - Previous workspace/desktop
-gesture swipe left 3 xdotool key super+ctrl+Left
-
-# Swipe right with 3 fingers - Next workspace/desktop
-gesture swipe right 3 xdotool key super+ctrl+Right
-
-# Pinch in - Zoom out (Ctrl+Minus)
-gesture pinch in xdotool key ctrl+minus
-
-# Pinch out - Zoom in (Ctrl+Plus)
-gesture pinch out xdotool key ctrl+plus
-EOF
-
-    log_success "Touchpad gestures configured"
-    log_info "Gestures will be available after next login"
-    log_info "To customize: edit ~/.config/libinput-gestures.conf"
-
-    # Provide troubleshooting info if touchpad has limitations
-    if [ "$touchpad_multitouch" = false ] || [ "$touchpad_detected" = false ]; then
-      echo ""
-      log_warning "Touchpad gesture troubleshooting:"
-      log_info "If gestures don't work after reboot, try:"
-      log_info "  1. Check device: libinput list-devices"
-      log_info "  2. Test touchpad: sudo libinput debug-events"
-      log_info "  3. Check logs: journalctl -xe | grep libinput"
-      log_info "  4. Verify driver: cat /proc/bus/input/devices | grep -A 5 Touchpad"
-      log_info ""
-      log_info "Budget laptops (like Lenovo 100S) often use PS/2 touchpads"
-      log_info "which may only support 2-finger gestures, not 3-finger."
-      echo ""
-    fi
-  else
-    if [ "$touchpad_detected" = false ]; then
-      log_warning "No touchpad detected. Gesture support may not work on this device."
-      read -r -p "Install touchpad gesture support anyway (for troubleshooting)? [y/N]: " response
-      response=${response,,}
-      if [[ "$response" != "y" && "$response" != "yes" ]]; then
-        log_info "Touchpad gesture installation skipped"
-        return
-      fi
-    elif [ "$touchpad_multitouch" = false ]; then
-      log_warning "Touchpad has limited multi-touch. 3-finger gestures may not work."
-      read -r -p "Install touchpad gesture support anyway (2-finger gestures might work)? [y/N]: " response
-      response=${response,,}
-      if [[ "$response" != "y" && "$response" != "yes" ]]; then
-        log_info "Touchpad gesture installation skipped"
-        return
-      fi
-    else
-      read -r -p "Install touchpad gesture support (3-finger swipe, pinch-to-zoom)? [y/N]: " response
-      response=${response,,}
-      if [[ "$response" != "y" && "$response" != "yes" ]]; then
-        log_info "Touchpad gesture installation skipped"
-        return
-      fi
-    fi
-
-    log_info "Installing libinput-gestures..."
-
-    # Check if yay is available for AUR installation
-    if ! command -v yay &>/dev/null; then
-      log_error "AUR helper (yay) not found. Cannot install libinput-gestures."
-      log_warning "Touchpad gestures require libinput-gestures from AUR"
-      log_info "Please install yay first, then run: yay -S libinput-gestures"
-      log_info "Continuing with installation..."
-      return
-    fi
-
-    # libinput-gestures is in AUR, not official repos
-    if ! install_aur_quietly libinput-gestures; then
-      log_error "Failed to install libinput-gestures from AUR"
-      log_warning "Touchpad gestures will not be available"
-      log_info "You can try manually later with: yay -S libinput-gestures"
-    fi
-
-    # xdotool and wmctrl are in official repos
-    install_packages_quietly xdotool wmctrl
-
-    # Add user to input group
-    sudo usermod -a -G input "$USER"
-
-    # Create default gestures configuration
-    mkdir -p "$HOME/.config"
-    cat << 'EOF' > "$HOME/.config/libinput-gestures.conf"
-# Gestures configuration for libinput-gestures
-# Swipe up with 3 fingers - Show desktop overview
-gesture swipe up 3 xdotool key super+w
-
-# Swipe down with 3 fingers - Show all windows
-gesture swipe down 3 xdotool key super+d
-
-# Swipe left with 3 fingers - Previous workspace/desktop
-gesture swipe left 3 xdotool key super+ctrl+Left
-
-# Swipe right with 3 fingers - Next workspace/desktop
-gesture swipe right 3 xdotool key super+ctrl+Right
-
-# Pinch in - Zoom out (Ctrl+Minus)
-gesture pinch in xdotool key ctrl+minus
-
-# Pinch out - Zoom in (Ctrl+Plus)
-gesture pinch out xdotool key ctrl+plus
-EOF
-
-    log_success "Touchpad gestures configured"
-    log_info "Gestures will be available after next login"
-    log_info "To customize: edit ~/.config/libinput-gestures.conf"
-
-    # Provide troubleshooting info if touchpad has limitations
-    if [ "$touchpad_multitouch" = false ] || [ "$touchpad_detected" = false ]; then
-      echo ""
-      log_warning "Touchpad gesture troubleshooting:"
-      log_info "If gestures don't work after reboot, try:"
-      log_info "  1. Check device: libinput list-devices"
-      log_info "  2. Test touchpad: sudo libinput debug-events"
-      log_info "  3. Check logs: journalctl -xe | grep libinput"
-      log_info "  4. Verify driver: cat /proc/bus/input/devices | grep -A 5 Touchpad"
-      log_info ""
-      log_info "Budget laptops (like Lenovo 100S) often use PS/2 touchpads"
-      log_info "which may only support 2-finger gestures, not 3-finger."
-      echo ""
-    fi
-  fi
 }
 
 # Apply advanced system optimizations (CachyOS-style)
@@ -1547,12 +1779,6 @@ show_laptop_summary() {
       fi
       ;;
   esac
-  echo -e "  • Touchpad tap-to-click enabled"
-  echo -e "  • Natural scrolling enabled"
-  echo -e "  • Disable typing while typing enabled"
-  if [ -f "$HOME/.config/libinput-gestures.conf" ]; then
-    echo -e "  • Touchpad gestures (3-finger swipe, pinch-to-zoom)"
-  fi
   echo ""
   echo -e "${YELLOW}Tips:${RESET}"
   if command -v tuned-adm >/dev/null 2>&1; then
@@ -1566,10 +1792,6 @@ show_laptop_summary() {
   fi
   if [ "$cpu_vendor" = "intel" ]; then
     echo -e "  • Thermal status: ${CYAN}sudo systemctl status thermald${RESET}"
-  fi
-  if [ -f "$HOME/.config/libinput-gestures.conf" ]; then
-    echo -e "  • Start gestures: ${CYAN}libinput-gestures-setup start${RESET}"
-    echo -e "  • Autostart gestures: ${CYAN}libinput-gestures-setup autostart${RESET}"
   fi
   echo ""
 }

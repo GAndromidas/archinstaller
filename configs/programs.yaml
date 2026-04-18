@@ -7,8 +7,6 @@ pacman:
       description: "Android platform tools for device management"
     - name: bat
       description: "Cat clone with syntax highlighting"
-    - name: bleachbit
-      description: "System cleaner and optimizer"
     - name: btop
       description: "Resource monitor"
     - name: chromium
@@ -67,8 +65,6 @@ essential:
       description: "Video editor for KDE"
     - name: libreoffice-fresh
       description: "Full-featured office suite"
-    - name: zed
-      description: "High-performance code editor"
   minimal:
     - name: mpv
       description: "Media player"
@@ -236,13 +232,9 @@ custom:
       description: "FTP client for file transfers"
     - name: kdenlive
       description: "Video editor for KDE"
-    - name: zed
-      description: "High-performance code editor"
   aur:
     - name: dropbox
       description: "Cloud storage and file synchronization"
-    - name: onlyoffice-bin
-      description: "Office suite for document editing"
     - name: rustdesk-bin
       description: "Remote desktop software"
     - name: ventoy-bin

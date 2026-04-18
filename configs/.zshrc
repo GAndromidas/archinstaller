@@ -71,8 +71,22 @@ alias sync='sudo pacman -Syy'                                                   
 alias update='yay -Syyu && sudo flatpak update'                                    # Update all packages (Pacman, AUR, Flatpak)
 # Smart mirror update alias - detects distribution automatically
 alias mirror='if [[ -f /etc/os-release ]] && grep -q '\''ID="endeavouros"'\'' /etc/os-release 2>/dev/null; then echo "Using EndeavourOS mirrors..." && sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist endeavour && sudo pacman -Syy; else echo "Using Arch Linux mirrors..." && sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist arch && sudo pacman -Syy; fi'  # Update mirror list and sync databases
-alias clean='sudo pacman -Sc --noconfirm && yay -Sc --noconfirm && sudo flatpak uninstall --unused && sudo pacman -Rns --noconfirm $(pacman -Qtdq) 2>/dev/null'  # Clean package cache and orphans
-alias cache='rm -rf ~/.cache/* && sudo paccache -r'                                # Clear user cache and old packages
+alias clean='echo "🧹 Starting Arch Linux Deep Clean..." && \
+  echo "→ Pruning pacman cache (keeping 3)..." && \
+  sudo paccache -rk3 && \
+  sudo paccache -ruk0 && \
+  echo "→ Cleaning AUR/yay cache..." && \
+  yay -Sc --noconfirm && \
+  echo "→ Removing unused Flatpaks..." && \
+  sudo flatpak uninstall --unused -y && \
+  echo "→ Removing orphaned packages..." && \
+  if [ -n "$(pacman -Qtdq)" ]; then sudo pacman -Rns $(pacman -Qtdq) --noconfirm; fi && \
+  echo "→ Vacuuming systemd journal (keep 3 days)..." && \
+  sudo journalctl --vacuum-time=3d && \
+  echo "→ Wiping thumbnail & browser caches..." && \
+  rm -rf ~/.cache/thumbnails/* && \
+  find ~/.cache/mozilla/firefox -name "cache2" -type d -exec rm -rf {} + 2>/dev/null && \
+  echo "✅ System clean complete!"'
 alias microcode='grep . /sys/devices/system/cpu/vulnerabilities/*'                 # Check CPU vulnerabilities
 alias jctl='journalctl -p 3 -xb'                                                   # Show boot errors
 

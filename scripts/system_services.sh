@@ -504,6 +504,60 @@ detect_cpu_vendor() {
   fi
 }
 
+# Function to check if ACPI should be skipped due to compatibility issues
+should_skip_acpi() {
+  local cpu_vendor=$(detect_cpu_vendor)
+  local manufacturer=$(detect_laptop_manufacturer)
+  local cpu_model=""
+  
+  # Get CPU model for specific checks
+  cpu_model=$(grep "model name" /proc/cpuinfo | head -1 | cut -d':' -f2 | xargs)
+  
+  # Skip ACPI for known problematic combinations
+  case "$manufacturer" in
+    hp)
+      # HP laptops with AMD APUs (especially older Ryzen models)
+      if [ "$cpu_vendor" = "amd" ]; then
+        case "$cpu_model" in
+          *"Ryzen 5 2500U"*|*"Ryzen 3 2200U"*|*"Ryzen 7 2700U"*|*"AMD A"*|*"AMD E"*)
+            log_info "HP laptop with problematic AMD APU detected - skipping ACPI/acpid"
+            echo "true"
+            return 0
+            ;;
+        esac
+      fi
+      ;;
+    lenovo)
+      # Some older Lenovo ThinkPads with ACPI issues
+      if [ "$cpu_vendor" = "amd" ] && echo "$cpu_model" | grep -q "AMD A[0-9]"; then
+        log_info "Lenovo laptop with older AMD APU detected - skipping ACPI/acpid"
+        echo "true"
+        return 0
+      fi
+      ;;
+    acer)
+      # Acer laptops with specific AMD APUs
+      if [ "$cpu_vendor" = "amd" ] && echo "$cpu_model" | grep -q "E[0-9]"; then
+        log_info "Acer laptop with AMD E-series APU detected - skipping ACPI/acpid"
+        echo "true"
+        return 0
+      fi
+      ;;
+  esac
+  
+  # Skip ACPI for very old CPUs (pre-2015)
+  if [ "$cpu_vendor" = "amd" ]; then
+    local cpu_family=$(grep "cpu family" /proc/cpuinfo | head -1 | cut -d':' -f2 | xargs)
+    if [ "$cpu_family" -lt "21" ]; then  # Family 21+ is Zen architecture
+      log_info "Old AMD CPU detected (family $cpu_family) - skipping ACPI/acpid"
+      echo "true"
+      return 0
+    fi
+  fi
+  
+  echo "false"
+}
+
 # Function to detect laptop manufacturer
 detect_laptop_manufacturer() {
   local manufacturer="unknown"
@@ -1222,8 +1276,13 @@ setup_lenovo_optimizations() {
       install_aur_quietly tlp
     fi
   else
-    log_info "Installing basic ACPI tools for Lenovo..."
-    install_packages_quietly acpi acpid
+    # Check if ACPI should be skipped due to compatibility issues
+    if [ "$(should_skip_acpi)" = "true" ]; then
+      log_info "Skipping ACPI tools due to compatibility issues"
+    else
+      log_info "Installing basic ACPI tools for Lenovo..."
+      install_packages_quietly acpi acpid
+    fi
   fi
 
   # Configure Lenovo function keys
@@ -1246,7 +1305,12 @@ setup_hp_optimizations() {
 
   # Install HP-specific packages
   log_info "Installing HP-specific tools..."
-  install_packages_quietly acpi acpid
+  # Check if ACPI should be skipped due to compatibility issues
+  if [ "$(should_skip_acpi)" = "true" ]; then
+    log_info "Skipping ACPI tools due to compatibility issues"
+  else
+    install_packages_quietly acpi acpid
+  fi
   
   if command -v yay >/dev/null 2>&1; then
     # Install HP Omen gaming tools if detected
@@ -1277,7 +1341,12 @@ setup_dell_optimizations() {
 
   # Install Dell-specific packages
   log_info "Installing Dell-specific tools..."
-  install_packages_quietly acpi acpid
+  # Check if ACPI should be skipped due to compatibility issues
+  if [ "$(should_skip_acpi)" = "true" ]; then
+    log_info "Skipping ACPI tools due to compatibility issues"
+  else
+    install_packages_quietly acpi acpid
+  fi
   
   if command -v yay >/dev/null 2>&1; then
     # Install Dell XPS tools if detected
@@ -1311,7 +1380,12 @@ setup_acer_optimizations() {
 
   # Install Acer-specific packages
   log_info "Installing Acer-specific tools..."
-  install_packages_quietly acpi acpid
+  # Check if ACPI should be skipped due to compatibility issues
+  if [ "$(should_skip_acpi)" = "true" ]; then
+    log_info "Skipping ACPI tools due to compatibility issues"
+  else
+    install_packages_quietly acpi acpid
+  fi
   
   if command -v yay >/dev/null 2>&1; then
     # Install Acer Nitro gaming tools if detected
@@ -1342,7 +1416,12 @@ setup_asus_optimizations() {
 
   # Install ASUS-specific packages
   log_info "Installing ASUS-specific tools..."
-  install_packages_quietly acpi acpid
+  # Check if ACPI should be skipped due to compatibility issues
+  if [ "$(should_skip_acpi)" = "true" ]; then
+    log_info "Skipping ACPI tools due to compatibility issues"
+  else
+    install_packages_quietly acpi acpid
+  fi
   
   if command -v yay >/dev/null 2>&1; then
     # Install ASUS ROG gaming tools if detected
@@ -1374,7 +1453,12 @@ setup_msi_optimizations() {
 
   # Install MSI-specific packages
   log_info "Installing MSI-specific tools..."
-  install_packages_quietly acpi acpid
+  # Check if ACPI should be skipped due to compatibility issues
+  if [ "$(should_skip_acpi)" = "true" ]; then
+    log_info "Skipping ACPI tools due to compatibility issues"
+  else
+    install_packages_quietly acpi acpid
+  fi
   
   if command -v yay >/dev/null 2>&1; then
     # Install MSI gaming tools
@@ -1721,9 +1805,14 @@ setup_laptop_optimizations() {
       ;;
     *)
       log_info "Unknown or unsupported manufacturer - applying generic optimizations"
-      install_packages_quietly acpi acpid
-      sudo systemctl enable acpid.service 2>/dev/null
-      sudo systemctl start acpid.service 2>/dev/null
+      # Check if ACPI should be skipped due to compatibility issues
+      if [ "$(should_skip_acpi)" = "true" ]; then
+        log_info "Skipping ACPI tools due to compatibility issues"
+      else
+        install_packages_quietly acpi acpid
+        sudo systemctl enable acpid.service 2>/dev/null
+        sudo systemctl start acpid.service 2>/dev/null
+      fi
       ;;
   esac
 

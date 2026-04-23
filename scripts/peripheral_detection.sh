@@ -8,20 +8,25 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
-# Load peripheral configuration from YAML file
+# Load peripheral configuration from YAML file (optional)
 load_peripheral_config() {
     local config_file="$SCRIPT_DIR/../configs/peripherals.yaml"
     
+    # Check if yq is available and config file exists
+    if ! command -v yq >/dev/null 2>&1; then
+        ui_info "yq not available - using built-in peripheral detection"
+        return 0  # Continue with built-in detection
+    fi
+    
     if [[ ! -f "$config_file" ]]; then
-        ui_warn "Peripheral configuration file not found: $config_file"
-        return 1
+        ui_info "Peripheral configuration file not found - using built-in detection"
+        return 0  # Continue with built-in detection
     fi
     
     # Add timeout for YAML loading to prevent hanging
-    if ! timeout 10s bash -c "command -v yq >/dev/null 2>&1 && yq eval '.' '$config_file' >/dev/null 2>&1"; then
-        ui_warn "Failed to load peripheral configuration or yq not available"
-        log_error "YAML configuration loading failed or timed out"
-        return 1
+    if ! timeout 10s bash -c "yq eval '.' '$config_file' >/dev/null 2>&1"; then
+        ui_warn "Failed to load peripheral configuration - using built-in detection"
+        return 0  # Continue with built-in detection
     fi
     
     ui_info "Peripheral configuration loaded successfully"
@@ -443,9 +448,11 @@ smart_peripheral_detection() {
         ui_warn "Running as root - some detection methods may behave differently"
     fi
     
-    local config_loaded=false
+    # Load peripheral configuration (optional)
     if load_peripheral_config; then
-        config_loaded=true
+        ui_info "Using enhanced peripheral detection with configuration"
+    else
+        ui_info "Using built-in peripheral detection"
     fi
     
     local logitech_detected=false

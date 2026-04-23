@@ -15,7 +15,7 @@ cleanup_and_optimize() {
   else
     log_warning "lsblk not available. Skipping SSD optimization."
   fi
-  run_step "Cleaning /tmp directory" sudo rm -rf /tmp/*
+  run_step "Cleaning /tmp directory" sudo find /tmp -mindepth 1 -maxdepth 1 ! -path '/tmp/systemd-*' ! -path '/tmp/.X*' ! -path '/tmp/pulse-*' -exec rm -rf {} + 2>/dev/null || true
   run_step "Syncing disk writes" sync
 }
 

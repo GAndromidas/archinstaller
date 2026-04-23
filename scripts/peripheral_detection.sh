@@ -39,119 +39,45 @@ load_peripheral_config() {
 detect_logitech_devices() {
     local logitech_devices=()
     
-    # Check for Logitech USB devices (including wireless receivers) with timeout
+    # Simple USB device scan with timeout
     local usb_devices
-    if ! usb_devices=$(timeout 5s lsusb 2>/dev/null); then
+    if ! usb_devices=$(timeout 3s lsusb 2>/dev/null); then
         ui_warn "USB device scan timed out - may be VM environment"
         printf '%s\n' "${logitech_devices[@]}"
         return 0
     fi
     
-    # Parse lsusb output for Logitech devices with timeout protection
-    while IFS= read -r line; do
-        if [[ "$line" =~ Bus[[:space:]]+[0-9]+[[:space:]]+Device[[:space:]]+[0-9]+:[[:space:]]+ID[[:space:]]+([0-9a-f]+):([0-9a-f]+) ]]; then
-            local vendor_id="${BASH_REMATCH[1]}"
-            local product_id="${BASH_REMATCH[2]}"
-            
-            # Check for Logitech vendor ID (046d)
-            if [[ "$vendor_id" == "046d" ]]; then
-                local device_info=$(timeout 3s lsusb -d "$vendor_id:$product_id" -v 2>/dev/null || echo "Logitech device ($vendor_id:$product_id)")
-                logitech_devices+=("$device_info")
-            fi
+    # Simple Logitech detection - just look for Logitech vendor ID and name
+    if echo "$usb_devices" | grep -qi "046d\|Logitech"; then
+        # Get Logitech device info
+        local logitech_info=$(echo "$usb_devices" | grep -i "046d\|Logitech" | head -3)
+        if [[ -n "$logitech_info" ]]; then
+            while IFS= read -r line; do
+                if [[ -n "$line" ]]; then
+                    logitech_devices+=("Logitech USB device: $(echo "$line" | cut -d: -f3- | sed 's/^ *//')")
+                fi
+            done <<< "$logitech_info"
         fi
-    done <<< "$usb_devices" | grep -i "Logitech"
-    
-    # Check for Logitech wireless receivers specifically
-    if lsusb | grep -i "Unifying" >/dev/null 2>&1; then
-        while IFS= read -r line; do
-            local device_name=$(echo "$line" | cut -d: -f3- | sed 's/^ *//')
-            logitech_devices+=("USB Receiver: $device_name")
-        done < <(lsusb | grep -i "Unifying")
     fi
     
-    # Check for Logitech Lightspeed receivers
-    if lsusb | grep -i "Lightspeed" >/dev/null 2>&1; then
-        while IFS= read -r line; do
-            local device_name=$(echo "$line" | cut -d: -f3- | sed 's/^ *//')
-            logitech_devices+=("Lightspeed Receiver: $device_name")
-        done < <(lsusb | grep -i "Lightspeed")
-    fi
-    
-    # Enhanced Bluetooth device detection
+    # Quick Bluetooth check (no hanging)
     if command -v bluetoothctl >/dev/null 2>&1; then
-        # Get all paired and connected devices
-        local bt_devices=$(bluetoothctl devices 2>/dev/null || true)
-        if [[ -n "$bt_devices" ]]; then
-            while IFS= read -r line; do
-                local device_mac=$(echo "$line" | awk '{print $2}')
-                local device_name=$(echo "$line" | cut -d' ' -f3-)
-                
-                # Check if it's a Logitech device
-                if echo "$device_name" | grep -i "Logitech" >/dev/null 2>&1; then
-                    # Check if device is connected
-                    local device_info=$(bluetoothctl info "$device_mac" 2>/dev/null || true)
-                    local connected="No"
-                    if echo "$device_info" | grep -q "Connected: yes"; then
-                        connected="Yes"
-                    fi
-                    logitech_devices+=("Bluetooth: $device_name ($device_mac) - Connected: $connected")
+        # Only check if service is active to avoid hanging
+        if systemctl is-active --quiet bluetooth 2>/dev/null; then
+            local bt_devices=$(timeout 2s bluetoothctl devices 2>/dev/null || true)
+            if [[ -n "$bt_devices" ]] && echo "$bt_devices" | grep -qi "Logitech"; then
+                local logitech_bt=$(echo "$bt_devices" | grep -i "Logitech" | head -2)
+                if [[ -n "$logitech_bt" ]]; then
+                    while IFS= read -r line; do
+                        if [[ -n "$line" ]]; then
+                            local device_name=$(echo "$line" | cut -d' ' -f3- | sed 's/^ *//')
+                            logitech_devices+=("Logitech Bluetooth: $device_name")
+                        fi
+                    done <<< "$logitech_bt"
                 fi
-            done <<< "$bt_devices"
-        fi
-        
-        # Also check for currently connected devices
-        local connected_bt=$(bluetoothctl devices Connected 2>/dev/null || true)
-        if [[ -n "$connected_bt" ]]; then
-            while IFS= read -r line; do
-                local device_mac=$(echo "$line" | awk '{print $2}')
-                local device_name=$(echo "$line" | cut -d' ' -f3-)
-                if echo "$device_name" | grep -i "Logitech" >/dev/null 2>&1; then
-                    logitech_devices+=("Bluetooth Connected: $device_name ($device_mac)")
-                fi
-            done <<< "$connected_bt"
+            fi
         fi
     fi
-    
-    # Check for Logitech devices in /sys/bus/usb/devices/ (more thorough)
-    for device in /sys/bus/usb/devices/*/idVendor; do
-        if [[ -f "$device" ]]; then
-            local vendor=$(cat "$device" 2>/dev/null || echo "")
-            if [[ "$vendor" == "046d" ]]; then  # Logitech vendor ID
-                local device_path=$(dirname "$device")
-                local product_file="$device_path/idProduct"
-                if [[ -f "$product_file" ]]; then
-                    local product=$(cat "$product_file" 2>/dev/null || echo "")
-                    # Check for specific Logitech device IDs
-                    case "$product" in
-                        "c086"|"c087"|"c088")
-                            logitech_devices+=("System: Logitech G502 X Lightspeed (VID:046d PID:$product)")
-                            ;;
-                        "c52b"|"c52e"|"c532")
-                            logitech_devices+=("System: Logitech Unifying Receiver (VID:046d PID:$product)")
-                            ;;
-                        *)
-                            logitech_devices+=("System: Logitech device (VID:046d PID:$product)")
-                            ;;
-                    esac
-                fi
-            fi
-        fi
-    done
-    
-    # Check for input devices that might be Logitech
-    for input_device in /sys/class/input/input*/device/id/vendor; do
-        if [[ -f "$input_device" ]]; then
-            local vendor=$(cat "$input_device" 2>/dev/null || echo "")
-            if [[ "$vendor" == "046d" ]]; then
-                local device_path=$(dirname "$input_device")
-                local product_file="$device_path/../id/product"
-                if [[ -f "$product_file" ]]; then
-                    local product=$(cat "$product_file" 2>/dev/null || echo "")
-                    logitech_devices+=("Input Device: Logitech $product")
-                fi
-            fi
-        fi
-    done
     
     printf '%s\n' "${logitech_devices[@]}"
 }

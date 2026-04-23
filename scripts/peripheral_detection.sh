@@ -86,13 +86,21 @@ detect_logitech_devices() {
 detect_keychron_keyboards() {
     local keychron_devices=()
     
-    # Check for Keychron USB devices
-    if lsusb | grep -i "Keychron" >/dev/null 2>&1; then
-        while IFS= read -r line; do
-            local device_id=$(echo "$line" | awk '{print $6}')
-            local device_name=$(echo "$line" | cut -d: -f3- | sed 's/^ *//')
-            keychron_devices+=("USB: $device_name ($device_id)")
-        done < <(lsusb | grep -i "Keychron")
+    # Check for Keychron USB devices - be very specific
+    local keychron_usb
+    if keychron_usb=$(timeout 3s lsusb 2>/dev/null | grep -i "Keychron" | head -2); then
+        if [[ -n "$keychron_usb" ]]; then
+            while IFS= read -r line; do
+                if [[ -n "$line" ]]; then
+                    local device_id=$(echo "$line" | awk '{print $6}')
+                    local device_name=$(echo "$line" | cut -d: -f3- | sed 's/^ *//')
+                    # Only count if it actually says "Keychron" in the name
+                    if echo "$device_name" | grep -qi "Keychron"; then
+                        keychron_devices+=("USB: $device_name ($device_id)")
+                    fi
+                fi
+            done <<< "$keychron_usb"
+        fi
     fi
     
     # Enhanced Bluetooth detection for Keychron with timeout
@@ -136,22 +144,29 @@ detect_keychron_keyboards() {
         fi
     fi
     
-    # Check for Keychron devices in /sys/bus/usb/devices/ (more thorough)
+    # Only check for Keychron vendor ID (3496) - removed Apple ID to prevent false positives
     for device in /sys/bus/usb/devices/*/idVendor; do
         if [[ -f "$device" ]]; then
             local vendor=$(cat "$device" 2>/dev/null || echo "")
-            # Keychron uses various vendor IDs, commonly 3496
-            if [[ "$vendor" == "3496" ]] || [[ "$vendor" == "05ac" ]]; then  # Keychron or Apple (some Keychron use Apple IDs)
+            # Keychron uses vendor ID 3496 specifically
+            if [[ "$vendor" == "3496" ]]; then
                 local device_path=$(dirname "$device")
                 local product_file="$device_path/idProduct"
                 if [[ -f "$product_file" ]]; then
                     local product=$(cat "$product_file" 2>/dev/null || echo "")
-                    # Check for specific Keychron K8 Pro model
+                    # Check for specific Keychron models
                     case "$product" in
-                        "6032"|"6034"|"6035")
+                        "6032"|"6034"|"6035"|"6030"|"6031")
                             keychron_devices+=("System: Keychron K8 Pro (VID:$vendor PID:$product)")
                             ;;
+                        "6028"|"6029")
+                            keychron_devices+=("System: Keychron K6 (VID:$vendor PID:$product)")
+                            ;;
+                        "6020"|"6021")
+                            keychron_devices+=("System: Keychron K2 (VID:$vendor PID:$product)")
+                            ;;
                         *)
+                            # Only add if we're confident it's a Keychron device
                             keychron_devices+=("System: Keychron keyboard (VID:$vendor PID:$product)")
                             ;;
                     esac
@@ -164,7 +179,7 @@ detect_keychron_keyboards() {
     for input_device in /sys/class/input/input*/device/id/vendor; do
         if [[ -f "$input_device" ]]; then
             local vendor=$(cat "$input_device" 2>/dev/null || echo "")
-            if [[ "$vendor" == "3496" ]] || [[ "$vendor" == "05ac" ]]; then
+            if [[ "$vendor" == "3496" ]]; then
                 local device_path=$(dirname "$input_device")
                 local product_file="$device_path/../id/product"
                 if [[ -f "$product_file" ]]; then
@@ -283,30 +298,31 @@ safe_install_package() {
 
 # Install Logitech software (Solaar)
 install_logitech_software() {
-    ui_info "Logitech devices detected, installing Solaar for Logitech peripheral management..."
+    ui_info "Installing Solaar for Logitech peripheral management..."
     
     local success=true
     
-    # Install solaar using safe installation
-    if ! safe_install_package "solaar" "pacman"; then
+    # Simple installation with timeout
+    if ! timeout 60s sudo pacman -S --noconfirm --needed solaar >/dev/null 2>&1; then
+        ui_warn "Solaar installation failed or timed out"
         success=false
     fi
     
     if [[ "$success" == true ]]; then
-        ui_success "Logitech software installation completed"
+        ui_success "Solaar installed successfully"
         log_success "Logitech peripheral support installed"
         
-        # Enable and start Solaar service if available
-        if systemctl list-unit-files | grep -q "solaar.service"; then
-            sudo systemctl enable --now solaar.service 2>/dev/null || true
+        # Enable and start Solaar service with timeout
+        if timeout 10s systemctl list-unit-files | grep -q "solaar.service"; then
+            timeout 5s sudo systemctl enable --now solaar.service 2>/dev/null || true
             ui_info "Solaar service enabled"
         fi
         
-        # Add user to plugdev group for device access
-        if groups "$USER" | grep -q "plugdev"; then
+        # Add user to plugdev group with timeout
+        if timeout 3s groups "$USER" | grep -q "plugdev"; then
             ui_info "User already in plugdev group"
         else
-            sudo usermod -a -G plugdev "$USER" 2>/dev/null || true
+            timeout 3s sudo usermod -a -G plugdev "$USER" 2>/dev/null || true
             ui_info "Added user to plugdev group for device access"
         fi
     else
@@ -319,24 +335,30 @@ install_logitech_software() {
 
 # Install Keychron keyboard software (via-bin from AUR)
 install_keychron_software() {
-    ui_info "Keychron keyboard detected, installing via-bin for keyboard management..."
+    ui_info "Installing via-bin for Keychron keyboard management..."
     
     local success=true
     
-    # Install via-bin using safe installation
-    if ! safe_install_package "via-bin" "aur"; then
+    # Simple AUR installation with timeout
+    if command -v yay >/dev/null 2>&1; then
+        if ! timeout 120s yay -S --noconfirm --needed via-bin >/dev/null 2>&1; then
+            ui_warn "via-bin installation failed or timed out"
+            success=false
+        fi
+    else
+        ui_warn "yay not available - skipping via-bin installation"
         success=false
     fi
     
     if [[ "$success" == true ]]; then
-        ui_success "Keychron software installation completed"
+        ui_success "via-bin installed successfully"
         log_success "Keychron keyboard support installed"
         
-        # Add user to input group for VIA access
-        if groups "$USER" | grep -q "input"; then
+        # Add user to input group with timeout
+        if timeout 3s groups "$USER" | grep -q "input"; then
             ui_info "User already in input group"
         else
-            sudo usermod -a -G input "$USER" 2>/dev/null || true
+            timeout 3s sudo usermod -a -G input "$USER" 2>/dev/null || true
             ui_info "Added user to input group for VIA access"
         fi
     else

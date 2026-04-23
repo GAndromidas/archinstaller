@@ -157,12 +157,14 @@ enable_services() {
     cronie.service
     fstrim.timer
     paccache.timer
-    power-profiles-daemon.service
     sshd.service
   )
 
   # Check and configure virt-manager guest integration
   configure_virt_manager_guest_integration
+
+  # Setup power profile management (power-profiles-daemon or tuned-ppd)
+  setup_power_profile_daemon
 
   # Conditionally add rustdesk.service if installed
   if pacman -Q rustdesk-bin &>/dev/null || pacman -Q rustdesk &>/dev/null; then
@@ -170,6 +172,24 @@ enable_services() {
     log_success "rustdesk.service will be enabled."
   else
     log_warning "rustdesk is not installed. Skipping rustdesk.service."
+  fi
+
+  # Check if Timeshift is already installed and install timeshift-autosnap if needed
+  if pacman -Q timeshift &>/dev/null; then
+    log_success "Timeshift detected - installing timeshift-autosnap for automatic snapshots..."
+    if command -v yay >/dev/null 2>&1; then
+      if yay -S --noconfirm --needed timeshift-autosnap >/dev/null 2>&1; then
+        log_success "timeshift-autosnap installed successfully"
+        services+=(timeshift-autosnap.timer)
+        log_success "timeshift-autosnap.timer will be enabled for automatic snapshots."
+      else
+        log_error "Failed to install timeshift-autosnap from AUR"
+      fi
+    else
+      log_warning "yay not available - cannot install timeshift-autosnap"
+    fi
+  else
+    log_info "Timeshift not detected - skipping timeshift-autosnap installation"
   fi
 
   step "Enabling the following system services:"
@@ -256,12 +276,12 @@ detect_and_install_gpu_drivers() {
 
   if lspci | grep -Eiq 'vga.*amd|3d.*amd|display.*amd'; then
     echo -e "${CYAN}AMD GPU detected. Installing AMD drivers and Vulkan support...${RESET}"
-    install_packages_quietly mesa xf86-video-amdgpu vulkan-radeon lib32-vulkan-radeon mesa-vdpau libva-mesa-driver lib32-mesa-vdpau lib32-libva-mesa-driver
+    install_packages_quietly mesa lib32-mesa xf86-video-amdgpu vulkan-radeon lib32-vulkan-radeon
     log_success "AMD drivers and Vulkan support installed"
     log_info "AMD GPU will use AMDGPU driver after reboot"
   elif lspci | grep -Eiq 'vga.*intel|3d.*intel|display.*intel'; then
     echo -e "${CYAN}Intel GPU detected. Installing Intel drivers and Vulkan support...${RESET}"
-    install_packages_quietly mesa vulkan-intel lib32-vulkan-intel mesa-vdpau libva-mesa-driver lib32-mesa-vdpau lib32-libva-mesa-driver
+    install_packages_quietly mesa lib32-mesa vulkan-intel lib32-vulkan-intel
     log_success "Intel drivers and Vulkan support installed"
     log_info "Intel GPU will use i915 or xe driver after reboot"
   elif lspci | grep -qi nvidia; then
@@ -434,11 +454,11 @@ detect_power_profile_daemon() {
       log_info "Older Intel CPU or kernel - tuned-ppd recommended"
     fi
   elif [ "$cpu_vendor" = "amd" ]; then
-    # Simple check: Ryzen with 5 or higher first digit = likely 5000+ series
+    # Check for modern AMD Ryzen CPUs (5000+ series) including Pro and mobile variants
     # Modern kernel required for proper AMD P-State support
-    if [ "$kernel_major" -ge 6 ] && echo "$cpu_model" | grep -qiE "Ryzen.*(5[0-9]{3}|[6-9][0-9]{3})"; then
+    if [ "$kernel_major" -ge 6 ] && echo "$cpu_model" | grep -qiE "Ryzen.*(5[0-9]{3}|[6-9][0-9]{3})|Ryzen.*Pro.*[5-9][0-9]{3}"; then
       recommended_daemon="power-profiles-daemon"
-      log_info "Modern AMD Ryzen (5000+ series) - power-profiles-daemon supported"
+      log_info "Modern AMD Ryzen (5000+ series including Pro/mobile) - power-profiles-daemon supported"
     else
       recommended_daemon="tuned-ppd"
       log_info "AMD CPU (Ryzen 1st-4th gen or older) - tuned-ppd recommended"

@@ -138,9 +138,11 @@ desktop_environments:
       - bluedevil
       - breeze-gtk
       - discover
+      - dolphin
       - flatpak-kcm
       - gwenview
       - haruna
+      - kate
       - kde-gtk-config
       - kdeconnect
       - kdeplasma-addons

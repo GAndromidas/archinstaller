@@ -321,7 +321,6 @@ update_system_mirrors  # Update mirrors BEFORE system update
 update_system
 set_sudo_pwfeedback
 install_cpu_microcode
-install_lts_kernel
 install_kernel_headers_for_all
 
 

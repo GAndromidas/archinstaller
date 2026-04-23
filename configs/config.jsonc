@@ -52,7 +52,8 @@
         },
         {
             "type": "packages",
-            "key": " "
+            "key": " ",
+            "format": "{pacman} (pacman), {flatpak-all} (flatpak)"
         },
         "break",
         {

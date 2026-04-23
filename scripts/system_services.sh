@@ -879,7 +879,7 @@ detect_filesystem_type() {
       log_success "F2FS filesystem detected (flash-optimized)"
       ;;
     btrfs)
-      log_success "Btrfs detected - snapshot support available"
+      log_success "Btrfs detected - advanced filesystem features available"
       ;;
     *)
       log_info "Filesystem: $root_fs (using default optimizations)"

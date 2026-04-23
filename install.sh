@@ -41,8 +41,7 @@ FEATURES:
     - Security hardening (UFW/Firewalld + Fail2ban with SSH protection)
     - Advanced performance tuning (CachyOS-inspired optimizations)
     - Smart AMD P-State system with gaming mode detection
-    - Btrfs snapshot system with Snapper + bootloader integration
-    - Smart peripheral detection (Logitech, Keychron, Razer, gaming devices)
+        - Smart peripheral detection (Logitech, Keychron, Razer, gaming devices)
     - Plymouth boot screen configuration
     - Zsh shell with Oh-My-Zsh and Starship prompt
     - Resume functionality for interrupted installations
@@ -55,7 +54,7 @@ SYSTEM INTELLIGENCE:
     - Persistent settings via udev rules and systemd services
 
 BOOTLOADER SUPPORT:
-    - GRUB with snapshot entries and timeout optimization
+    - GRUB with timeout optimization and boot menu management
     - systemd-boot with LTS kernel fallback and EFI support
     - Limine with modern UEFI and fast boot support
 

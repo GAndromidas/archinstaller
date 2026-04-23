@@ -261,28 +261,6 @@ install_kernel_headers_for_all() {
   echo -e "\\n${GREEN}Kernel headers installation completed${RESET}\\n"
 }
 
-install_inotify_tools() {
-  step "Installing inotify-tools for grub-btrfsd"
-  local pkg="inotify-tools"
-  if pacman -Q "$pkg" &>/dev/null; then
-    log_success "$pkg already installed. Skipping."
-    INSTALLED_PACKAGES+=("$pkg")
-    return 0
-  else
-    log_info "Installing $pkg..."
-    if sudo pacman -S --noconfirm --needed "$pkg" >/dev/null 2>&1; then
-      log_success "$pkg installed successfully."
-      INSTALLED_PACKAGES+=("$pkg")
-      return 0
-    else
-      log_error "Failed to install $pkg. grub-btrfsd might not function correctly."
-      return 1
-    fi
-  fi
-  echo ""
-}
-
-
 generate_locales() {
   step "Configuring system locales"
 
@@ -346,10 +324,5 @@ install_cpu_microcode
 install_lts_kernel
 install_kernel_headers_for_all
 
-# Conditional install for grub-btrfsd dependency
-BOOTLOADER=$(detect_bootloader)
-if [ "$BOOTLOADER" = "grub" ]; then
-    install_inotify_tools
-fi
 
 generate_locales

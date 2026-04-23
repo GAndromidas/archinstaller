@@ -489,7 +489,7 @@ configure_grub() {
 configure_limine_basic() {
   step "Configuring Limine bootloader"
   
-  # Use standard limine.conf location that works with limine-snapper-sync
+  # Use standard limine.conf location
   local limine_config="/boot/limine.conf"
   
   # Create simple configuration
@@ -613,7 +613,7 @@ EOF
   fi
   log_info "Configuration file: $limine_config"
   log_info "Kernels configured: ${kernels_added[*]}"
-  log_warning "Note: Snapshot support removed for stability - use GRUB or systemd-boot for snapshots"
+  log_info "Limine bootloader configured successfully"
 }
 
 # --- Console Font Setup ---

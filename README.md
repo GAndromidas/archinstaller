@@ -64,9 +64,9 @@ Laptop Features:
 #### Bootloader Detection & Configuration
 | Bootloader | Features | Integration |
 |------------|----------|-------------|
-| **GRUB** | Smart snapshot entries, timeout optimization | grub-btrfs + Timeshift/Snapper |
-| **systemd-boot** | EFI support, smart snapshot recovery | Automatic entry management |
-| **Limine** | Modern UEFI, fast boot, smart snapshots | Timeshift/Snapper integration |
+| **GRUB** | Timeout optimization, boot menu management | Automatic configuration |
+| **systemd-boot** | EFI support, kernel fallback | Automatic entry management |
+| **Limine** | Modern UEFI, fast boot support | Simple configuration |
 
 #### Advanced Performance Optimization (CachyOS-Inspired)
 
@@ -114,14 +114,6 @@ Sudo:
   - Proper user group membership
   - Hardware access permissions
 ```
-
-#### Btrfs Snapshot System
-- **Smart Solution**: Timeshift or Snapper + bootloader integration
-- **User Choice**: Interactive selection between Timeshift (recommended) and Snapper (advanced)
-- **Automatic Snapshots**: Before/after package operations (timeshift-autosnap for Timeshift)
-- **GUI Management**: btrfs-assistant for easy rollback
-- **Boot Integration**: GRUB/systemd-boot/Limine snapshot entries
-- **Dual Support**: Configure both systems simultaneously if desired
 
 ### Smart AMD P-State System (NEW)
 
@@ -301,7 +293,7 @@ custom:          # Optional additions
 
 ### Bootloader Support
 
-- **GRUB** 2.x with Btrfs snapshot support
+- **GRUB** 2.x with timeout optimization
 - **systemd-boot** with LTS kernel fallback
 - **Limine** (modern UEFI bootloader)
 

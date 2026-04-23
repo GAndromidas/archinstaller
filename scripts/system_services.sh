@@ -253,35 +253,24 @@ get_ram_gb() {
 detect_and_install_gpu_drivers() {
   step "Detecting and installing graphics drivers"
 
-  # VM detection function (from gamemode.sh)
-  is_vm() {
-    if grep -q -i 'hypervisor' /proc/cpuinfo; then
-      return 0
-    fi
-    if systemd-detect-virt --quiet; then
-      return 0
-    fi
-    if [ -d /proc/xen ]; then
-      return 0
-    fi
-    return 1
-  }
-
-  if is_vm; then
+  if is_vm_environment; then
     echo -e "${YELLOW}Virtual machine detected. Installing VM guest utilities and skipping physical GPU drivers.${RESET}"
     install_packages_quietly qemu-guest-agent spice-vdagent xf86-video-qxl
     log_success "VM guest utilities installed."
     return
   fi
 
+  # Install base Mesa first (needed for all GPU types)
+  install_packages_quietly mesa lib32-mesa
+
   if lspci | grep -Eiq 'vga.*amd|3d.*amd|display.*amd'; then
     echo -e "${CYAN}AMD GPU detected. Installing AMD drivers and Vulkan support...${RESET}"
-    install_packages_quietly mesa lib32-mesa xf86-video-amdgpu vulkan-radeon lib32-vulkan-radeon
+    install_packages_quietly xf86-video-amdgpu vulkan-radeon lib32-vulkan-radeon
     log_success "AMD drivers and Vulkan support installed"
     log_info "AMD GPU will use AMDGPU driver after reboot"
   elif lspci | grep -Eiq 'vga.*intel|3d.*intel|display.*intel'; then
     echo -e "${CYAN}Intel GPU detected. Installing Intel drivers and Vulkan support...${RESET}"
-    install_packages_quietly mesa lib32-mesa vulkan-intel lib32-vulkan-intel
+    install_packages_quietly vulkan-intel lib32-vulkan-intel
     log_success "Intel drivers and Vulkan support installed"
     log_info "Intel GPU will use i915 or xe driver after reboot"
   elif lspci | grep -qi nvidia; then
@@ -335,7 +324,7 @@ detect_and_install_gpu_drivers() {
         case "$legacy_choice" in
           1)
             echo -e "${CYAN}Installing Nouveau drivers...${RESET}"
-            install_packages_quietly mesa xf86-video-nouveau vulkan-nouveau lib32-vulkan-nouveau
+            install_packages_quietly xf86-video-nouveau vulkan-nouveau lib32-vulkan-nouveau
             log_success "Nouveau drivers installed."
             break
             ;;
@@ -374,8 +363,7 @@ detect_and_install_gpu_drivers() {
     log_success "NVIDIA drivers installed."
     return
   else
-    echo -e "${YELLOW}No AMD, Intel, or NVIDIA GPU detected. Installing basic Mesa drivers only.${RESET}"
-    install_packages_quietly mesa
+    echo -e "${YELLOW}No AMD, Intel, or NVIDIA GPU detected. Using basic Mesa drivers already installed.${RESET}"
   fi
 
   # Verify GPU driver is loaded

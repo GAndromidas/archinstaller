@@ -571,7 +571,7 @@ EOF
       ui_info "Added standard kernel entry to Limine"
     fi
     
-    # Add LTS kernel entry if available
+    # Add LTS kernel entry if available (user-installed only)
     if [[ -f "/boot/vmlinuz-linux-lts" ]] && [[ -f "/boot/initramfs-linux-lts.img" ]]; then
       cat << EOF
 
@@ -582,7 +582,7 @@ cmdline: $cmdline
 module_path: boot():/initramfs-linux-lts.img
 EOF
     fi
-    
+        
     # Enhanced Windows detection with more disk paths
     local windows_found=false
     for disk in /dev/sda1 /dev/sdb1 /dev/sdc1 /dev/nvme0n1p1 /dev/nvme1n1p1; do

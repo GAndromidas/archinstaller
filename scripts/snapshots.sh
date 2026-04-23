@@ -342,13 +342,19 @@ setup_timeshift_grub_integration() {
 
 setup_timeshift_systemd_boot_integration() {
   local entries_dir=/boot/loader/entries
+  local root_partuuid=$(findmnt -n -o PARTUUID / 2>/dev/null || echo "")
   
-  cat << 'EOF' | sudo tee $entries_dir/timeshift-recovery.conf >/dev/null
+  if [ -z "$root_partuuid" ]; then
+    log_error "Failed to get root PARTUUID for systemd-boot recovery entry"
+    return 1
+  fi
+  
+  cat << EOF | sudo tee $entries_dir/timeshift-recovery.conf >/dev/null
 # Timeshift Recovery
 title   Timeshift Recovery
 linux   /vmlinuz-linux
 initrd  /initramfs-linux.img
-options root=PARTUUID=$(findmnt -n -o PARTUUID /) rw rootflags=subvol=@ quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3
+options root=PARTUUID=$root_partuuid rw rootflags=subvol=@ quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3
 EOF
   
   log_success Timeshift systemd-boot integration configured

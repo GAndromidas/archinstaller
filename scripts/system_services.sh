@@ -1023,15 +1023,15 @@ detect_kernel_type() {
       # Gaming/desktop optimizations already in place
       log_info "Arch Linux (linux-zen) already optimized for low latency"
       ;;
-    linux-hardened)
-      # Security-focused - minimal changes
-      log_info "Hardened kernel - security optimizations active"
-      ;;
     linux-lts)
       # Stability focused
       log_info "LTS kernel - maximum stability"
       ;;
-  esac
+    linux-hardened)
+      # Security-focused - minimal changes
+      log_info "Hardened kernel - security optimizations active"
+      ;;
+    esac
 }
 
 # Function to detect VM hypervisor

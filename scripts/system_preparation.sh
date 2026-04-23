@@ -282,27 +282,6 @@ install_inotify_tools() {
   echo ""
 }
 
-install_lts_kernel() {
-  step "Ensuring LTS kernel is installed for snapshot recovery"
-  local lts_kernel="linux-lts"
-
-  if ! pacman -Q "$lts_kernel" &>/dev/null; then
-    log_info "Installing missing LTS kernel: $lts_kernel"
-    if sudo pacman -S --noconfirm --needed "$lts_kernel"; then
-      log_success "LTS kernel installed successfully."
-      INSTALLED_PACKAGES+=("$lts_kernel")
-      return 0
-    else
-      log_error "Failed to install LTS kernel. Btrfs fallback might not be available."
-      return 1
-    fi
-  else
-    log_success "LTS kernel is already installed."
-    INSTALLED_PACKAGES+=("$lts_kernel")
-    return 0
-  fi
-  echo ""
-}
 
 generate_locales() {
   step "Configuring system locales"

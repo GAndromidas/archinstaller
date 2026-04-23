@@ -35,14 +35,14 @@ select_snapshot_system() {
   # Check if Btrfs filesystem is being used
   if ! is_btrfs_system; then
     echo 
-    gum style --foreground 11 ⚠️  WARNING: No Btrfs filesystem detected!
-    gum style --margin 0 2 --foreground 15 Snapshot systems require Btrfs to function properly.
+    gum style --foreground 11 "⚠️  WARNING: No Btrfs filesystem detected!"
+    gum style --margin "0 2" --foreground 15 "Snapshot systems require Btrfs to function properly."
     echo 
     
     if gum confirm --default=false "Continue anyway? (Not recommended)"; then
-      log_warning User chose to continue without Btrfs - snapshots may not work
+      log_warning "User chose to continue without Btrfs - snapshots may not work"
     else
-      log_info Skipping snapshot system setup - Btrfs not detected
+      log_info "Skipping snapshot system setup - Btrfs not detected"
       SNAPSHOT_SYSTEM=skip
       mkdir -p $HOME/.config/archinstaller
       echo $SNAPSHOT_SYSTEM > $HOME/.config/archinstaller/snapshot-system
@@ -53,8 +53,8 @@ select_snapshot_system() {
   # If both are installed, ask user to choose
   if [ $timeshift_installed = true ] && [ $snapper_installed = true ]; then
     echo 
-    gum style --foreground 226 🔧 Both Timeshift and Snapper are detected!
-    gum style --margin 0 2 --foreground 15 Please choose your snapshot system:
+    gum style --foreground 226 "🔧 Both Timeshift and Snapper are detected!"
+    gum style --margin "0 2" --foreground 15 "Please choose your snapshot system:"
     echo 
     
     local choice=$(gum choose --header="Select snapshot system:" \
@@ -66,37 +66,37 @@ select_snapshot_system() {
     case $choice in
       "Timeshift (Recommended for most users)")
         SNAPSHOT_SYSTEM=timeshift
-        log_info Selected Timeshift snapshot system
+        log_info "Selected Timeshift snapshot system"
         ;;
       "Snapper (Advanced with CLI focus)")
         SNAPSHOT_SYSTEM=snapper
-        log_info Selected Snapper snapshot system
+        log_info "Selected Snapper snapshot system"
         ;;
       "Configure Both (Keep both systems)")
         SNAPSHOT_SYSTEM=both
-        log_info Selected to configure both Timeshift and Snapper
+        log_info "Selected to configure both Timeshift and Snapper"
         ;;
       "Skip snapshots (Don't configure any)")
         SNAPSHOT_SYSTEM=skip
-        log_info Selected to skip snapshot configuration
+        log_info "Selected to skip snapshot configuration"
         ;;
     esac
     
   # If only Timeshift is installed
   elif [ $timeshift_installed = true ] && [ $snapper_installed = false ]; then
-    log_info Timeshift detected - will configure Timeshift system
+    log_info "Timeshift detected - will configure Timeshift system"
     SNAPSHOT_SYSTEM=timeshift
     
   # If only Snapper is installed  
   elif [ $timeshift_installed = false ] && [ $snapper_installed = true ]; then
-    log_info Snapper detected - will configure Snapper system
+    log_info "Snapper detected - will configure Snapper system"
     SNAPSHOT_SYSTEM=snapper
     
   # If neither is installed, ask user preference
   else
     echo 
-    gum style --foreground 226 🔧 No snapshot system detected!
-    gum style --margin 0 2 --foreground 15 Please choose your preferred snapshot system:
+    gum style --foreground 226 "🔧 No snapshot system detected!"
+    gum style --margin "0 2" --foreground 15 "Please choose your preferred snapshot system:"
     echo 
     
     local choice=$(gum choose --header="Select snapshot system:" \
@@ -107,15 +107,15 @@ select_snapshot_system() {
     case $choice in
       "Timeshift (Recommended for most users)")
         SNAPSHOT_SYSTEM=timeshift
-        log_info Selected Timeshift snapshot system
+        log_info "Selected Timeshift snapshot system"
         ;;
       "Snapper (Advanced with CLI focus)")
         SNAPSHOT_SYSTEM=snapper
-        log_info Selected Snapper snapshot system
+        log_info "Selected Snapper snapshot system"
         ;;
       "Skip snapshots (Don't configure any)")
         SNAPSHOT_SYSTEM=skip
-        log_info Selected to skip snapshot configuration
+        log_info "Selected to skip snapshot configuration"
         ;;
     esac
   fi
@@ -123,7 +123,7 @@ select_snapshot_system() {
   # Store choice for future reference
   mkdir -p $HOME/.config/archinstaller
   echo $SNAPSHOT_SYSTEM > $HOME/.config/archinstaller/snapshot-system
-  log_success Snapshot system preference saved: $SNAPSHOT_SYSTEM
+  log_success "Snapshot system preference saved: $SNAPSHOT_SYSTEM"
 }
 
 # Non-interactive selection for snapshot system
@@ -187,19 +187,8 @@ configure_timeshift_system() {
     log_success "Timeshift installed"
   fi
   
-  # Install timeshift-autosnap from AUR
-  if command -v yay >/dev/null 2>&1; then
-    if ! yay -S --noconfirm --needed timeshift-autosnap; then
-      log_warning "Failed to install timeshift-autosnap (non-critical)"
-    else
-      log_success "timeshift-autosnap installed"
-    fi
-  else
-    log_info "yay not available - skipping timeshift-autosnap installation"
-  fi
-  
-  # Configure timeshift-autosnap
-  configure_timeshift_autosnap
+  # Skip timeshift-autosnap installation as it causes system update issues
+  log_info "Skipping timeshift-autosnap installation to prevent update conflicts"
   
   # Create Timeshift configuration
   configure_timeshift_config
@@ -289,42 +278,46 @@ configure_both_systems() {
 configure_timeshift_config() {
   sudo mkdir -p /etc/timeshift
   
-  # Create Timeshift configuration
-  cat << 'EOF' | sudo tee /etc/timeshift/timeshift.json >/dev/null
+  # Create Timeshift configuration with proper device UUID
+  local root_uuid=$(findmnt -n -o UUID / 2>/dev/null || echo "")
+  cat << EOF | sudo tee /etc/timeshift/timeshift.json >/dev/null
 {
-    backup_device_uuid: ,
-    parent_device_uuid: ,
-    do_first_run: false,
-    btrfs_mode: true,
-    schedule_monthly: false,
-    schedule_weekly: false,
-    schedule_daily: true,
-    schedule_hourly: false,
-    schedule_boot: true,
-    schedule_boot_enabled: true,
-    count_monthly: 0,
-    count_weekly: 0,
-    count_daily: 1,
-    count_hourly: 0,
-    count_boot: 1,
-    snapshot_size: 100M,
-    snapshot_size_unit: MB,
-    exclude: [
-        /home/*/.cache,
-        /home/*/.local/share/Trash,
-        /home/*/.thumbnails,
-        /home/*/.tmp,
-        /home/*/.local/share/Steam,
-        /home/*/.local/share/Flatpak,
-        /var/cache,
-        /var/tmp,
-        /var/log,
-        /var/run,
-        /var/lock,
-        /lost+found,
-        /timeshift-btrfs,
-        /.snapshots
-    ]
+    "backup_device_uuid": "$root_uuid",
+    "parent_device_uuid": "",
+    "do_first_run": false,
+    "btrfs_mode": true,
+    "include_btrfs_home_for_backup": false,
+    "include_btrfs_home_for_restore": false,
+    "stop_cron_emails": true,
+    "schedule_monthly": false,
+    "schedule_weekly": false,
+    "schedule_daily": true,
+    "schedule_hourly": false,
+    "schedule_boot": true,
+    "schedule_boot_enabled": true,
+    "count_monthly": 0,
+    "count_weekly": 0,
+    "count_daily": 1,
+    "count_hourly": 0,
+    "count_boot": 1,
+    "date_format": "%Y-%m-%d %H:%M:%S",
+    "exclude": [
+        "/home/*/.cache",
+        "/home/*/.local/share/Trash",
+        "/home/*/.thumbnails",
+        "/home/*/.tmp",
+        "/home/*/.local/share/Steam",
+        "/home/*/.local/share/Flatpak",
+        "/var/cache",
+        "/var/tmp",
+        "/var/log",
+        "/var/run",
+        "/var/lock",
+        "/lost+found",
+        "/timeshift-btrfs",
+        "/.snapshots"
+    ],
+    "exclude-apps": []
 }
 EOF
   
@@ -522,8 +515,8 @@ EOF
 # Main smart snapshot setup function
 setup_smart_snapshots() {
   # Check if snapshots should be skipped entirely
-  if [ $SNAPSHOT_SYSTEM = skip ]; then
-    log_info Snapshot system configuration skipped by user choice
+  if [ "$SNAPSHOT_SYSTEM" = "skip" ]; then
+    log_info "Snapshot system configuration skipped by user choice"
     return 0
   fi
   

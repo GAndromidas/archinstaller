@@ -30,31 +30,31 @@ source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zs
 # FZF Configuration - Compact list with colors
 # =============================================================================
 
-# Set FZF default options for compact list display with colors
+# Set FZF default options to inherit terminal colors
 export FZF_DEFAULT_OPTS="
   --height 40%
   --layout=reverse
   --border
   --inline-info
-  --color=fg:#d8dee9,bg:#2e3440,hl:#88c0d0
-  --color=fg+:#eceff4,bg+:#3b4252,hl+:#8fbcbb
-  --color=info:#81a1c1,prompt:#88c0d0,pointer:#88c0d0
-  --color=marker:#a3be8c,spinner:#81a1c1,header:#5e81ac
-  --color=border:#4c566a
+  --color=fg:-1,bg:-1,hl:blue:bold
+  --color=fg+:white,bg+:bright-black,hl+:blue:bold
+  --color=info:magenta,prompt:blue,pointer:blue
+  --color=marker:green,spinner:yellow,header:blue
+  --color=border:bright-black
 "
 
-# FZF file search (Ctrl+T) options
+# FZF file search (Ctrl+T)
 export FZF_CTRL_T_OPTS="
   --preview 'bat --color=always --style=numbers --line-range=:500 {}'
   --preview-window=right:50%:wrap
 "
 
-# FZF directory search (Alt+C) options
+# FZF directory search (Alt+C)
 export FZF_ALT_C_OPTS="
   --preview 'eza --tree --color=always --icons {} | head -200'
 "
 
-# FZF command history (Ctrl+R) options
+# FZF command history (Ctrl+R)
 export FZF_CTRL_R_OPTS="
   --preview 'echo {}'
   --preview-window=down:3:wrap

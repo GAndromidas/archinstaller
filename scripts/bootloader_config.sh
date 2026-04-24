@@ -77,8 +77,6 @@ configure_boot() {
 
   # Only sync options if they're inconsistent (don't override Plymouth configuration)
   run_step "Checking kernel options consistency" check_kernel_options_consistency
-
-  run_step "Removing systemd-boot fallback entries" sudo rm -f /boot/loader/entries/*fallback.conf
 }
 
 # Check kernel options consistency and only sync if necessary
@@ -446,9 +444,6 @@ configure_grub() {
         [[ "$k" != "linux" && "$k" != "fallback" && "$k" != "rescue" ]] && SECONDARY_KERNELS+=("$k")
     done
     [[ -z "$MAIN_KERNEL" ]] && MAIN_KERNEL="${KERNELS[0]}"
-
-    # Remove fallback/recovery kernels
-    sudo rm -f /boot/initramfs-*-fallback.img /boot/vmlinuz-*-fallback 2>/dev/null || true
 
     # Regenerate grub.cfg only if changes were made
     local grub_config="/etc/default/grub"

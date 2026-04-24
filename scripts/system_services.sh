@@ -185,7 +185,22 @@ enable_services() {
   for svc in "${services[@]}"; do
     echo -e "  - $svc"
   done
-  sudo systemctl enable --now "${services[@]}" 2>/dev/null || true
+  # Enable each service individually with proper error handling
+  local enable_success=true
+  for svc in "${services[@]}"; do
+    if ! sudo systemctl enable --now "$svc" >/dev/null 2>&1; then
+      log_error "Failed to enable $svc service"
+      enable_success=false
+    else
+      log_success "Enabled $svc service"
+    fi
+  done
+  
+  if [[ "$enable_success" == true ]]; then
+    log_success "All essential services enabled successfully."
+  else
+    log_error "Some services failed to enable"
+  fi
 
   # Verify services started correctly
   log_info "Verifying service status..."

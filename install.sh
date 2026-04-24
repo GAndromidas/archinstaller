@@ -581,10 +581,8 @@ save_log_on_exit() {
   } >> "$INSTALL_LOG"
 }
 
-# Installation start header
-print_header "Starting Arch Linux Installation" \
-  "This process will take approximately 10-20 minutes depending on your internet speed." \
-  "You can safely leave this running - it will handle everything automatically!"
+# Installation start
+echo "Starting ArchInstaller"
 
 # Step 1: System Preparation
 # Check if step was previously completed successfully

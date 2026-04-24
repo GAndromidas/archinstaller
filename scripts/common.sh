@@ -516,7 +516,7 @@ show_menu() {
     ui_warn "Headless system detected. Only Server mode is available."
     echo -e "${GREEN}Your OS is: $detected_os${RESET}"
     INSTALL_MODE="server"
-    print_header "Installation Mode" "Server - Headless server setup"
+    echo "Installation Mode: Server - Headless server setup"
     return
   fi
 
@@ -571,7 +571,7 @@ show_gum_menu() {
     "Standard"*)
       INSTALL_MODE="default"
       if validate_install_mode "$INSTALL_MODE"; then
-        print_header "Installation Mode" "Standard - Complete setup with all packages (intermediate users)"
+        echo "Installation Mode: Standard - Complete setup with all packages (intermediate users)"
       else
         log_error "Failed to validate installation mode"
         exit 1
@@ -580,7 +580,7 @@ show_gum_menu() {
     "Minimal"*)
       INSTALL_MODE="minimal"
       if validate_install_mode "$INSTALL_MODE"; then
-        print_header "Installation Mode" "Minimal - Essential tools only (recommended for new users)"
+        echo "Installation Mode: Minimal - Essential tools only (recommended for new users)"
       else
         log_error "Failed to validate installation mode"
         exit 1
@@ -589,7 +589,7 @@ show_gum_menu() {
     "Server"*)
       INSTALL_MODE="server"
       if validate_install_mode "$INSTALL_MODE"; then
-        print_header "Installation Mode" "Server - Headless server setup"
+        echo "Installation Mode: Server - Headless server setup"
       else
         log_error "Failed to validate installation mode"
         exit 1
@@ -598,7 +598,7 @@ show_gum_menu() {
     "Custom"*)
       INSTALL_MODE="custom"
       if validate_install_mode "$INSTALL_MODE"; then
-        print_header "Installation Mode" "Custom - Interactive selection (choose what to install) (advanced users)"
+        echo "Installation Mode: Custom - Interactive selection (choose what to install) (advanced users)"
       else
         log_error "Failed to validate installation mode"
         exit 1
@@ -644,7 +644,7 @@ show_traditional_menu() {
         1)
           INSTALL_MODE="default"
           if validate_install_mode "$INSTALL_MODE"; then
-            print_header "Installation Mode" "Standard - Complete setup with all packages (intermediate users)"
+            echo "Installation Mode: Standard - Complete setup with all packages (intermediate users)"
             break
           else
             log_error "Failed to validate installation mode"
@@ -654,7 +654,7 @@ show_traditional_menu() {
         2)
           INSTALL_MODE="minimal"
           if validate_install_mode "$INSTALL_MODE"; then
-            print_header "Installation Mode" "Minimal - Essential tools only (recommended for new users)"
+            echo "Installation Mode: Minimal - Essential tools only (recommended for new users)"
             break
           else
             log_error "Failed to validate installation mode"
@@ -664,7 +664,7 @@ show_traditional_menu() {
         3)
           INSTALL_MODE="server"
           if validate_install_mode "$INSTALL_MODE"; then
-            print_header "Installation Mode" "Server - Headless server setup"
+            echo "Installation Mode: Server - Headless server setup"
             break
           else
             log_error "Failed to validate installation mode"
@@ -674,7 +674,7 @@ show_traditional_menu() {
         4)
           INSTALL_MODE="custom"
           if validate_install_mode "$INSTALL_MODE"; then
-            print_header "Installation Mode" "Custom - Interactive selection (choose what to install) (advanced users)"
+            echo "Installation Mode: Custom - Interactive selection (choose what to install) (advanced users)"
             break
           else
             log_error "Failed to validate installation mode"

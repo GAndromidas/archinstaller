@@ -33,13 +33,23 @@ add_systemd_boot_kernel_params() {
       sudo sed -i 's/quiet//g; s/loglevel=[^ ]*//g; s/systemd\.show_status=[^ ]*//g; s/rd\.udev\.log_level=[^ ]*//g' "$entry"
       sudo sed -i 's/  */ /g; s/^ *//; s/ *$//' "$entry" # Clean up extra spaces
       
-      # Add parameters to options line
-      if sudo sed -i '/^options / s/$/ quiet loglevel=3 systemd.show_status=auto rd.udev.log_level=3/' "$entry"; then
-        log_success "Updated kernel parameters in $entry_name"
-        ((modified_count++))
+      # Check if this is a UKI system and adjust parameters accordingly
+      if is_uki_system; then
+        # For UKI systems, only add quiet to hide text and show UKI logo
+        if sudo sed -i '/^options / s/$/ quiet/' "$entry"; then
+          log_success "Updated UKI kernel parameters in $entry_name (quiet only)"
+          ((modified_count++))
+        else
+          log_error "Failed to add UKI kernel parameters to $entry_name"
+        fi
       else
-        log_error "Failed to add kernel parameters to $entry_name"
-        # Continue to try other entries, but log the error
+        # For traditional systems, add full Plymouth-compatible parameters
+        if sudo sed -i '/^options / s/$/ quiet loglevel=3 systemd.show_status=auto rd.udev.log_level=3/' "$entry"; then
+          log_success "Updated kernel parameters in $entry_name"
+          ((modified_count++))
+        else
+          log_error "Failed to add kernel parameters to $entry_name"
+        fi
       fi
     else
       log_info "All kernel parameters already present in $entry_name - skipping."
@@ -424,7 +434,18 @@ configure_grub() {
     ui_info "Note: Arch Linux (linux-zen) default setting handled by gaming mode when installed"
 
     set_grub_config "GRUB_SAVEDEFAULT" "true"
-    set_grub_config "GRUB_CMDLINE_LINUX_DEFAULT" '"quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 plymouth.ignore-serial-consoles"'
+    
+    # Check if this is a UKI system and adjust parameters accordingly
+    if is_uki_system; then
+      # For UKI systems, only add quiet to hide text and show UKI logo
+      set_grub_config "GRUB_CMDLINE_LINUX_DEFAULT" '"quiet"'
+      ui_info "UKI system detected - using quiet-only kernel parameters"
+    else
+      # For traditional systems, add full Plymouth-compatible parameters
+      set_grub_config "GRUB_CMDLINE_LINUX_DEFAULT" '"quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 plymouth.ignore-serial-consoles"'
+      ui_info "Traditional system detected - using Plymouth-compatible kernel parameters"
+    fi
+    
     set_grub_config "GRUB_DISABLE_SUBMENU" "notlinux"
     set_grub_config "GRUB_GFXMODE" "auto"
     set_grub_config "GRUB_GFXPAYLOAD_LINUX" "keep"
@@ -506,7 +527,18 @@ configure_limine_basic() {
   fi
   
   # Build kernel command line
-  local cmdline="root=UUID=$root_uuid rw quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3"
+  local cmdline="root=UUID=$root_uuid rw"
+  
+  # Check if this is a UKI system and adjust parameters accordingly
+  if is_uki_system; then
+    # For UKI systems, only add quiet to hide text and show UKI logo
+    cmdline="$cmdline quiet"
+    ui_info "UKI system detected - using quiet-only kernel parameters for Limine"
+  else
+    # For traditional systems, add full Plymouth-compatible parameters
+    cmdline="$cmdline quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3"
+    ui_info "Traditional system detected - using Plymouth-compatible kernel parameters for Limine"
+  fi
   
   # Add filesystem-specific options
   local root_fstype=$(findmnt -n -o FSTYPE / 2>/dev/null || echo "")

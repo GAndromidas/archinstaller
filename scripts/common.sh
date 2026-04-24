@@ -440,6 +440,29 @@ is_laptop() {
   fi
 }
 
+# Check if system uses UKI (Unified Kernel Image)
+is_uki_system() {
+  # Check for UKI files in /boot/efi/EFI/Linux/
+  if [[ -d /boot/efi/EFI/Linux/ ]] && ls /boot/efi/EFI/Linux/*.efi >/dev/null 2>&1; then
+    return 0
+  fi
+  
+  # Check for UKI entries in systemd-boot configuration
+  if [[ -d /boot/loader/entries ]]; then
+    local uki_entries=$(find /boot/loader/entries -name "*.conf" -exec grep -l "linux.*\.efi" {} \; 2>/dev/null)
+    if [[ -n "$uki_entries" ]]; then
+      return 0
+    fi
+  fi
+  
+  # Check if systemd-boot is configured for UKI
+  if [[ -f /boot/loader/loader.conf ]] && grep -q "default.*\.efi" /boot/loader/loader.conf 2>/dev/null; then
+    return 0
+  fi
+  
+  return 1
+}
+
 # Function to update mirrors using rate-mirrors (silent with confirmation)
 update_system_mirrors() {
   # Check if rate-mirrors is available (silent check)

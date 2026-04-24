@@ -261,6 +261,14 @@ main() {
   # Print simple banner (no figlet)
   echo -e "${CYAN}=== Plymouth Configuration ===${RESET}"
 
+  # Check if this is a UKI system and skip Plymouth installation
+  if is_uki_system; then
+    ui_info "UKI (Unified Kernel Image) system detected"
+    ui_info "Skipping Plymouth installation - UKI provides its own boot logo"
+    ui_info "System will use quiet-only kernel parameters for clean UKI boot experience"
+    return 0
+  fi
+
   # Check if plymouth is already fully configured
   if is_plymouth_configured; then
     log_success "Plymouth is already configured - skipping setup to save time"
@@ -272,6 +280,12 @@ main() {
     return 0
   fi
 
+  ui_info "Traditional system detected - installing Plymouth for boot splash screen"
+  
+  # Install Plymouth packages first
+  step "Installing Plymouth packages"
+  install_packages_quietly plymouth
+  
   # Use the centralized function from common.sh
   run_step "Configuring Plymouth hook and rebuilding initramfs" configure_plymouth_hook_and_initramfs
   run_step "Setting Plymouth theme" set_plymouth_theme

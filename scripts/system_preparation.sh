@@ -100,14 +100,13 @@ install_all_packages() {
 
   # If in server mode, filter out desktop-specific helper utilities
   if [[ "${INSTALL_MODE:-}" == "server" ]]; then
-    ui_info "Server mode: Filtering out desktop-specific helper utilities (bluetooth, plymouth)..."
+    ui_info "Server mode: Filtering out desktop-specific helper utilities (bluetooth)..."
     local server_filtered_packages=()
     for pkg in "${packages_to_install[@]}"; do
-      if [[ "$pkg" != "bluez-utils" && "$pkg" != "plymouth" ]]; then
+      if [[ "$pkg" != "bluez-utils" ]]; then
         server_filtered_packages+=("$pkg")
       fi
     done
-    # Replace the original list with the filtered one
     packages_to_install=("${server_filtered_packages[@]}")
   fi
 

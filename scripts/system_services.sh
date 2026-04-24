@@ -86,6 +86,9 @@ configure_ufw() {
     # Allow specific ports for KDE Connect
     sudo ufw allow 1714:1764/udp
     sudo ufw allow 1714:1764/tcp
+    log_success "KDE Connect ports opened in firewall"
+  fi
+}
 
 configure_user_groups() {
   step "Configuring user groups"
@@ -1018,28 +1021,9 @@ detect_kernel_type() {
       # Security-focused - minimal changes
       log_info "Hardened kernel - security optimizations active"
       ;;
-    esac
-}
-
-           fi
-          ;;
-        microsoft)
-          log_info "Hyper-V detected"
-          if ! pacman -Q hyperv &>/dev/null; then
-            install_packages_quietly hyperv
-            log_success "Hyper-V utilities installed"
-          fi
-          ;;
-        *)
-          log_info "Running in virtual machine: $virt_type"
-          ;;
-      esac
-    else
-      log_info "Running on bare metal (physical hardware)"
-    fi
-  else
-    log_warning "systemd-detect-virt not available"
-  fi
+    *)
+      ;;
+  esac
 }
 
 # Function to detect desktop environment version

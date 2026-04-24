@@ -545,7 +545,6 @@ EOF
     if pacman -Qi linux-zen &>/dev/null; then
       if [[ -f "/boot/vmlinuz-linux-zen" ]] && [[ -f "/boot/initramfs-linux-zen.img" ]]; then
         cat << EOF
-
 Arch Linux (linux-zen)
 protocol: linux
 path: boot():/vmlinuz-linux-zen

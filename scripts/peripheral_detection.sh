@@ -2,611 +2,339 @@
 set -uo pipefail
 
 # Smart Peripheral Detection for Archinstaller
-# Automatically detects connected peripherals and installs appropriate packages
+# Focused detection for Keychron keyboards and Logitech mice
+# Only installs software when devices are actually detected
 
 # Source common functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
-# Load peripheral configuration from YAML file (optional)
-load_peripheral_config() {
-    local config_file="$SCRIPT_DIR/../configs/peripherals.yaml"
-    
-    # Check if yq is available and config file exists
-    if ! command -v yq >/dev/null 2>&1; then
-        ui_info "yq not available - using built-in peripheral detection"
-        return 0  # Continue with built-in detection
-    fi
-    
-    if [[ ! -f "$config_file" ]]; then
-        ui_info "Peripheral configuration file not found - using built-in detection"
-        return 0  # Continue with built-in detection
-    fi
-    
-    # Add timeout for YAML loading to prevent hanging
-    if ! timeout 10s bash -c "yq eval '.' '$config_file' >/dev/null 2>&1"; then
-        ui_warn "Failed to load peripheral configuration - using built-in detection"
-        return 0  # Continue with built-in detection
-    fi
-    
-    ui_info "Peripheral configuration loaded successfully"
-    return 0
-}
+# ===== Focused Device Detection =====
 
-# ===== Enhanced Detection Functions =====
-
-# Detect Logitech devices (mice, keyboards, etc.)
-detect_logitech_devices() {
+# Detect Logitech mice (specifically G502 X Lightspeed and other Logitech mice)
+detect_logitech_mice() {
     local logitech_devices=()
     
-    # Simple USB device scan with timeout
+    # Quick USB scan with timeout
     local usb_devices
-    if ! usb_devices=$(timeout 3s lsusb 2>/dev/null); then
-        ui_warn "USB device scan timed out - may be VM environment"
-        printf '%s\n' "${logitech_devices[@]}"
+    if ! usb_devices=$(timeout 2s lsusb 2>/dev/null); then
         return 0
     fi
     
-    # Simple Logitech detection - just look for Logitech vendor ID and name
-    if echo "$usb_devices" | grep -qi "046d\|Logitech"; then
-        # Get Logitech device info
-        local logitech_info=$(echo "$usb_devices" | grep -i "046d\|Logitech" | head -3)
-        if [[ -n "$logitech_info" ]]; then
-            while IFS= read -r line; do
-                if [[ -n "$line" ]]; then
-                    logitech_devices+=("Logitech USB device: $(echo "$line" | cut -d: -f3- | sed 's/^ *//')")
-                fi
-            done <<< "$logitech_info"
-        fi
-    fi
+    # Look specifically for Logitech vendor ID (046d) and mouse-related devices
+    local logitech_mice=$(echo "$usb_devices" | grep -i "046d" | grep -i "mouse\|g502\|lightspeed\|g pro\|g703\|g903" | head -3)
     
-    # Quick Bluetooth check (no hanging)
-    if command -v bluetoothctl >/dev/null 2>&1; then
-        # Only check if service is active to avoid hanging
-        if systemctl is-active --quiet bluetooth 2>/dev/null; then
-            local bt_devices=$(timeout 2s bluetoothctl devices 2>/dev/null || true)
-            if [[ -n "$bt_devices" ]] && echo "$bt_devices" | grep -qi "Logitech"; then
-                local logitech_bt=$(echo "$bt_devices" | grep -i "Logitech" | head -2)
-                if [[ -n "$logitech_bt" ]]; then
-                    while IFS= read -r line; do
-                        if [[ -n "$line" ]]; then
-                            local device_name=$(echo "$line" | cut -d' ' -f3- | sed 's/^ *//')
-                            logitech_devices+=("Logitech Bluetooth: $device_name")
-                        fi
-                    done <<< "$logitech_bt"
+    if [[ -n "$logitech_mice" ]]; then
+        while IFS= read -r line; do
+            if [[ -n "$line" ]]; then
+                local device_name=$(echo "$line" | cut -d: -f3- | sed 's/^ *//')
+                local device_id=$(echo "$line" | awk '{print $6}')
+                
+                # Enhanced detection for specific models
+                if echo "$device_name" | grep -qi "g502.*lightspeed\|g502 x"; then
+                    logitech_devices+=("Logitech G502 X Lightspeed: $device_name ($device_id)")
+                elif echo "$device_name" | grep -qi "mouse\|g pro\|g703\|g903"; then
+                    logitech_devices+=("Logitech Mouse: $device_name ($device_id)")
                 fi
             fi
+        done <<< "$logitech_mice"
+    fi
+    
+    # Quick Bluetooth check for Logitech mice
+    if command -v bluetoothctl >/dev/null 2>&1 && systemctl is-active --quiet bluetooth 2>/dev/null; then
+        local bt_devices=$(timeout 2s bluetoothctl devices 2>/dev/null | grep -i "Logitech.*mouse\|Logitech.*g502" | head -2)
+        if [[ -n "$bt_devices" ]]; then
+            while IFS= read -r line; do
+                if [[ -n "$line" ]]; then
+                    local device_name=$(echo "$line" | cut -d' ' -f3-)
+                    logitech_devices+=("Logitech Bluetooth Mouse: $device_name")
+                fi
+            done <<< "$bt_devices"
         fi
     fi
     
     printf '%s\n' "${logitech_devices[@]}"
 }
 
-# Detect Keychron keyboards
+# Detect Keychron keyboards (specifically K8 Pro and other Keychron models)
 detect_keychron_keyboards() {
     local keychron_devices=()
     
-    # Check for Keychron USB devices - be very specific
-    local keychron_usb
-    if keychron_usb=$(timeout 3s lsusb 2>/dev/null | grep -i "Keychron" | head -2); then
-        if [[ -n "$keychron_usb" ]]; then
-            while IFS= read -r line; do
-                if [[ -n "$line" ]]; then
-                    local device_id=$(echo "$line" | awk '{print $6}')
-                    local device_name=$(echo "$line" | cut -d: -f3- | sed 's/^ *//')
-                    # Only count if it actually says "Keychron" in the name
-                    if echo "$device_name" | grep -qi "Keychron"; then
-                        keychron_devices+=("USB: $device_name ($device_id)")
-                    fi
-                fi
-            done <<< "$keychron_usb"
-        fi
+    # Quick USB scan with timeout
+    local usb_devices
+    if ! usb_devices=$(timeout 2s lsusb 2>/dev/null); then
+        return 0
     fi
     
-    # Enhanced Bluetooth detection for Keychron with timeout
-    if command -v bluetoothctl >/dev/null 2>&1; then
-        # Get all paired and connected devices with timeout
-        local bt_devices
-        if ! bt_devices=$(timeout 5s bluetoothctl devices 2>/dev/null || true); then
-            ui_warn "Bluetooth device scan timed out - may be VM environment"
-            printf '%s\n' "${keychron_devices[@]}"
-            return 0
-        fi
-        
+    # Look specifically for Keychron vendor ID (3496) AND device name containing Keychron
+    local keychron_keyboards=$(echo "$usb_devices" | grep -i "3496" | grep -i "Keychron" | head -3)
+    
+    if [[ -n "$keychron_keyboards" ]]; then
+        while IFS= read -r line; do
+            if [[ -n "$line" ]]; then
+                local device_name=$(echo "$line" | cut -d: -f3- | sed 's/^ *//')
+                local device_id=$(echo "$line" | awk '{print $6}')
+                
+                # Ultra-strict detection - must have vendor ID 3496 AND Keychron in name
+                if echo "$line" | grep -qi "3496" && echo "$device_name" | grep -qi "Keychron"; then
+                    # Enhanced detection for specific models
+                    if echo "$device_name" | grep -qi "k8.*pro\|k8 pro"; then
+                        keychron_devices+=("Keychron K8 Pro: $device_name ($device_id)")
+                    elif echo "$device_name" | grep -qi "k6\|k2\|keyboard"; then
+                        keychron_devices+=("Keychron Keyboard: $device_name ($device_id)")
+                    fi
+                fi
+            fi
+        done <<< "$keychron_keyboards"
+    fi
+    
+    # Bluetooth detection for Keychron - very specific to avoid false positives
+    if command -v bluetoothctl >/dev/null 2>&1 && systemctl is-active --quiet bluetooth 2>/dev/null; then
+        local bt_devices=$(timeout 2s bluetoothctl devices 2>/dev/null | grep -i "Keychron.*K8.*Pro\|Keychron.*K8 Pro" | head -2)
         if [[ -n "$bt_devices" ]]; then
             while IFS= read -r line; do
-                local device_mac=$(echo "$line" | awk '{print $2}')
-                local device_name=$(echo "$line" | cut -d' ' -f3-)
-                
-                # Check if it's a Keychron device
-                if echo "$device_name" | grep -i "Keychron" >/dev/null 2>&1; then
-                    # Check if device is connected with timeout
-                    local device_info
-                    if ! device_info=$(timeout 3s bluetoothctl info "$device_mac" 2>/dev/null || true); then
-                        keychron_devices+=("Bluetooth: $device_name (timeout)")
-                    else
-                        keychron_devices+=("Bluetooth: $device_name")
+                if [[ -n "$line" ]]; then
+                    local device_name=$(echo "$line" | cut -d' ' -f3-)
+                    # Only count if it's specifically K8 Pro
+                    if echo "$device_name" | grep -qi "K8.*Pro\|K8 Pro"; then
+                        keychron_devices+=("Keychron K8 Pro (Bluetooth): $device_name")
                     fi
                 fi
             done <<< "$bt_devices"
-        fi
-        
-        # Also check for currently connected devices
-        local connected_bt=$(bluetoothctl devices Connected 2>/dev/null || true)
-        if [[ -n "$connected_bt" ]]; then
-            while IFS= read -r line; do
-                local device_mac=$(echo "$line" | awk '{print $2}')
-                local device_name=$(echo "$line" | cut -d' ' -f3-)
-                if echo "$device_name" | grep -i "Keychron" >/dev/null 2>&1; then
-                    keychron_devices+=("Bluetooth Connected: $device_name ($device_mac)")
-                fi
-            done <<< "$connected_bt"
-        fi
-    fi
-    
-    # Only check for Keychron vendor ID (3496) - removed Apple ID to prevent false positives
-    for device in /sys/bus/usb/devices/*/idVendor; do
-        if [[ -f "$device" ]]; then
-            local vendor=$(cat "$device" 2>/dev/null || echo "")
-            # Keychron uses vendor ID 3496 specifically
-            if [[ "$vendor" == "3496" ]]; then
-                local device_path=$(dirname "$device")
-                local product_file="$device_path/idProduct"
-                if [[ -f "$product_file" ]]; then
-                    local product=$(cat "$product_file" 2>/dev/null || echo "")
-                    # Check for specific Keychron models
-                    case "$product" in
-                        "6032"|"6034"|"6035"|"6030"|"6031")
-                            keychron_devices+=("System: Keychron K8 Pro (VID:$vendor PID:$product)")
-                            ;;
-                        "6028"|"6029")
-                            keychron_devices+=("System: Keychron K6 (VID:$vendor PID:$product)")
-                            ;;
-                        "6020"|"6021")
-                            keychron_devices+=("System: Keychron K2 (VID:$vendor PID:$product)")
-                            ;;
-                        *)
-                            # Only add if we're confident it's a Keychron device
-                            keychron_devices+=("System: Keychron keyboard (VID:$vendor PID:$product)")
-                            ;;
-                    esac
-                fi
-            fi
-        fi
-    done
-    
-    # Check for input devices that might be Keychron
-    for input_device in /sys/class/input/input*/device/id/vendor; do
-        if [[ -f "$input_device" ]]; then
-            local vendor=$(cat "$input_device" 2>/dev/null || echo "")
-            if [[ "$vendor" == "3496" ]]; then
-                local device_path=$(dirname "$input_device")
-                local product_file="$device_path/../id/product"
-                if [[ -f "$product_file" ]]; then
-                    local product=$(cat "$product_file" 2>/dev/null || echo "")
-                    if echo "$product" | grep -i "Keychron" >/dev/null 2>&1; then
-                        keychron_devices+=("Input Device: Keychron $product")
-                    fi
-                fi
-            fi
-        fi
-    done
-    
-    # Check for Keychron in /proc/bus/input/devices (alternative detection)
-    if [[ -f /proc/bus/input/devices ]]; then
-        local keychron_input=$(grep -i "Keychron" /proc/bus/input/devices 2>/dev/null || true)
-        if [[ -n "$keychron_input" ]]; then
-            while IFS= read -r line; do
-                if echo "$line" | grep -q "Name="; then
-                    local device_name=$(echo "$line" | cut -d= -f2- | sed 's/^"//; s/"$//')
-                    keychron_devices+=("Input System: $device_name")
-                fi
-            done <<< "$keychron_input"
         fi
     fi
     
     printf '%s\n' "${keychron_devices[@]}"
 }
 
-# Detect other common peripherals that might need special packages
-detect_other_peripherals() {
-    local other_devices=()
-    
-    # Check for Razer devices
-    if lsusb | grep -i "Razer" >/dev/null 2>&1; then
-        other_devices+=("Razer gaming device detected")
-    fi
-    
-    # Check for gaming mice (common gaming mouse vendors)
-    local gaming_vendors=("1532" "046d" "1b1c" "1532" "045e")  # Razer, Logitech, Corsair, Razer, Microsoft
-    for vendor_id in "${gaming_vendors[@]}"; do
-        for device in /sys/bus/usb/devices/*/idVendor; do
-            if [[ -f "$device" ]]; then
-                local vendor=$(cat "$device" 2>/dev/null || echo "")
-                if [[ "$vendor" == "$vendor_id" ]]; then
-                    local device_path=$(dirname "$device")
-                    local product_file="$device_path/idProduct"
-                    if [[ -f "$product_file" ]]; then
-                        local product=$(cat "$product_file" 2>/dev/null || echo "")
-                        other_devices+=("Gaming device detected (VID:$vendor_id PID:$product)")
-                    fi
-                fi
-            fi
-        done
-    done
-    
-    printf '%s\n' "${other_devices[@]}"
-}
+# ===== Smart Installation Functions =====
 
-# ===== Package Installation Functions =====
-
-# Function to check if a package is already installed
-is_package_installed() {
-    local package="$1"
-    if pacman -Qi "$package" >/dev/null 2>&1; then
-        return 0
-    elif command -v yay >/dev/null 2>&1 && yay -Qi "$package" >/dev/null 2>&1; then
-        return 0
-    else
-        return 1
-    fi
-}
-
-# Function to safely install a package without duplicates
-safe_install_package() {
-    local package="$1"
-    local package_type="$2"  # "pacman" or "aur"
-    
-    if is_package_installed "$package"; then
-        ui_info "$package is already installed, skipping..."
-        log_info "$package already present on system"
-        return 0
-    fi
-    
-    case "$package_type" in
-        "pacman")
-            if pacman_install_single "$package" true; then
-                log_success "Successfully installed $package"
-                INSTALLED_PACKAGES+=("$package")
-                return 0
-            else
-                log_error "Failed to install $package"
-                return 1
-            fi
-            ;;
-        "aur")
-            if command -v yay >/dev/null 2>&1; then
-                if yay -S --noconfirm --needed "$package" >/dev/null 2>&1; then
-                    log_success "Successfully installed $package from AUR"
-                    INSTALLED_PACKAGES+=("$package")
-                    return 0
-                else
-                    log_error "Failed to install $package from AUR"
-                    return 1
-                fi
-            else
-                log_error "yay not available for AUR package installation"
-                return 1
-            fi
-            ;;
-        *)
-            log_error "Unknown package type: $package_type"
-            return 1
-            ;;
-    esac
-}
-
-# Install Logitech software (Solaar)
-install_logitech_software() {
-    ui_info "Installing Solaar for Logitech peripheral management..."
+# Install Solaar for Logitech mice with autostart configuration
+install_solaar_for_logitech() {
+    ui_info "Installing Solaar for Logitech mouse management..."
     
     local success=true
     
-    # Simple installation with timeout
-    if ! timeout 60s sudo pacman -S --noconfirm --needed solaar >/dev/null 2>&1; then
-        ui_warn "Solaar installation failed or timed out"
-        success=false
+    # Check if Solaar is already installed
+    if pacman -Qi solaar >/dev/null 2>&1; then
+        ui_info "Solaar is already installed"
+    else
+        # Install Solaar with timeout
+        if ! timeout 30s sudo pacman -S --noconfirm --needed solaar >/dev/null 2>&1; then
+            ui_warn "Solaar installation failed or timed out"
+            success=false
+        fi
     fi
     
     if [[ "$success" == true ]]; then
         ui_success "Solaar installed successfully"
-        log_success "Logitech peripheral support installed"
         
-        # Enable and start Solaar service with timeout
-        if timeout 10s systemctl list-unit-files | grep -q "solaar.service"; then
+        # Enable and start Solaar service
+        if systemctl list-unit-files | grep -q "solaar.service"; then
             timeout 5s sudo systemctl enable --now solaar.service 2>/dev/null || true
             ui_info "Solaar service enabled"
         fi
         
-        # Add user to plugdev group with timeout
+        # Add user to plugdev group for device access
         if timeout 3s groups "$USER" | grep -q "plugdev"; then
             ui_info "User already in plugdev group"
         else
             timeout 3s sudo usermod -a -G plugdev "$USER" 2>/dev/null || true
             ui_info "Added user to plugdev group for device access"
         fi
+        
+        # Create autostart configuration for system tray
+        setup_solaar_autostart
+        
+        log_success "Logitech mouse support installed with system tray integration"
     else
         ui_error "Solaar installation failed"
-        log_error "Logitech software installation incomplete"
+        log_error "Logitech mouse setup incomplete"
     fi
     
     return $([[ "$success" == true ]] && echo 0 || echo 1)
 }
 
-# Install Keychron keyboard software (via-bin from AUR)
-install_keychron_software() {
-    ui_info "Installing via-bin for Keychron keyboard management..."
+# Setup Solaar autostart with system tray integration
+setup_solaar_autostart() {
+    local autostart_dir="$HOME/.config/autostart"
+    local desktop_file="$autostart_dir/solaar.desktop"
+    
+    # Create autostart directory if it doesn't exist
+    mkdir -p "$autostart_dir" 2>/dev/null || true
+    
+    # Create desktop file for autostart
+    cat > "$desktop_file" << 'EOF'
+[Desktop Entry]
+Type=Application
+Name=Solaar
+Comment=Logitech Mouse and Keyboard Configuration
+Exec=solaar --window=hide
+Icon=solaar
+Terminal=false
+Categories=System;Settings;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
+X-KDE-autostart-after-plasma
+EOF
+    
+    if [[ -f "$desktop_file" ]]; then
+        ui_success "Solaar autostart configured for system tray"
+        ui_info "Solaar will start automatically with system tray icon"
+    else
+        ui_warn "Failed to create Solaar autostart configuration"
+    fi
+}
+
+# Install VIA for Keychron keyboards
+install_via_for_keychron() {
+    ui_info "Installing VIA for Keychron keyboard management..."
     
     local success=true
     
-    # Simple AUR installation with timeout
-    if command -v yay >/dev/null 2>&1; then
-        if ! timeout 120s yay -S --noconfirm --needed via-bin >/dev/null 2>&1; then
-            ui_warn "via-bin installation failed or timed out"
+    # Check if yay is available
+    if ! command -v yay >/dev/null 2>&1; then
+        ui_warn "yay not available - cannot install VIA from AUR"
+        return 1
+    fi
+    
+    # Check if via-bin is already installed
+    if yay -Qi via-bin >/dev/null 2>&1; then
+        ui_info "VIA is already installed"
+    else
+        # Install via-bin with timeout
+        if ! timeout 60s yay -S --noconfirm --needed via-bin >/dev/null 2>&1; then
+            ui_warn "VIA installation failed or timed out"
             success=false
         fi
-    else
-        ui_warn "yay not available - skipping via-bin installation"
-        success=false
     fi
     
     if [[ "$success" == true ]]; then
-        ui_success "via-bin installed successfully"
-        log_success "Keychron keyboard support installed"
+        ui_success "VIA installed successfully"
         
-        # Add user to input group with timeout
+        # Add user to input group for VIA access
         if timeout 3s groups "$USER" | grep -q "input"; then
             ui_info "User already in input group"
         else
             timeout 3s sudo usermod -a -G input "$USER" 2>/dev/null || true
             ui_info "Added user to input group for VIA access"
         fi
+        
+        log_success "Keychron keyboard support installed"
     else
-        ui_error "via-bin installation failed"
-        log_error "Keychron software installation incomplete"
+        ui_error "VIA installation failed"
+        log_error "Keychron keyboard setup incomplete"
     fi
     
     return $([[ "$success" == true ]] && echo 0 || echo 1)
 }
 
-# ===== Main Detection and Installation Function =====
+# ===== Main Smart Detection Function =====
 
 smart_peripheral_detection() {
     ui_info "Starting smart peripheral detection..."
     
-    # Check if running in VM and skip intensive detection
-    if is_vm_environment; then
-        ui_warn "Virtual machine detected - using simplified peripheral detection"
-        ui_info "VM environments may not show all connected devices"
+    # Check if running on laptop - skip peripheral detection on laptops
+    if is_laptop; then
+        ui_info "Laptop detected - using built-in touchpad and keyboard"
+        ui_info "Skipping external peripheral detection"
         return 0
     fi
     
-    # Validate required commands are available
-    local required_commands=("lsusb")
-    for cmd in "${required_commands[@]}"; do
-        if ! command -v "$cmd" >/dev/null 2>&1; then
-            ui_error "Required command '$cmd' not found. Cannot perform peripheral detection."
-            log_error "Missing required command: $cmd"
-            return 1
-        fi
-    done
-    
-    # Check if we have necessary permissions
-    if [[ $EUID -eq 0 ]]; then
-        ui_warn "Running as root - some detection methods may behave differently"
-    fi
-    
-    # Load peripheral configuration (optional)
-    if load_peripheral_config; then
-        ui_info "Using enhanced peripheral detection with configuration"
-    else
-        ui_info "Using built-in peripheral detection"
+    # Validate lsusb is available
+    if ! command -v lsusb >/dev/null 2>&1; then
+        ui_warn "lsusb not available - skipping peripheral detection"
+        return 0
     fi
     
     local logitech_detected=false
     local keychron_detected=false
-    local other_detected=false
     local installation_success=true
     
-    # Detect Logitech devices
+    # Detect Logitech mice
+    ui_info "Scanning for Logitech mice..."
     local logitech_devices
-    readarray -t logitech_devices < <(detect_logitech_devices)
-    if [[ ${#logitech_devices[@]} -gt 0 ]]; then
+    readarray -t logitech_devices < <(detect_logitech_mice)
+    
+    # Validate that we actually have Logitech devices (not empty strings)
+    local has_logitech=false
+    for device in "${logitech_devices[@]}"; do
+        if [[ -n "$device" && "$device" != *"Logitech USB device: "* ]]; then
+            has_logitech=true
+            break
+        fi
+    done
+    
+    if [[ "$has_logitech" == true ]]; then
         logitech_detected=true
-        ui_info "Logitech devices detected:"
+        ui_success "Logitech mice detected:"
         for device in "${logitech_devices[@]}"; do
-            ui_info "  • $device"
-        done
-    fi
-    
-    # Detect Keychron keyboards
-    local keychron_devices
-    readarray -t keychron_devices < <(detect_keychron_keyboards)
-    if [[ ${#keychron_devices[@]} -gt 0 ]]; then
-        keychron_detected=true
-        ui_info "Keychron keyboards detected:"
-        for device in "${keychron_devices[@]}"; do
-            ui_info "  • $device"
-        done
-    fi
-    
-    # Detect other peripherals
-    local other_devices
-    readarray -t other_devices < <(detect_other_peripherals)
-    if [[ ${#other_devices[@]} -gt 0 ]]; then
-        other_detected=true
-        ui_info "Other peripherals detected:"
-        for device in "${other_devices[@]}"; do
-            ui_info "  • $device"
-        done
-    fi
-    
-    # Install appropriate software based on detected devices
-    if [[ "$logitech_detected" == true ]]; then
-        ui_info "Installing Logitech software..."
-        if ! install_logitech_software; then
-            installation_success=false
-            ui_warn "Logitech software installation encountered issues"
-        fi
-    fi
-    
-    if [[ "$keychron_detected" == true ]]; then
-        ui_info "Installing Keychron software..."
-        if ! install_keychron_software; then
-            installation_success=false
-            ui_warn "Keychron software installation encountered issues"
-        fi
-    fi
-    
-    # Summary
-    echo ""
-    ui_info "Smart Peripheral Detection Summary:"
-    if [[ "$logitech_detected" == true ]]; then
-        ui_info "  ✓ Logitech devices: Solaar management software"
-    fi
-    if [[ "$keychron_detected" == true ]]; then
-        ui_info "  ✓ Keychron keyboards: VIA configuration tool"
-    fi
-    if [[ "$other_detected" == true ]]; then
-        ui_info "  ✓ Other gaming/peripheral devices detected"
-    fi
-    if [[ "$logitech_detected" == false ]] && [[ "$keychron_detected" == false ]] && [[ "$other_detected" == false ]]; then
-        ui_info "  ℹ No specific peripheral software needed"
-    fi
-    
-    # Final validation
-    if [[ "$installation_success" == true ]]; then
-        ui_success "Smart peripheral detection completed successfully"
-        log_success "Smart peripheral detection completed without errors"
-        return 0
-    else
-        ui_warn "Smart peripheral detection completed with some issues"
-        log_warning "Some peripheral software installation failed"
-        return 1
-    fi
-}
-
-# ===== Advanced Detection with YAML Config =====
-
-detect_peripherals_from_config() {
-    local config_file="$SCRIPT_DIR/../configs/peripherals.yaml"
-    
-    if [[ ! -f "$config_file" ]] || ! command -v yq >/dev/null 2>&1; then
-        return 1
-    fi
-    
-    ui_info "Using advanced peripheral detection with configuration..."
-    
-    local detected_peripherals=()
-    
-    # Parse YAML config and detect devices
-    local peripheral_types
-    readarray -t peripheral_types < <(yq 'keys | .[]' "$config_file" 2>/dev/null || true)
-    
-    for peripheral_type in "${peripheral_types[@]}"; do
-        local vendor_ids
-        readarray -t vendor_ids < <(yq ".${peripheral_type}.detection.vendor_ids.[]" "$config_file" 2>/dev/null || true)
-        
-        local name_patterns
-        readarray -t name_patterns < <(yq ".${peripheral_type}.detection.name_patterns.[]" "$config_file" 2>/dev/null || true)
-        
-        local detected=false
-        
-        # Check USB devices
-        for vendor_id in "${vendor_ids[@]}"; do
-            if lsusb | grep -i "$vendor_id" >/dev/null 2>&1; then
-                detected=true
-                detected_peripherals+=("$peripheral_type (USB: $vendor_id)")
-                break
+            if [[ -n "$device" && "$device" != *"Logitech USB device: "* ]]; then
+                ui_info "  • $device"
             fi
         done
         
-        # Check name patterns
-        if [[ "$detected" == false ]]; then
-            for pattern in "${name_patterns[@]}"; do
-                if lsusb | grep -i "$pattern" >/dev/null 2>&1; then
-                    detected=true
-                    detected_peripherals+=("$peripheral_type (Name: $pattern)")
-                    break
-                fi
-            done
+        # Install Solaar only if Logitech mice detected
+        if ! install_solaar_for_logitech; then
+            installation_success=false
         fi
-        
-        # Install packages if detected
-        if [[ "$detected" == true ]]; then
-            ui_info "$peripheral_type devices detected, installing packages..."
-            install_peripheral_packages "$peripheral_type" "$config_file"
-        fi
-    done
-    
-    if [[ ${#detected_peripherals[@]} -gt 0 ]]; then
-        ui_info "Advanced detection found:"
-        for peripheral in "${detected_peripherals[@]}"; do
-            ui_info "  • $peripheral"
-        done
+    else
+        ui_info "No Logitech mice detected"
     fi
+    
+    # Detect Keychron keyboards
+    ui_info "Scanning for Keychron keyboards..."
+    local keychron_devices
+    readarray -t keychron_devices < <(detect_keychron_keyboards)
+    
+    # Validate that we actually have Keychron devices (not empty strings)
+    local has_keychron=false
+    for device in "${keychron_devices[@]}"; do
+        if [[ -n "$device" && "$device" == *"Keychron"* ]]; then
+            has_keychron=true
+            break
+        fi
+    done
+    
+    if [[ "$has_keychron" == true ]]; then
+        keychron_detected=true
+        ui_success "Keychron keyboards detected:"
+        for device in "${keychron_devices[@]}"; do
+            if [[ -n "$device" && "$device" == *"Keychron"* ]]; then
+                ui_info "  • $device"
+            fi
+        done
+        
+        # Install VIA only if Keychron keyboards detected
+        if ! install_via_for_keychron; then
+            installation_success=false
+        fi
+    else
+        ui_info "No Keychron keyboards detected"
+    fi
+    
+    # Summary
+    echo
+    ui_info "Peripheral detection summary:"
+    if [[ "$logitech_detected" == true ]]; then
+        ui_success "✓ Logitech mice detected and configured"
+    fi
+    if [[ "$keychron_detected" == true ]]; then
+        ui_success "✓ Keychron keyboards detected and configured"
+    fi
+    if [[ "$logitech_detected" == false && "$keychron_detected" == false ]]; then
+        ui_info "No supported peripherals detected"
+    fi
+    
+    if [[ "$installation_success" == false ]]; then
+        ui_warn "Some peripheral software installations encountered issues"
+    fi
+    
+    echo
+    ui_info "Smart peripheral detection completed"
 }
 
-install_peripheral_packages() {
-    local peripheral_type="$1"
-    local config_file="$2"
-    
-    # Install pacman packages
-    local pacman_packages
-    readarray -t pacman_packages < <(yq ".${peripheral_type}.packages.pacman.[].name" "$config_file" 2>/dev/null || true)
-    
-    for pkg in "${pacman_packages[@]}"; do
-        ui_info "Installing $pkg for $peripheral_type..."
-        if pacman_install_single "$pkg" true; then
-            log_success "Installed $pkg for $peripheral_type"
-            INSTALLED_PACKAGES+=("$pkg")
-        else
-            log_error "Failed to install $pkg for $peripheral_type"
-        fi
-    done
-    
-    # Install AUR packages
-    local aur_packages
-    readarray -t aur_packages < <(yq ".${peripheral_type}.packages.aur.[].name" "$config_file" 2>/dev/null || true)
-    
-    for pkg in "${aur_packages[@]}"; do
-        ui_info "Installing $pkg from AUR for $peripheral_type..."
-        if command -v yay >/dev/null 2>&1 && yay -S --noconfirm --needed "$pkg" >/dev/null 2>&1; then
-            log_success "Installed $pkg from AUR for $peripheral_type"
-            INSTALLED_PACKAGES+=("$pkg")
-        else
-            log_error "Failed to install $pkg from AUR for $peripheral_type"
-        fi
-    done
-    
-    # Run post-install commands
-    local post_install_commands
-    readarray -t post_install_commands < <(yq ".${peripheral_type}.packages.pacman.[].post_install.[]" "$config_file" 2>/dev/null || true)
-    
-    for cmd in "${post_install_commands[@]}"; do
-        ui_info "Running post-install command: $cmd"
-        if eval "$cmd" 2>/dev/null; then
-            log_success "Post-install command completed: $cmd"
-        else
-            log_warning "Post-install command failed: $cmd"
-        fi
-    done
-    
-    # Enable services
-    local services
-    readarray -t services < <(yq ".${peripheral_type}.packages.pacman.[].service" "$config_file" 2>/dev/null || true)
-    
-    for service in "${services[@]}"; do
-        ui_info "Enabling service: $service"
-        if sudo systemctl enable --now "$service" 2>/dev/null; then
-            log_success "Service enabled: $service"
-        else
-            log_warning "Failed to enable service: $service"
-        fi
-    done
-}
-
-# ===== Standalone Execution =====
+# Execute main function if script is run directly
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     smart_peripheral_detection
 fi

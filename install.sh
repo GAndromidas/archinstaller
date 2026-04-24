@@ -6,7 +6,7 @@ INSTALL_LOG="$HOME/.archinstaller.log"
 
 # Function to show help
 show_help() {
-  cat << EOF
+  cat << 'EOF'
 ArchInstaller - Arch Linux Post-Installation Automation
 
 USAGE:

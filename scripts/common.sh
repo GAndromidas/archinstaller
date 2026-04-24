@@ -1,6 +1,10 @@
 #!/bin/bash
 set -uo pipefail
 
+# ============================================================================
+# SECTION 1: COLOR VARIABLES & BASIC FUNCTIONS
+# ============================================================================
+
 # Color variables for output formatting
 if [ -t 1 ]; then
     RED='\033[0;31m'
@@ -338,11 +342,7 @@ supports_gum() {
 
 ui_info() {
   local message="$1"
-  if supports_gum; then
-    gum style --foreground 226 "$message"
-  else
-    echo -e "${YELLOW}$message${RESET}"
-  fi
+  echo -e "$message"
 }
 
 ui_success() {
@@ -356,11 +356,7 @@ ui_success() {
 
 ui_warn() {
   local message="$1"
-  if supports_gum; then
-    gum style --foreground 226 "$message"
-  else
-    echo -e "${YELLOW}$message${RESET}"
-  fi
+  echo -e "$message"
 }
 
 ui_error() {
@@ -385,11 +381,10 @@ print_header() {
       shift
     done
   else
-    echo -e "${CYAN}----------------------------------------------------------------${RESET}"
-    echo -e "${CYAN}$title${RESET}"
-    echo -e "${CYAN}----------------------------------------------------------------${RESET}"
+    echo "$title"
+    echo "----------------------------------------"
     while (( "$#" )); do
-      echo -e "${YELLOW}$1${RESET}"
+      echo "$1"
       shift
     done
   fi
@@ -430,13 +425,15 @@ EOF
 # ============================================================================
 # SECTION 7: MENU & INSTALLATION MODE SELECTION
 # ============================================================================
-is_vm_environment() {
-  # Check for common VM indicators
-  if [[ -d /sys/class/dmi/id ]] && grep -q -i "vmware\|virtualbox\|qemu\|kvm\|hyper-v" /sys/class/dmi/id/product_name 2>/dev/null; then
+
+# Check if system is a laptop (for skipping peripheral detection)
+is_laptop() {
+  # Check for common laptop indicators
+  if [[ -d /sys/class/dmi/id ]] && grep -q -i "laptop\|notebook\|portable\|mobile" /sys/class/dmi/id/chassis_type 2>/dev/null; then
     return 0
-  elif [[ -f /proc/cpuinfo ]] && grep -q -i "hypervisor" /proc/cpuinfo 2>/dev/null; then
+  elif [[ -d /sys/class/dmi/id ]] && grep -q -i "laptop\|notebook\|portable" /sys/class/dmi/id/product_name 2>/dev/null; then
     return 0
-  elif command -v systemd-detect-virt >/dev/null 2>&1 && systemd-detect-virt --vm 2>/dev/null; then
+  elif command -v laptop-detect >/dev/null 2>&1 && laptop-detect >/dev/null 2>&1; then
     return 0
   else
     return 1
@@ -625,21 +622,20 @@ show_traditional_menu() {
     detected_os="Unknown"
   fi
   
-  echo -e "${CYAN}----------------------------------------------------------------${RESET}"
-  echo -e "${CYAN}WELCOME TO ARCH INSTALLER${RESET}"
-  echo -e "${CYAN}----------------------------------------------------------------${RESET}"
-  echo -e "${GREEN}Your OS is: $detected_os${RESET}"
+  echo "WELCOME TO ARCH INSTALLER"
+  echo "----------------------------------------"
+  echo "Your OS is: $detected_os"
   echo ""
-  echo -e "${YELLOW}This script will transform your fresh Arch Linux installation into a${RESET}"
-  echo -e "${YELLOW}fully configured, optimized system with all the tools you need!${RESET}"
+  echo "This script will transform your fresh Arch Linux installation into a"
+  echo "fully configured, optimized system with all the tools you need!"
   echo ""
   echo -e "${CYAN}Choose your installation mode:${RESET}"
   echo ""
-  printf "${BLUE}  1) Standard${RESET}%-12s - Complete setup with all packages (intermediate users)\n" ""
-  printf "${GREEN}  2) Minimal${RESET}%-13s - Essential tools only (recommended for new users)\n" ""
-  printf "${CYAN}  3) Server${RESET}%-13s - Headless server setup (Docker, SSH, etc.)\n" ""
-  printf "${YELLOW}  4) Custom${RESET}%-14s - Interactive selection (choose what to install) (advanced users)\n" ""
-  printf "${RED}  5) Exit${RESET}%-16s - Cancel installation\n" ""
+  printf "  1) Standard%-12s - Complete setup with all packages (intermediate users)\n" ""
+  printf "  2) Minimal%-13s - Essential tools only (recommended for new users)\n" ""
+  printf "  3) Server%-13s - Headless server setup (Docker, SSH, etc.)\n" ""
+  printf "  4) Custom%-14s - Interactive selection (choose what to install) (advanced users)\n" ""
+  printf "  5) Exit%-16s - Cancel installation\n" ""
   echo ""
 
   while true; do
@@ -724,14 +720,14 @@ log_success() {
 }
 
 # Function: log_warning
-# Description: Prints warning message in yellow with optional context
+# Description: Prints warning message with optional context
 # Parameters: $1 - Warning message, $2 - Optional context/details
 log_warning() {
   local message="$1"
   local context="${2:-}"
-  echo -e "${YELLOW}! $message${RESET}"
+  echo -e "! $message"
   if [ -n "$context" ]; then
-    echo -e "${CYAN}  Note: $context${RESET}"
+    echo -e "  Note: $context"
   fi
   log_to_file "WARNING: $message"
 }
@@ -740,9 +736,9 @@ log_warning() {
 log_error() {
   local message="$1"
   local hint="${2:-}"
-  echo -e "${RED}$message${RESET}"
+  echo -e "$message"
   if [ -n "$hint" ]; then
-    echo -e "${YELLOW}  Tip: $hint${RESET}"
+    echo -e "  Tip: $hint"
   fi
   ERRORS+=("$message")
   log_to_file "ERROR: $message"
@@ -1110,16 +1106,14 @@ gum_confirm() {
 
 prompt_reboot() {
   simple_banner "Reboot System"
-  echo -e "${YELLOW}Congratulations! Your Arch Linux system is now fully configured!${RESET}"
+  echo "Congratulations! Your Arch Linux system is now fully configured!"
   echo ""
-  echo -e "${CYAN}What happens after reboot:${RESET}"
-  echo -e "  - Boot screen will appear"
-  echo -e "  - Your desktop environment will be ready to use"
-  echo -e "  - Security features will be active"
-  echo -e "  - Performance optimizations will be enabled"
-  echo -e "  - Gaming tools will be available (if installed)"
+  echo "What happens after reboot:"
+  echo "  - Boot screen will appear"
+  echo "  - Performance optimizations will be enabled"
+  echo "  - Gaming tools will be available (if installed)"
   echo ""
-  echo -e "${YELLOW}It is strongly recommended to reboot now to apply all changes.${RESET}"
+  echo "It is strongly recommended to reboot now to apply all changes."
   echo ""
 
   # Use gum menu for reboot confirmation
@@ -1129,16 +1123,16 @@ prompt_reboot() {
     echo ""
     if gum confirm --default=true "Reboot now?"; then
       echo ""
-      echo -e "${CYAN}Rebooting your system...${RESET}"
-      echo -e "${YELLOW}Thank you for using Arch Installer!${RESET}"
+      echo "Rebooting your system..."
+      echo "Thank you for using Arch Installer!"
       echo ""
       sleep 2
       sudo reboot
     else
       echo ""
-      echo -e "${YELLOW}Reboot skipped. You can reboot manually at any time using:${RESET}"
-      echo -e "${CYAN}   sudo reboot${RESET}"
-      echo -e "${YELLOW}   Or simply restart your computer.${RESET}"
+      echo "Reboot skipped. You can reboot manually at any time using:"
+      echo "   sudo reboot"
+      echo "   Or simply restart your computer."
     fi
   else
     # Fallback to text prompt if gum is not available

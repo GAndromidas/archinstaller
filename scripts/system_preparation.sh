@@ -20,6 +20,16 @@ check_prerequisites() {
     log_error "Do not run this script as root. Please run as a regular user with sudo privileges."
     return 1
   fi
+  
+  # Ensure yq is available for programs.sh YAML parsing
+  if ! command -v yq >/dev/null 2>&1; then
+    ui_info "Installing yq for YAML configuration parsing..."
+    if ! pacman_install_single "yq" true; then
+      log_error "Failed to install yq. Please install it manually: sudo pacman -S yq"
+      return 1
+    fi
+    ui_success "yq installed successfully"
+  fi
   if ! command -v pacman >/dev/null; then
     log_error "This script is intended for Arch Linux systems with pacman."
     return 1

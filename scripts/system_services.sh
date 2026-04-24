@@ -86,36 +86,6 @@ configure_ufw() {
     # Allow specific ports for KDE Connect
     sudo ufw allow 1714:1764/udp
     sudo ufw allow 1714:1764/tcp
-    log_success "KDE Connect ports allowed through UFW."
-  else
-    log_warning "KDE Connect is not installed. Skipping KDE Connect service configuration."
-  fi
-}
-
-# Function to provide instructions for virt-manager guest integration
-configure_virt_manager_guest_integration() {
-  step "Checking for Virt-Manager and providing guest integration instructions"
-  if command -v virt-manager >/dev/null 2>&1; then
-    ui_info "Virt-Manager detected. For optimal virtual machine experience (copy/paste, file sharing, display resizing), you need to install guest agents inside your VMs."
-    echo ""
-    gum style --foreground 226 "Recommended packages for Linux guest VMs:"
-    gum style --margin "0 2" --foreground 15 "• spice-vdagent: Enables clipboard sharing (copy/paste), automatic display resizing, and cursor integration."
-    gum style --margin "0 2" --foreground 15 "• qemu-guest-agent: Allows the host to send commands to the guest (e.g., graceful shutdown) and retrieve information."
-    echo ""
-    gum style --foreground 226 "Installation steps inside your Linux guest VM (e.g., for Arch Linux guests):"
-    gum style --margin "0 2" --foreground 15 "1. Open a terminal in your guest VM."
-    gum style --margin "0 2" --foreground 15 "2. Run: ${GREEN}sudo pacman -S spice-vdagent qemu-guest-agent${RESET}"
-    gum style --margin "0 2" --foreground 15 "3. Enable the QEMU guest agent service: ${GREEN}sudo systemctl enable --now qemu-guest-agent${RESET}"
-    echo ""
-    gum style --foreground 226 "Ensure your VM configuration in Virt-Manager includes:"
-    gum style --margin "0 2" --foreground 15 "• A 'Channel' device with 'Spice agent (qemu-ga)' type."
-    gum style --margin "0 2" --foreground 15 "• A 'Video' device with 'QXL' or 'Virtio' model and a 'Spice server' display."
-    echo ""
-    log_success "Virt-Manager guest integration instructions provided."
-  else
-    log_info "Virt-Manager not installed. Skipping guest integration instructions."
-  fi
-}
 
 configure_user_groups() {
   step "Configuring user groups"
@@ -147,8 +117,24 @@ enable_services() {
     for svc in "${services[@]}"; do
       echo -e "  - $svc"
     done
-    sudo systemctl enable --now "${services[@]}" >/dev/null 2>&1 || true
-    log_success "Essential server services enabled."
+    # Enable each service individually with proper error handling
+    local enable_success=true
+    for svc in "${services[@]}"; do
+      if ! sudo systemctl enable --now "$svc" >/dev/null 2>&1; then
+        log_error "Failed to enable $svc service"
+        enable_success=false
+      else
+        log_success "Enabled $svc service"
+      fi
+    done
+    
+    if [[ "$enable_success" == true ]]; then
+      log_success "All essential services enabled successfully."
+    else
+      log_error "Some services failed to enable"
+    fi
+    
+    exit 0
     exit 0
   fi
 
@@ -252,14 +238,7 @@ get_ram_gb() {
 
 detect_and_install_gpu_drivers() {
   step "Detecting and installing graphics drivers"
-
-  if is_vm_environment; then
-    echo -e "${YELLOW}Virtual machine detected. Installing VM guest utilities and skipping physical GPU drivers.${RESET}"
-    install_packages_quietly qemu-guest-agent spice-vdagent xf86-video-qxl
-    log_success "VM guest utilities installed."
-    return
-  fi
-
+  
   # Install base Mesa first (needed for all GPU types)
   install_packages_quietly mesa lib32-mesa
 
@@ -1042,35 +1021,7 @@ detect_kernel_type() {
     esac
 }
 
-# Function to detect VM hypervisor
-detect_vm_hypervisor() {
-  step "Detecting virtual machine environment"
-
-  if command -v systemd-detect-virt >/dev/null 2>&1; then
-    local virt_type=$(systemd-detect-virt)
-
-    if [ "$virt_type" != "none" ]; then
-      log_success "Virtual machine detected: $virt_type"
-
-      case "$virt_type" in
-        kvm|qemu)
-          log_info "KVM/QEMU detected - qemu-guest-agent already installed"
-          ;;
-        vmware)
-          log_info "VMware detected - consider installing open-vm-tools"
-          if ! pacman -Q open-vm-tools &>/dev/null; then
-            install_packages_quietly open-vm-tools
-            sudo systemctl enable --now vmtoolsd.service
-            log_success "VMware tools installed and enabled"
-          fi
-          ;;
-        oracle)
-          log_info "VirtualBox detected - consider installing virtualbox-guest-utils"
-          if ! pacman -Q virtualbox-guest-utils &>/dev/null; then
-            install_packages_quietly virtualbox-guest-utils
-            sudo systemctl enable --now vboxservice.service
-            log_success "VirtualBox guest utilities installed"
-          fi
+           fi
           ;;
         microsoft)
           log_info "Hyper-V detected"
@@ -1901,9 +1852,5 @@ detect_filesystem_type
 detect_storage_type
 detect_audio_system
 detect_kernel_type
-detect_vm_hypervisor
-detect_de_version
-detect_bluetooth_hardware
-detect_and_install_gpu_drivers
 detect_hybrid_graphics
 setup_laptop_optimizations

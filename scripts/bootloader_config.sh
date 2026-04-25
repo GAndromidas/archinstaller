@@ -12,7 +12,7 @@ add_systemd_boot_kernel_params() {
     step "Configuring kernel parameters for UKI system"
     
     local cmdline_file="/etc/kernel/cmdline"
-    local uki_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false"
+    local uki_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash"
     
     # Read existing cmdline if it exists
     local existing_cmdline=""
@@ -485,7 +485,7 @@ configure_grub() {
       step "Configuring kernel parameters for UKI system"
       
       local cmdline_file="/etc/kernel/cmdline"
-      local uki_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false"
+      local uki_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash"
       
       # Read existing cmdline if it exists
       local existing_cmdline=""
@@ -618,7 +618,7 @@ configure_limine_basic() {
     step "Configuring kernel parameters for UKI system"
     
     local cmdline_file="/etc/kernel/cmdline"
-    local uki_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false"
+    local uki_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash"
     
     # Read existing cmdline if it exists
     local existing_cmdline=""

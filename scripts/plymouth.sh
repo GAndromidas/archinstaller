@@ -75,7 +75,7 @@ add_kernel_parameters() {
     step "Configuring kernel parameters for UKI system"
     
     local cmdline_file="/etc/kernel/cmdline"
-    local uki_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false"
+    local uki_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash"
     
     # Read existing cmdline if it exists
     local existing_cmdline=""
@@ -329,7 +329,7 @@ is_plymouth_configured() {
     # Check if /etc/kernel/cmdline has proper parameters
     if [[ -f /etc/kernel/cmdline ]]; then
       local cmdline_content=$(cat /etc/kernel/cmdline 2>/dev/null || echo "")
-      local required_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false"
+      local required_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash"
       local all_params_present=true
       
       for param in $required_params; do
@@ -478,14 +478,24 @@ main() {
   # Print simple banner (no figlet)
   echo -e "${CYAN}=== Plymouth Configuration ===${RESET}"
 
-  # Check if this is a UKI system and configure UKI boot logo
+  # Check if this is a UKI system and configure UKI boot logo + Plymouth
   if is_uki_system; then
     ui_info "UKI (Unified Kernel Image) system detected"
-    ui_info "Configuring UKI boot logo display for clean boot experience"
-    ui_info "Skipping Plymouth installation - UKI provides its own boot logo"
+    ui_info "Configuring UKI boot logo display with Plymouth for clean boot experience"
     configure_uki_boot_logo
-    ui_info "UKI boot logo configuration completed"
-    ui_info "System will display boot logo cleanly without text overlay"
+    ui_info "Installing Plymouth for UKI system to suppress kernel/systemd messages"
+    
+    # Install Plymouth packages for UKI
+    step "Installing Plymouth packages for UKI system"
+    install_packages_quietly plymouth
+    
+    # Configure Plymouth for UKI
+    run_step "Configuring Plymouth hook and rebuilding initramfs" configure_plymouth_hook_and_initramfs
+    run_step "Setting Plymouth theme" set_plymouth_theme
+    run_step "Adding kernel parameters for UKI + Plymouth" add_kernel_parameters
+    
+    ui_info "UKI + Plymouth configuration completed"
+    ui_info "System will display clean boot logo with Plymouth suppressing text overlay"
     return 0
   else
     ui_info "Traditional system detected - installing Plymouth for boot splash screen"

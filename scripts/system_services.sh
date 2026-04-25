@@ -420,38 +420,56 @@ detect_power_profile_daemon() {
   local recommended_daemon="tuned-ppd"  # Default to safer choice
   local cpu_model=$(grep -m1 "model name" /proc/cpuinfo | cut -d: -f2 | xargs)
 
-  # Simple logic: Check kernel version and CPU family for modern support
-  # power-profiles-daemon requires kernel 5.17+ and modern CPU (Zen 3+ or Skylake+)
+  # Check kernel version for power-profiles-daemon compatibility
   local kernel_major=$(uname -r | cut -d. -f1)
   local kernel_minor=$(uname -r | cut -d. -f2)
 
+  # Safety check: power-profiles-daemon requires kernel 5.17+
+  if [ "$kernel_major" -lt 5 ] || ([ "$kernel_major" -eq 5 ] && [ "$kernel_minor" -lt 17 ]); then
+    log_info "Kernel version too old for power-profiles-daemon (requires 5.17+) - using tuned-ppd"
+    echo "tuned-ppd"
+    return 0
+  fi
+
   if [ "$cpu_vendor" = "intel" ]; then
-    # Budget Intel CPUs - always use tuned-ppd
+    # Budget Intel CPUs - always use tuned-ppd for stability
     if echo "$cpu_model" | grep -qiE "Atom|Celeron|Pentium"; then
       recommended_daemon="tuned-ppd"
-      log_info "Intel budget CPU detected - tuned-ppd recommended"
-    # Modern kernel + Core i-series = likely 6th gen+ = power-profiles-daemon OK
+      log_info "Intel budget CPU detected - tuned-ppd recommended for stability"
+    # Modern Intel CPUs (6th gen+) with recent kernel - power-profiles-daemon OK
     elif [ "$kernel_major" -ge 6 ] && echo "$cpu_model" | grep -qiE "Core.*i[3579]"; then
-      recommended_daemon="power-profiles-daemon"
-      log_info "Modern Intel CPU with recent kernel - power-profiles-daemon supported"
+      # Additional check for Intel P-State support
+      if [ -d /sys/devices/system/cpu/intel_pstate ]; then
+        recommended_daemon="power-profiles-daemon"
+        log_info "Modern Intel CPU with P-State support - power-profiles-daemon recommended"
+      else
+        recommended_daemon="tuned-ppd"
+        log_info "Intel CPU without P-State - tuned-ppd recommended"
+      fi
     else
       recommended_daemon="tuned-ppd"
-      log_info "Older Intel CPU or kernel - tuned-ppd recommended"
+      log_info "Older Intel CPU - tuned-ppd recommended for compatibility"
     fi
   elif [ "$cpu_vendor" = "amd" ]; then
-    # Check for modern AMD Ryzen CPUs (5000+ series) including Pro and mobile variants
-    # Modern kernel required for proper AMD P-State support
-    if [ "$kernel_major" -ge 6 ] && echo "$cpu_model" | grep -qiE "Ryzen.*(5[0-9]{3}|[6-9][0-9]{3})|Ryzen.*Pro.*[5-9][0-9]{3}"; then
-      recommended_daemon="power-profiles-daemon"
-      log_info "Modern AMD Ryzen (5000+ series including Pro/mobile) - power-profiles-daemon supported"
+    # Check for AMD P-State support first
+    if [ -d /sys/devices/system/cpu/amd_pstate ]; then
+      # Modern AMD CPUs with P-State support - power-profiles-daemon OK
+      if echo "$cpu_model" | grep -qiE "Ryzen.*[3-9][0-9]{3}|Ryzen.*Pro.*[3-9][0-9]{3}"; then
+        recommended_daemon="power-profiles-daemon"
+        log_info "Modern AMD Ryzen with P-State support - power-profiles-daemon recommended"
+      else
+        recommended_daemon="tuned-ppd"
+        log_info "AMD CPU with P-State but older generation - tuned-ppd recommended"
+      fi
     else
+      # AMD CPUs without P-State - use tuned-ppd
       recommended_daemon="tuned-ppd"
-      log_info "AMD CPU (Ryzen 1st-4th gen or older) - tuned-ppd recommended"
+      log_info "AMD CPU without P-State support - tuned-ppd recommended"
     fi
   else
     # Unknown CPU - default to tuned-ppd (safer choice)
     recommended_daemon="tuned-ppd"
-    log_info "Unknown CPU vendor - tuned-ppd recommended (safer)"
+    log_info "Unknown CPU vendor - tuned-ppd recommended for safety"
   fi
 
   echo "$recommended_daemon"
@@ -463,17 +481,33 @@ setup_power_profile_daemon() {
 
   local daemon=$(detect_power_profile_daemon)
 
+  # Safety check: Stop any existing power management services to prevent conflicts
+  if systemctl is-enabled --quiet tuned.service 2>/dev/null; then
+    log_info "Stopping existing tuned service to prevent conflicts..."
+    sudo systemctl stop tuned.service 2>/dev/null || true
+    sudo systemctl disable tuned.service 2>/dev/null || true
+  fi
+
+  if systemctl is-enabled --quiet power-profiles-daemon.service 2>/dev/null; then
+    log_info "Stopping existing power-profiles-daemon service to prevent conflicts..."
+    sudo systemctl stop power-profiles-daemon.service 2>/dev/null || true
+    sudo systemctl disable power-profiles-daemon.service 2>/dev/null || true
+  fi
+
   if [ "$daemon" = "power-profiles-daemon" ]; then
     log_info "Installing power-profiles-daemon..."
     install_packages_quietly power-profiles-daemon
 
-    sudo systemctl enable --now power-profiles-daemon.service 2>/dev/null
-
-    if systemctl is-active --quiet power-profiles-daemon.service; then
-      log_success "power-profiles-daemon is active"
-      log_info "Use 'powerprofilesctl' to manage power profiles"
+    # Enable and start with error handling
+    if sudo systemctl enable power-profiles-daemon.service 2>/dev/null; then
+      if sudo systemctl start power-profiles-daemon.service 2>/dev/null; then
+        log_success "power-profiles-daemon is active"
+        log_info "Use 'powerprofilesctl' to manage power profiles"
+      else
+        log_warning "power-profiles-daemon failed to start - may require reboot"
+      fi
     else
-      log_warning "power-profiles-daemon may require a reboot"
+      log_warning "Failed to enable power-profiles-daemon service"
     fi
   else
     log_info "Installing tuned-ppd (power-profiles-daemon alternative)..."
@@ -482,14 +516,17 @@ setup_power_profile_daemon() {
     if command -v yay >/dev/null 2>&1; then
       install_aur_quietly tuned-ppd
 
-      sudo systemctl enable --now tuned.service 2>/dev/null
-
-      if systemctl is-active --quiet tuned.service; then
-        log_success "tuned-ppd is active"
-        log_info "Use 'tuned-adm' to manage power profiles"
-        log_info "Available profiles: balanced, powersave, performance"
+      # Enable and start with error handling
+      if sudo systemctl enable tuned.service 2>/dev/null; then
+        if sudo systemctl start tuned.service 2>/dev/null; then
+          log_success "tuned-ppd is active"
+          log_info "Use 'tuned-adm' to manage power profiles"
+          log_info "Available profiles: balanced, powersave, performance"
+        else
+          log_warning "tuned-ppd failed to start - may require reboot"
+        fi
       else
-        log_warning "tuned-ppd may require a reboot"
+        log_warning "Failed to enable tuned service"
       fi
     else
       log_warning "yay not available - cannot install tuned-ppd from AUR"
@@ -509,57 +546,88 @@ detect_cpu_vendor() {
   fi
 }
 
+# Function to install ACPI with smart compatibility handling
+install_smart_acpi() {
+  local acpi_mode=$(should_skip_acpi)
+  
+  case "$acpi_mode" in
+    "minimal")
+      log_info "Installing minimal ACPI support for legacy hardware"
+      install_packages_quietly acpi
+      # Only enable acpid service, don't start it automatically on legacy systems
+      sudo systemctl enable acpid.service 2>/dev/null || true
+      ;;
+    "false")
+      log_info "Installing full ACPI support for modern hardware"
+      install_packages_quietly acpi acpid
+      sudo systemctl enable acpid.service 2>/dev/null
+      sudo systemctl start acpid.service 2>/dev/null
+      ;;
+    *)
+      log_info "Skipping ACPI tools due to compatibility issues"
+      ;;
+  esac
+}
+
 # Function to check if ACPI should be skipped due to compatibility issues
 should_skip_acpi() {
   local cpu_vendor=$(detect_cpu_vendor)
   local manufacturer=$(detect_laptop_manufacturer)
   local cpu_model=""
+  local cpu_family=""
   
   # Get CPU model for specific checks
   cpu_model=$(grep "model name" /proc/cpuinfo | head -1 | cut -d':' -f2 | xargs)
   
-  # Skip ACPI for known problematic combinations
+  # Get CPU family for architecture detection
+  cpu_family=$(grep "cpu family" /proc/cpuinfo | head -1 | cut -d':' -f2 | xargs)
+  
+  # Modern ACPI compatibility check - only skip truly problematic hardware
+  
+  # 1. Skip only for very old pre-Zen AMD CPUs (pre-2017)
+  if [ "$cpu_vendor" = "amd" ]; then
+    if [ "$cpu_family" -lt "23" ]; then  # Family 23+ is Zen 2 and newer
+      log_info "Legacy AMD CPU detected (family $cpu_family) - using minimal ACPI"
+      echo "minimal"
+      return 0
+    fi
+  fi
+  
+  # 2. Skip for very old Intel CPUs (pre-2015)
+  if [ "$cpu_vendor" = "intel" ]; then
+    local cpu_model_num=$(echo "$cpu_model" | grep -o '[0-9]\{3,4\}' | head -1)
+    if [ -n "$cpu_model_num" ] && [ "$cpu_model_num" -lt "4000" ]; then
+      log_info "Legacy Intel CPU detected (model $cpu_model_num) - using minimal ACPI"
+      echo "minimal"
+      return 0
+    fi
+  fi
+  
+  # 3. Check for known problematic legacy hardware (only very old models)
   case "$manufacturer" in
     hp)
-      # HP laptops with AMD APUs (especially older Ryzen models)
+      # Only skip for very old HP models with legacy APUs
       if [ "$cpu_vendor" = "amd" ]; then
         case "$cpu_model" in
-          *"Ryzen 5 2500U"*|*"Ryzen 3 2200U"*|*"Ryzen 7 2700U"*|*"AMD A"*|*"AMD E"*)
-            log_info "HP laptop with problematic AMD APU detected - skipping ACPI/acpid"
-            echo "true"
+          *"AMD A4"*|*"AMD A6"*|*"AMD A8"*|*"AMD A10"*|*"AMD E1"*|*"AMD E2"*|*"AMD A[4-6]"*)
+            log_info "HP laptop with legacy AMD APU detected - using minimal ACPI"
+            echo "minimal"
             return 0
             ;;
         esac
       fi
       ;;
     lenovo)
-      # Some older Lenovo ThinkPads with ACPI issues
-      if [ "$cpu_vendor" = "amd" ] && echo "$cpu_model" | grep -q "AMD A[0-9]"; then
-        log_info "Lenovo laptop with older AMD APU detected - skipping ACPI/acpid"
-        echo "true"
-        return 0
-      fi
-      ;;
-    acer)
-      # Acer laptops with specific AMD APUs
-      if [ "$cpu_vendor" = "amd" ] && echo "$cpu_model" | grep -q "E[0-9]"; then
-        log_info "Acer laptop with AMD E-series APU detected - skipping ACPI/acpid"
-        echo "true"
+      # Only skip for very old ThinkPads with legacy hardware
+      if [ "$cpu_vendor" = "amd" ] && echo "$cpu_model" | grep -q "AMD A[4-6]"; then
+        log_info "Lenovo laptop with legacy AMD APU detected - using minimal ACPI"
+        echo "minimal"
         return 0
       fi
       ;;
   esac
   
-  # Skip ACPI for very old CPUs (pre-2015)
-  if [ "$cpu_vendor" = "amd" ]; then
-    local cpu_family=$(grep "cpu family" /proc/cpuinfo | head -1 | cut -d':' -f2 | xargs)
-    if [ "$cpu_family" -lt "21" ]; then  # Family 21+ is Zen architecture
-      log_info "Old AMD CPU detected (family $cpu_family) - skipping ACPI/acpid"
-      echo "true"
-      return 0
-    fi
-  fi
-  
+  # Default: ACPI is safe for modern hardware
   echo "false"
 }
 
@@ -1234,13 +1302,8 @@ setup_lenovo_optimizations() {
       install_aur_quietly tlp
     fi
   else
-    # Check if ACPI should be skipped due to compatibility issues
-    if [ "$(should_skip_acpi)" = "true" ]; then
-      log_info "Skipping ACPI tools due to compatibility issues"
-    else
-      log_info "Installing basic ACPI tools for Lenovo..."
-      install_packages_quietly acpi acpid
-    fi
+    # Install ACPI with smart compatibility handling
+    install_smart_acpi
   fi
 
   # Configure Lenovo function keys
@@ -1263,12 +1326,8 @@ setup_hp_optimizations() {
 
   # Install HP-specific packages
   log_info "Installing HP-specific tools..."
-  # Check if ACPI should be skipped due to compatibility issues
-  if [ "$(should_skip_acpi)" = "true" ]; then
-    log_info "Skipping ACPI tools due to compatibility issues"
-  else
-    install_packages_quietly acpi acpid
-  fi
+  # Install ACPI with smart compatibility handling
+  install_smart_acpi
   
   if command -v yay >/dev/null 2>&1; then
     # Install HP Omen gaming tools if detected
@@ -1299,12 +1358,8 @@ setup_dell_optimizations() {
 
   # Install Dell-specific packages
   log_info "Installing Dell-specific tools..."
-  # Check if ACPI should be skipped due to compatibility issues
-  if [ "$(should_skip_acpi)" = "true" ]; then
-    log_info "Skipping ACPI tools due to compatibility issues"
-  else
-    install_packages_quietly acpi acpid
-  fi
+  # Install ACPI with smart compatibility handling
+  install_smart_acpi
   
   if command -v yay >/dev/null 2>&1; then
     # Install Dell XPS tools if detected
@@ -1338,12 +1393,8 @@ setup_acer_optimizations() {
 
   # Install Acer-specific packages
   log_info "Installing Acer-specific tools..."
-  # Check if ACPI should be skipped due to compatibility issues
-  if [ "$(should_skip_acpi)" = "true" ]; then
-    log_info "Skipping ACPI tools due to compatibility issues"
-  else
-    install_packages_quietly acpi acpid
-  fi
+  # Install ACPI with smart compatibility handling
+  install_smart_acpi
   
   if command -v yay >/dev/null 2>&1; then
     # Install Acer Nitro gaming tools if detected
@@ -1374,12 +1425,8 @@ setup_asus_optimizations() {
 
   # Install ASUS-specific packages
   log_info "Installing ASUS-specific tools..."
-  # Check if ACPI should be skipped due to compatibility issues
-  if [ "$(should_skip_acpi)" = "true" ]; then
-    log_info "Skipping ACPI tools due to compatibility issues"
-  else
-    install_packages_quietly acpi acpid
-  fi
+  # Install ACPI with smart compatibility handling
+  install_smart_acpi
   
   if command -v yay >/dev/null 2>&1; then
     # Install ASUS ROG gaming tools if detected
@@ -1411,12 +1458,8 @@ setup_msi_optimizations() {
 
   # Install MSI-specific packages
   log_info "Installing MSI-specific tools..."
-  # Check if ACPI should be skipped due to compatibility issues
-  if [ "$(should_skip_acpi)" = "true" ]; then
-    log_info "Skipping ACPI tools due to compatibility issues"
-  else
-    install_packages_quietly acpi acpid
-  fi
+  # Install ACPI with smart compatibility handling
+  install_smart_acpi
   
   if command -v yay >/dev/null 2>&1; then
     # Install MSI gaming tools
@@ -1763,14 +1806,8 @@ setup_laptop_optimizations() {
       ;;
     *)
       log_info "Unknown or unsupported manufacturer - applying generic optimizations"
-      # Check if ACPI should be skipped due to compatibility issues
-      if [ "$(should_skip_acpi)" = "true" ]; then
-        log_info "Skipping ACPI tools due to compatibility issues"
-      else
-        install_packages_quietly acpi acpid
-        sudo systemctl enable acpid.service 2>/dev/null
-        sudo systemctl start acpid.service 2>/dev/null
-      fi
+      # Install ACPI with smart compatibility handling
+      install_smart_acpi
       ;;
   esac
 
@@ -1780,7 +1817,23 @@ setup_laptop_optimizations() {
 
 # Apply advanced system optimizations (CachyOS-style)
 setup_advanced_optimizations() {
-  setup_advanced_optimizations
+  step "Applying advanced system optimizations"
+  
+  # Apply sysctl optimizations for better performance
+  log_info "Applying kernel parameter optimizations..."
+  
+  # Network optimizations
+  echo "net.core.default_qdisc=fq_codel" | sudo tee -a /etc/sysctl.d/99-archinstaller.conf 2>/dev/null || true
+  echo "net.ipv4.tcp_congestion_control=bbr" | sudo tee -a /etc/sysctl.d/99-archinstaller.conf 2>/dev/null || true
+  
+  # Memory management optimizations
+  echo "vm.swappiness=10" | sudo tee -a /etc/sysctl.d/99-archinstaller.conf 2>/dev/null || true
+  echo "vm.vfs_cache_pressure=50" | sudo tee -a /etc/sysctl.d/99-archinstaller.conf 2>/dev/null || true
+  
+  # Apply sysctl changes
+  sudo sysctl --system 2>/dev/null || true
+  
+  log_success "Advanced system optimizations applied"
 }
 
 # Continue setup_laptop_optimizations function

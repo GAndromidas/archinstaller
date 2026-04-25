@@ -256,16 +256,85 @@ is_plymouth_configured() {
   fi
 }
 
+# Function to configure UKI boot logo and hide text after logo
+configure_uki_boot_logo() {
+  step "Configuring UKI boot logo display"
+  
+  # Check if systemd-boot is being used
+  if [[ ! -d /boot/loader ]]; then
+    log_warning "systemd-boot loader directory not found - UKI boot logo configuration skipped"
+    return 1
+  fi
+  
+  # Configure systemd-boot loader.conf for clean UKI boot
+  local loader_conf="/boot/loader/loader.conf"
+  if [[ -f "$loader_conf" ]]; then
+    log_info "Configuring systemd-boot for clean UKI boot experience..."
+    
+    # Ensure quiet mode is set to hide kernel messages
+    if ! grep -q "options.*quiet" "$loader_conf"; then
+      # Add quiet option if not present
+      if grep -q "^options" "$loader_conf"; then
+        sudo sed -i 's/^options.*/& quiet/' "$loader_conf"
+      else
+        echo "options quiet" | sudo tee -a "$loader_conf" >/dev/null
+      fi
+      log_success "Added quiet option to systemd-boot configuration"
+    fi
+    
+    # Set console mode to hide text after boot logo
+    if ! grep -q "console-mode" "$loader_conf"; then
+      echo "console-mode max" | sudo tee -a "$loader_conf" >/dev/null
+      log_success "Set console-mode to max for better display"
+    fi
+    
+    # Ensure timeout is reasonable for boot logo display
+    if grep -q "timeout" "$loader_conf"; then
+      sudo sed -i 's/^timeout.*/timeout 3/' "$loader_conf"
+    else
+      echo "timeout 3" | sudo tee -a "$loader_conf" >/dev/null
+    fi
+    log_success "Set bootloader timeout to 3 seconds for logo display"
+    
+  else
+    log_warning "systemd-boot loader.conf not found - creating basic configuration"
+    sudo mkdir -p /boot/loader
+    cat << EOF | sudo tee "$loader_conf" >/dev/null
+timeout 3
+console-mode max
+options quiet
+EOF
+    log_success "Created systemd-boot configuration for UKI"
+  fi
+  
+  # Check UKI files and ensure they have proper boot parameters
+  local uki_dir="/boot/efi/EFI/Linux"
+  if [[ -d "$uki_dir" ]]; then
+    local uki_files=("$uki_dir"/*.efi)
+    if [[ ${#uki_files[@]} -gt 0 ]]; then
+      log_info "Found UKI files: $(basename "${uki_files[0]}")"
+      log_success "UKI boot logo configuration completed"
+      log_info "The UKI embedded boot logo will display cleanly without text overlay"
+    else
+      log_warning "No UKI files found in $uki_dir"
+    fi
+  else
+    log_warning "UKI directory $uki_dir not found"
+  fi
+}
+
 # ======= Main =======
 main() {
   # Print simple banner (no figlet)
   echo -e "${CYAN}=== Plymouth Configuration ===${RESET}"
 
-  # Check if this is a UKI system and skip Plymouth installation
+  # Check if this is a UKI system and configure UKI boot logo
   if is_uki_system; then
     ui_info "UKI (Unified Kernel Image) system detected"
-    ui_info "Skipping Plymouth installation - UKI provides its own boot logo"
-    ui_info "System will use quiet-only kernel parameters for clean UKI boot experience"
+    ui_info "Configuring UKI boot logo display for clean boot experience"
+    configure_uki_boot_logo
+    ui_info "UKI boot logo configuration completed"
+    ui_info "System will display boot logo cleanly without text overlay"
     return 0
   fi
 

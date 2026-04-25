@@ -75,7 +75,7 @@ add_kernel_parameters() {
     step "Configuring kernel parameters for UKI system"
     
     local cmdline_file="/etc/kernel/cmdline"
-    local uki_params="quiet loglevel=3 systemd.show_status=auto rd.udev.log_level=3"
+    local uki_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false"
     
     # Read existing cmdline if it exists
     local existing_cmdline=""
@@ -99,10 +99,20 @@ add_kernel_parameters() {
         log_info "Backed up existing $cmdline_file"
       fi
       
-      # Create/merge cmdline with required parameters
-      local new_cmdline="$existing_cmdline $uki_params"
-      # Remove duplicates and clean up spaces
-      new_cmdline=$(echo "$new_cmdline" | tr ' ' '\n' | sort -u | tr '\n' ' ' | sed 's/^ *//;s/ *$//')
+      # Preserve existing system parameters and append quiet parameters at the end
+      # This maintains the correct order: root, zswap, rootflags, rw, rootfstype, then quiet parameters
+      local new_cmdline="$existing_cmdline"
+      
+      # Remove any existing quiet/loglevel parameters to avoid duplicates
+      new_cmdline=$(echo "$new_cmdline" | sed 's/quiet//g; s/loglevel=[^ ]*//g; s/rd\.udev\.log_level=[^ ]*//g; s/rd\.systemd\.show_status=[^ ]*//g; s/systemd\.show_status=[^ ]*//g')
+      
+      # Clean up extra spaces
+      new_cmdline=$(echo "$new_cmdline" | sed 's/  */ /g; s/^ *//; s/ *$//')
+      
+      # Append the UKI quiet parameters at the end
+      new_cmdline="$new_cmdline $uki_params"
+      # Clean up spaces again
+      new_cmdline=$(echo "$new_cmdline" | sed 's/^ *//;s/ *$//')
       
       # Write the new cmdline
       echo "$new_cmdline" | sudo tee "$cmdline_file" >/dev/null
@@ -319,7 +329,7 @@ is_plymouth_configured() {
     # Check if /etc/kernel/cmdline has proper parameters
     if [[ -f /etc/kernel/cmdline ]]; then
       local cmdline_content=$(cat /etc/kernel/cmdline 2>/dev/null || echo "")
-      local required_params="quiet loglevel=3 systemd.show_status=auto rd.udev.log_level=3"
+      local required_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false"
       local all_params_present=true
       
       for param in $required_params; do

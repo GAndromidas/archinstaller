@@ -271,7 +271,7 @@ configure_uki_boot_logo() {
   if [[ -f "$loader_conf" ]]; then
     log_info "Configuring systemd-boot for clean UKI boot experience..."
     
-    # Ensure quiet mode is set to hide kernel messages
+    # Ensure quiet mode and loglevel are set to completely hide kernel messages
     if ! grep -q "options.*quiet" "$loader_conf"; then
       # Add quiet option if not present
       if grep -q "^options" "$loader_conf"; then
@@ -280,6 +280,23 @@ configure_uki_boot_logo() {
         echo "options quiet" | sudo tee -a "$loader_conf" >/dev/null
       fi
       log_success "Added quiet option to systemd-boot configuration"
+    fi
+    
+    # Add loglevel=3 to suppress all console text after logo
+    if ! grep -q "options.*loglevel=3" "$loader_conf"; then
+      if grep -q "^options" "$loader_conf"; then
+        sudo sed -i 's/^options.*/& loglevel=3/' "$loader_conf"
+      else
+        echo "options loglevel=3" | sudo tee -a "$loader_conf" >/dev/null
+      fi
+      log_success "Added loglevel=3 to suppress console text"
+    else
+      # Update existing options line to include both parameters
+      if grep -q "^options.*quiet" "$loader_conf"; then
+        sudo sed -i 's/^options.*quiet.*/& loglevel=3/' "$loader_conf"
+      else
+        sudo sed -i 's/^options.*loglevel=3.*/& quiet/' "$loader_conf"
+      fi
     fi
     
     # Set console mode to hide text after boot logo
@@ -302,7 +319,7 @@ configure_uki_boot_logo() {
     cat << EOF | sudo tee "$loader_conf" >/dev/null
 timeout 3
 console-mode max
-options quiet
+options quiet loglevel=3
 EOF
     log_success "Created systemd-boot configuration for UKI"
   fi

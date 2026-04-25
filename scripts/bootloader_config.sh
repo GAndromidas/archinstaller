@@ -6,6 +6,63 @@ source "$SCRIPT_DIR/common.sh"
 
 # --- systemd-boot ---
 add_systemd_boot_kernel_params() {
+  # Check if this is a UKI system first
+  if is_uki_system; then
+    # UKI system: configure /etc/kernel/cmdline and rebuild UKI
+    step "Configuring kernel parameters for UKI system"
+    
+    local cmdline_file="/etc/kernel/cmdline"
+    local uki_params="quiet loglevel=3 systemd.show_status=auto rd.udev.log_level=3"
+    
+    # Read existing cmdline if it exists
+    local existing_cmdline=""
+    if [[ -f "$cmdline_file" ]]; then
+      existing_cmdline=$(cat "$cmdline_file" 2>/dev/null || echo "")
+    fi
+    
+    # Check if all required parameters are already present
+    local needs_update=false
+    for param in $uki_params; do
+      if [[ "$existing_cmdline" != *"$param"* ]]; then
+        needs_update=true
+        break
+      fi
+    done
+    
+    if [[ "$needs_update" = true ]]; then
+      # Backup existing cmdline file
+      if [[ -f "$cmdline_file" ]]; then
+        sudo cp "$cmdline_file" "${cmdline_file}.backup.$(date +%Y%m%d_%H%M%S)"
+        log_info "Backed up existing $cmdline_file"
+      fi
+      
+      # Create/merge cmdline with required parameters
+      local new_cmdline="$existing_cmdline $uki_params"
+      # Remove duplicates and clean up spaces
+      new_cmdline=$(echo "$new_cmdline" | tr ' ' '\n' | sort -u | tr '\n' ' ' | sed 's/^ *//;s/ *$//')
+      
+      # Write the new cmdline
+      echo "$new_cmdline" | sudo tee "$cmdline_file" >/dev/null
+      log_success "Updated $cmdline_file with UKI parameters"
+      log_info "Parameters: $new_cmdline"
+      
+      # Rebuild UKI to bake in the new parameters
+      step "Rebuilding UKI with new kernel parameters"
+      if sudo mkinitcpio -P >/dev/null 2>&1; then
+        log_success "UKI rebuilt successfully with new kernel parameters"
+        log_info "Kernel parameters are now baked into the UKI image"
+      else
+        log_error "Failed to rebuild UKI with mkinitcpio -P"
+        return 1
+      fi
+    else
+      log_info "All UKI kernel parameters already present in $cmdline_file"
+    fi
+    
+    return 0
+  fi
+  
+  # Traditional system: configure systemd-boot entries
   local boot_entries_dir="/boot/loader/entries"
   if [ ! -d "$boot_entries_dir" ]; then
     log_warning "Boot entries directory not found. Skipping kernel parameter addition for systemd-boot."
@@ -33,23 +90,12 @@ add_systemd_boot_kernel_params() {
       sudo sed -i 's/quiet//g; s/loglevel=[^ ]*//g; s/systemd\.show_status=[^ ]*//g; s/rd\.udev\.log_level=[^ ]*//g' "$entry"
       sudo sed -i 's/  */ /g; s/^ *//; s/ *$//' "$entry" # Clean up extra spaces
       
-      # Check if this is a UKI system and adjust parameters accordingly
-      if is_uki_system; then
-        # For UKI systems, only add quiet to hide text and show UKI logo
-        if sudo sed -i '/^options / s/$/ quiet/' "$entry"; then
-          log_success "Updated UKI kernel parameters in $entry_name (quiet only)"
-          ((modified_count++))
-        else
-          log_error "Failed to add UKI kernel parameters to $entry_name"
-        fi
+      # For traditional systems, add full Plymouth-compatible parameters
+      if sudo sed -i '/^options / s/$/ quiet loglevel=3 systemd.show_status=auto rd.udev.log_level=3/' "$entry"; then
+        log_success "Updated kernel parameters in $entry_name"
+        ((modified_count++))
       else
-        # For traditional systems, add full Plymouth-compatible parameters
-        if sudo sed -i '/^options / s/$/ quiet loglevel=3 systemd.show_status=auto rd.udev.log_level=3/' "$entry"; then
-          log_success "Updated kernel parameters in $entry_name"
-          ((modified_count++))
-        else
-          log_error "Failed to add kernel parameters to $entry_name"
-        fi
+        log_error "Failed to add kernel parameters to $entry_name"
       fi
     else
       log_info "All kernel parameters already present in $entry_name - skipping."
@@ -423,6 +469,64 @@ set_loader_config() {
 configure_grub() {
     step "Configuring GRUB"
 
+    # Check if this is a UKI system first
+    if is_uki_system; then
+      # UKI system: configure /etc/kernel/cmdline and rebuild UKI
+      step "Configuring kernel parameters for UKI system"
+      
+      local cmdline_file="/etc/kernel/cmdline"
+      local uki_params="quiet loglevel=3 systemd.show_status=auto rd.udev.log_level=3"
+      
+      # Read existing cmdline if it exists
+      local existing_cmdline=""
+      if [[ -f "$cmdline_file" ]]; then
+        existing_cmdline=$(cat "$cmdline_file" 2>/dev/null || echo "")
+      fi
+      
+      # Check if all required parameters are already present
+      local needs_update=false
+      for param in $uki_params; do
+        if [[ "$existing_cmdline" != *"$param"* ]]; then
+          needs_update=true
+          break
+        fi
+      done
+      
+      if [[ "$needs_update" = true ]]; then
+        # Backup existing cmdline file
+        if [[ -f "$cmdline_file" ]]; then
+          sudo cp "$cmdline_file" "${cmdline_file}.backup.$(date +%Y%m%d_%H%M%S)"
+          log_info "Backed up existing $cmdline_file"
+        fi
+        
+        # Create/merge cmdline with required parameters
+        local new_cmdline="$existing_cmdline $uki_params"
+        # Remove duplicates and clean up spaces
+        new_cmdline=$(echo "$new_cmdline" | tr ' ' '\n' | sort -u | tr '\n' ' ' | sed 's/^ *//;s/ *$//')
+        
+        # Write the new cmdline
+        echo "$new_cmdline" | sudo tee "$cmdline_file" >/dev/null
+        log_success "Updated $cmdline_file with UKI parameters"
+        log_info "Parameters: $new_cmdline"
+        
+        # Rebuild UKI to bake in the new parameters
+        step "Rebuilding UKI with new kernel parameters"
+        if sudo mkinitcpio -P >/dev/null 2>&1; then
+          log_success "UKI rebuilt successfully with new kernel parameters"
+          log_info "Kernel parameters are now baked into the UKI image"
+        else
+          log_error "Failed to rebuild UKI with mkinitcpio -P"
+          return 1
+        fi
+      else
+        log_info "All UKI kernel parameters already present in $cmdline_file"
+      fi
+      
+      ui_info "UKI system detected - kernel parameters configured via /etc/kernel/cmdline"
+      return 0
+    fi
+    
+    # Traditional system: configure GRUB
     # Always set optimal timeout regardless of kernel choice
     set_grub_config "GRUB_TIMEOUT" "3"
     ui_info "Set GRUB timeout to 3 seconds (optimal setting)"
@@ -435,16 +539,9 @@ configure_grub() {
 
     set_grub_config "GRUB_SAVEDEFAULT" "true"
     
-    # Check if this is a UKI system and adjust parameters accordingly
-    if is_uki_system; then
-      # For UKI systems, only add quiet to hide text and show UKI logo
-      set_grub_config "GRUB_CMDLINE_LINUX_DEFAULT" '"quiet"'
-      ui_info "UKI system detected - using quiet-only kernel parameters"
-    else
-      # For traditional systems, add full Plymouth-compatible parameters
-      set_grub_config "GRUB_CMDLINE_LINUX_DEFAULT" '"quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 plymouth.ignore-serial-consoles"'
-      ui_info "Traditional system detected - using Plymouth-compatible kernel parameters"
-    fi
+    # For traditional systems, add full Plymouth-compatible parameters
+    set_grub_config "GRUB_CMDLINE_LINUX_DEFAULT" '"quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 plymouth.ignore-serial-consoles"'
+    ui_info "Traditional system detected - using Plymouth-compatible kernel parameters"
     
     set_grub_config "GRUB_DISABLE_SUBMENU" "notlinux"
     set_grub_config "GRUB_GFXMODE" "auto"
@@ -505,6 +602,64 @@ configure_grub() {
 configure_limine_basic() {
   step "Configuring Limine bootloader"
   
+  # Check if this is a UKI system first
+  if is_uki_system; then
+    # UKI system: configure /etc/kernel/cmdline and rebuild UKI
+    step "Configuring kernel parameters for UKI system"
+    
+    local cmdline_file="/etc/kernel/cmdline"
+    local uki_params="quiet loglevel=3 systemd.show_status=auto rd.udev.log_level=3"
+    
+    # Read existing cmdline if it exists
+    local existing_cmdline=""
+    if [[ -f "$cmdline_file" ]]; then
+      existing_cmdline=$(cat "$cmdline_file" 2>/dev/null || echo "")
+    fi
+    
+    # Check if all required parameters are already present
+    local needs_update=false
+    for param in $uki_params; do
+      if [[ "$existing_cmdline" != *"$param"* ]]; then
+        needs_update=true
+        break
+      fi
+    done
+    
+    if [[ "$needs_update" = true ]]; then
+      # Backup existing cmdline file
+      if [[ -f "$cmdline_file" ]]; then
+        sudo cp "$cmdline_file" "${cmdline_file}.backup.$(date +%Y%m%d_%H%M%S)"
+        log_info "Backed up existing $cmdline_file"
+      fi
+      
+      # Create/merge cmdline with required parameters
+      local new_cmdline="$existing_cmdline $uki_params"
+      # Remove duplicates and clean up spaces
+      new_cmdline=$(echo "$new_cmdline" | tr ' ' '\n' | sort -u | tr '\n' ' ' | sed 's/^ *//;s/ *$//')
+      
+      # Write the new cmdline
+      echo "$new_cmdline" | sudo tee "$cmdline_file" >/dev/null
+      log_success "Updated $cmdline_file with UKI parameters"
+      log_info "Parameters: $new_cmdline"
+      
+      # Rebuild UKI to bake in the new parameters
+      step "Rebuilding UKI with new kernel parameters"
+      if sudo mkinitcpio -P >/dev/null 2>&1; then
+        log_success "UKI rebuilt successfully with new kernel parameters"
+        log_info "Kernel parameters are now baked into the UKI image"
+      else
+        log_error "Failed to rebuild UKI with mkinitcpio -P"
+        return 1
+      fi
+    else
+      log_info "All UKI kernel parameters already present in $cmdline_file"
+    fi
+    
+    ui_info "UKI system detected - kernel parameters configured via /etc/kernel/cmdline"
+    return 0
+  fi
+  
+  # Traditional system: configure Limine
   # Use standard limine.conf location
   local limine_config="/boot/limine.conf"
   
@@ -526,19 +681,12 @@ configure_limine_basic() {
     return 1
   fi
   
-  # Build kernel command line
+  # Build kernel command line for traditional systems
   local cmdline="root=UUID=$root_uuid rw"
   
-  # Check if this is a UKI system and adjust parameters accordingly
-  if is_uki_system; then
-    # For UKI systems, only add quiet to hide text and show UKI logo
-    cmdline="$cmdline quiet"
-    ui_info "UKI system detected - using quiet-only kernel parameters for Limine"
-  else
-    # For traditional systems, add full Plymouth-compatible parameters
-    cmdline="$cmdline quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3"
-    ui_info "Traditional system detected - using Plymouth-compatible kernel parameters for Limine"
-  fi
+  # For traditional systems, add full Plymouth-compatible parameters
+  cmdline="$cmdline quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3"
+  ui_info "Traditional system detected - using Plymouth-compatible kernel parameters for Limine"
   
   # Add filesystem-specific options
   local root_fstype=$(findmnt -n -o FSTYPE / 2>/dev/null || echo "")

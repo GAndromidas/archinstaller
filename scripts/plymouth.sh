@@ -69,6 +69,63 @@ add_kernel_parameters() {
   # Detect bootloader using the centralized function
   local BOOTLOADER=$(detect_bootloader)
   
+  # Check if this is a UKI system
+  if is_uki_system; then
+    # UKI system: configure /etc/kernel/cmdline and rebuild UKI
+    step "Configuring kernel parameters for UKI system"
+    
+    local cmdline_file="/etc/kernel/cmdline"
+    local uki_params="quiet loglevel=3 systemd.show_status=auto rd.udev.log_level=3"
+    
+    # Read existing cmdline if it exists
+    local existing_cmdline=""
+    if [[ -f "$cmdline_file" ]]; then
+      existing_cmdline=$(cat "$cmdline_file" 2>/dev/null || echo "")
+    fi
+    
+    # Check if all required parameters are already present
+    local needs_update=false
+    for param in $uki_params; do
+      if [[ "$existing_cmdline" != *"$param"* ]]; then
+        needs_update=true
+        break
+      fi
+    done
+    
+    if [[ "$needs_update" = true ]]; then
+      # Backup existing cmdline file
+      if [[ -f "$cmdline_file" ]]; then
+        sudo cp "$cmdline_file" "${cmdline_file}.backup.$(date +%Y%m%d_%H%M%S)"
+        log_info "Backed up existing $cmdline_file"
+      fi
+      
+      # Create/merge cmdline with required parameters
+      local new_cmdline="$existing_cmdline $uki_params"
+      # Remove duplicates and clean up spaces
+      new_cmdline=$(echo "$new_cmdline" | tr ' ' '\n' | sort -u | tr '\n' ' ' | sed 's/^ *//;s/ *$//')
+      
+      # Write the new cmdline
+      echo "$new_cmdline" | sudo tee "$cmdline_file" >/dev/null
+      log_success "Updated $cmdline_file with UKI parameters"
+      log_info "Parameters: $new_cmdline"
+      
+      # Rebuild UKI to bake in the new parameters
+      step "Rebuilding UKI with new kernel parameters"
+      if sudo mkinitcpio -P >/dev/null 2>&1; then
+        log_success "UKI rebuilt successfully with new kernel parameters"
+        log_info "Kernel parameters are now baked into the UKI image"
+      else
+        log_error "Failed to rebuild UKI with mkinitcpio -P"
+        return 1
+      fi
+    else
+      log_info "All UKI kernel parameters already present in $cmdline_file"
+    fi
+    
+    return 0
+  fi
+  
+  # Traditional system: configure bootloader entries
   case "$BOOTLOADER" in
     "systemd-boot")
       # systemd-boot logic with consistent options
@@ -136,24 +193,63 @@ add_kernel_parameters() {
       done
       
       if [[ $updated_count -gt 0 ]]; then
-        echo -e "\\n${GREEN}Kernel parameters updated consistently for all entries (${updated_count} modified)${RESET}\\n"
+        echo -e "\n${GREEN}Kernel parameters updated consistently for all entries (${updated_count} modified)${RESET}\n"
       else
-        echo -e "\\n${GREEN}All kernel entries already have consistent options with splash${RESET}\\n"
+        echo -e "\n${GREEN}All kernel entries already have consistent options with splash${RESET}\n"
       fi
       ;;
     "grub")
-      # GRUB logic
-      if grep -q 'splash' /etc/default/grub; then
-        log_warning "'splash' already present in GRUB_CMDLINE_LINUX_DEFAULT."
+      # GRUB logic for traditional systems with Plymouth
+      local grub_params="splash quiet loglevel=3 systemd.show_status=auto rd.udev.log_level=3"
+      local grub_cmdline_current=""
+      local needs_update=false
+      
+      # Get current GRUB_CMDLINE_LINUX_DEFAULT
+      if [[ -f /etc/default/grub ]]; then
+        grub_cmdline_current=$(grep "^GRUB_CMDLINE_LINUX_DEFAULT=" /etc/default/grub | sed 's/^GRUB_CMDLINE_LINUX_DEFAULT="//' | sed 's/"$//' || echo "")
+      fi
+      
+      # Check if all Plymouth parameters are present
+      for param in $grub_params; do
+        if [[ "$grub_cmdline_current" != *"$param"* ]]; then
+          needs_update=true
+          break
+        fi
+      done
+      
+      if [[ "$needs_update" = true ]]; then
+        # Backup existing GRUB config
+        sudo cp /etc/default/grub "/etc/default/grub.backup.$(date +%Y%m%d_%H%M%S)"
+        log_info "Backed up existing GRUB configuration"
+        
+        # Merge parameters with existing ones
+        local new_cmdline="$grub_cmdline_current $grub_params"
+        # Remove duplicates and clean up spaces
+        new_cmdline=$(echo "$new_cmdline" | tr ' ' '\n' | sort -u | tr '\n' ' ' | sed 's/^ *//;s/ *$//')
+        
+        # Update GRUB configuration
+        if grep -q "^GRUB_CMDLINE_LINUX_DEFAULT=" /etc/default/grub; then
+          sudo sed -i "s|^GRUB_CMDLINE_LINUX_DEFAULT=.*|GRUB_CMDLINE_LINUX_DEFAULT=\"$new_cmdline\"|" /etc/default/grub
+        else
+          echo "GRUB_CMDLINE_LINUX_DEFAULT=\"$new_cmdline\"" | sudo tee -a /etc/default/grub >/dev/null
+        fi
+        
+        log_success "Updated GRUB_CMDLINE_LINUX_DEFAULT with Plymouth parameters"
+        log_info "Parameters: $new_cmdline"
+        
+        # Regenerate GRUB configuration
+        if sudo grub-mkconfig -o /boot/grub/grub.cfg >/dev/null 2>&1; then
+          log_success "Regenerated grub.cfg with Plymouth parameters"
+        else
+          log_error "Failed to regenerate grub.cfg"
+          return 1
+        fi
       else
-        sudo sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="/GRUB_CMDLINE_LINUX_DEFAULT="splash /' /etc/default/grub
-        log_success "Added 'splash' to GRUB_CMDLINE_LINUX_DEFAULT."
-        sudo grub-mkconfig -o /boot/grub/grub.cfg
-        log_success "Regenerated grub.cfg after adding 'splash'."
+        log_info "All Plymouth parameters already present in GRUB configuration"
       fi
       ;;
     "limine")
-      # Limine logic
+      # Limine logic for traditional systems with Plymouth
       local limine_config=""
       limine_config=$(find_limine_config)
       
@@ -162,7 +258,7 @@ add_kernel_parameters() {
         return
       fi
       
-      log_info "Adding 'splash' parameter to Limine bootloader..."
+      log_info "Adding Plymouth parameters to Limine bootloader..."
       
       # Validate format compatibility
       if ! grep -q "^[[:space:]]*cmdline:" "$limine_config"; then
@@ -170,29 +266,39 @@ add_kernel_parameters() {
         return
       fi
       
+      local limine_params="splash quiet loglevel=3 systemd.show_status=auto rd.udev.log_level=3 nowatchdog"
       local modified_count=0
       
-      # Add splash parameter if missing
-      if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "splash"; then
-        sudo sed -i '/^[[:space:]]*cmdline:/ { /splash/! s/$/ splash/ }' "$limine_config"
+      # Get current cmdline from limine.conf
+      local current_cmdline=$(grep "^[[:space:]]*cmdline:" "$limine_config" | sed 's/^[[:space:]]*cmdline:[[:space:]]*//' || echo "")
+      
+      # Check if all Plymouth parameters are present
+      local needs_update=false
+      for param in $limine_params; do
+        if [[ "$current_cmdline" != *"$param"* ]]; then
+          needs_update=true
+          break
+        fi
+      done
+      
+      if [[ "$needs_update" = true ]]; then
+        # Backup existing limine config
+        sudo cp "$limine_config" "${limine_config}.backup.$(date +%Y%m%d_%H%M%S)"
+        log_info "Backed up existing limine.conf"
+        
+        # Merge parameters with existing ones
+        local new_cmdline="$current_cmdline $limine_params"
+        # Remove duplicates and clean up spaces
+        new_cmdline=$(echo "$new_cmdline" | tr ' ' '\n' | sort -u | tr '\n' ' ' | sed 's/^ *//;s/ *$//')
+        
+        # Update limine configuration
+        sudo sed -i "s|^[[:space:]]*cmdline:.*|cmdline: $new_cmdline|" "$limine_config"
+        
+        log_success "Updated Limine cmdline with Plymouth parameters"
+        log_info "Parameters: $new_cmdline"
         ((modified_count++))
-        log_success "Added 'splash' to Limine cmdline parameters"
       else
-        log_info "Splash parameter already present in Limine configuration"
-      fi
-      
-      # Add quiet parameter if missing for better Plymouth experience
-      if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "quiet"; then
-        sudo sed -i '/^[[:space:]]*cmdline:/ { /quiet/! s/splash/quiet splash/ }' "$limine_config"
-        ((modified_count++))
-        log_success "Added 'quiet' to Limine cmdline parameters"
-      fi
-      
-      # Add nowatchdog parameter if missing for Plymouth compatibility
-      if grep "^[[:space:]]*cmdline:" "$limine_config" | grep -qv "nowatchdog"; then
-        sudo sed -i '/^[[:space:]]*cmdline:/ { /nowatchdog/! s/$/ nowatchdog/ }' "$limine_config"
-        ((modified_count++))
-        log_success "Added 'nowatchdog' to Limine cmdline parameters"
+        log_info "All Plymouth parameters already present in Limine configuration"
       fi
       
       if [ $modified_count -gt 0 ]; then
@@ -206,6 +312,37 @@ add_kernel_parameters() {
 
 # Function to check if Plymouth is fully configured
 is_plymouth_configured() {
+  # For UKI systems, Plymouth is not used - check UKI configuration instead
+  if is_uki_system; then
+    local uki_configured=false
+    
+    # Check if /etc/kernel/cmdline has proper parameters
+    if [[ -f /etc/kernel/cmdline ]]; then
+      local cmdline_content=$(cat /etc/kernel/cmdline 2>/dev/null || echo "")
+      local required_params="quiet loglevel=3 systemd.show_status=auto rd.udev.log_level=3"
+      local all_params_present=true
+      
+      for param in $required_params; do
+        if [[ "$cmdline_content" != *"$param"* ]]; then
+          all_params_present=false
+          break
+        fi
+      done
+      
+      if [[ "$all_params_present" = true ]]; then
+        uki_configured=true
+      fi
+    fi
+    
+    # For UKI systems, return true if UKI is properly configured
+    if [[ "$uki_configured" = true ]]; then
+      return 0
+    else
+      return 1
+    fi
+  fi
+  
+  # Traditional system: check Plymouth configuration
   local plymouth_hook_present=false
   local plymouth_theme_set=false
   local splash_parameter_set=false
@@ -260,44 +397,13 @@ is_plymouth_configured() {
 configure_uki_boot_logo() {
   step "Configuring UKI boot logo display"
   
-  # Check if systemd-boot is being used
-  if [[ ! -d /boot/loader ]]; then
-    log_warning "systemd-boot loader directory not found - UKI boot logo configuration skipped"
-    return 1
-  fi
+  # For UKI systems, kernel parameters are handled via /etc/kernel/cmdline, not loader.conf
+  # Only configure basic bootloader settings that don't affect kernel parameters
   
-  # Configure systemd-boot loader.conf for clean UKI boot
+  # Configure systemd-boot loader.conf for clean UKI boot (no kernel parameters here)
   local loader_conf="/boot/loader/loader.conf"
   if [[ -f "$loader_conf" ]]; then
     log_info "Configuring systemd-boot for clean UKI boot experience..."
-    
-    # Ensure quiet mode and loglevel are set to completely hide kernel messages
-    if ! grep -q "options.*quiet" "$loader_conf"; then
-      # Add quiet option if not present
-      if grep -q "^options" "$loader_conf"; then
-        sudo sed -i 's/^options.*/& quiet/' "$loader_conf"
-      else
-        echo "options quiet" | sudo tee -a "$loader_conf" >/dev/null
-      fi
-      log_success "Added quiet option to systemd-boot configuration"
-    fi
-    
-    # Add loglevel=3 to suppress all console text after logo
-    if ! grep -q "options.*loglevel=3" "$loader_conf"; then
-      if grep -q "^options" "$loader_conf"; then
-        sudo sed -i 's/^options.*/& loglevel=3/' "$loader_conf"
-      else
-        echo "options loglevel=3" | sudo tee -a "$loader_conf" >/dev/null
-      fi
-      log_success "Added loglevel=3 to suppress console text"
-    else
-      # Update existing options line to include both parameters
-      if grep -q "^options.*quiet" "$loader_conf"; then
-        sudo sed -i 's/^options.*quiet.*/& loglevel=3/' "$loader_conf"
-      else
-        sudo sed -i 's/^options.*loglevel=3.*/& quiet/' "$loader_conf"
-      fi
-    fi
     
     # Set console mode to hide text after boot logo
     if ! grep -q "console-mode" "$loader_conf"; then
@@ -310,8 +416,15 @@ configure_uki_boot_logo() {
       sudo sed -i 's/^timeout.*/timeout 3/' "$loader_conf"
     else
       echo "timeout 3" | sudo tee -a "$loader_conf" >/dev/null
+      log_success "Set bootloader timeout to 3 seconds for logo display"
     fi
-    log_success "Set bootloader timeout to 3 seconds for logo display"
+    
+    # Remove any kernel parameters from loader.conf (they should be in /etc/kernel/cmdline for UKI)
+    if grep -q "^options" "$loader_conf"; then
+      log_info "Removing kernel parameters from loader.conf (should be in /etc/kernel/cmdline for UKI)"
+      sudo sed -i '/^options.*/d' "$loader_conf"
+      log_success "Removed kernel parameters from loader.conf - using /etc/kernel/cmdline instead"
+    fi
     
   else
     log_warning "systemd-boot loader.conf not found - creating basic configuration"
@@ -319,9 +432,8 @@ configure_uki_boot_logo() {
     cat << EOF | sudo tee "$loader_conf" >/dev/null
 timeout 3
 console-mode max
-options quiet loglevel=3
 EOF
-    log_success "Created systemd-boot configuration for UKI"
+    log_success "Created systemd-boot configuration for UKI (no kernel parameters in loader.conf)"
   fi
   
   # Check UKI files and ensure they have proper boot parameters

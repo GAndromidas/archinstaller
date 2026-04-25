@@ -332,10 +332,13 @@ main() {
   if is_uki_system; then
     ui_info "UKI (Unified Kernel Image) system detected"
     ui_info "Configuring UKI boot logo display for clean boot experience"
+    ui_info "Skipping Plymouth installation - UKI provides its own boot logo"
     configure_uki_boot_logo
     ui_info "UKI boot logo configuration completed"
     ui_info "System will display boot logo cleanly without text overlay"
     return 0
+  else
+    ui_info "Traditional system detected - installing Plymouth for boot splash screen"
   fi
 
   # Check if plymouth is already fully configured

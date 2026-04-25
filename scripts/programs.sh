@@ -39,17 +39,7 @@ pacman_remove() {
 }
 
 # ===== YAML Parsing Functions =====
-
-ensure_yq() {
-	if ! command -v yq &>/dev/null; then
-		ui_info "yq is required for YAML parsing. Installing..."
-		if ! pacman_install_single "yq" true; then
-			log_error "Failed to install yq. Please install it manually: sudo pacman -S yq"
-			return 1
-		fi
-	fi
-	return 0
-}
+# yq is now installed as part of BASE_HELPER_UTILS
 
 read_yaml_packages() {
 	local yaml_file="$1"
@@ -97,9 +87,7 @@ load_package_lists_from_yaml() {
 		return 1
 	fi
 
-	if ! ensure_yq; then
-		return 1
-	fi
+	# yq is now installed as part of BASE_HELPER_UTILS
 
 	read_yaml_packages "$PROGRAMS_YAML" ".pacman.packages" pacman_programs pacman_descriptions
 	read_yaml_packages "$PROGRAMS_YAML" ".essential.default" essential_programs_default essential_descriptions_default

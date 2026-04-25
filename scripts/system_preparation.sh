@@ -9,7 +9,6 @@ source "$SCRIPT_DIR/common.sh"
 detect_network_speed() {
   step "Configuring download settings"
 
-  # Always use ParallelDownloads = 10 (standard setting)
   log_info "Setting ParallelDownloads to 10 (standard setting)"
   export PACMAN_PARALLEL=10
 }
@@ -21,15 +20,7 @@ check_prerequisites() {
     return 1
   fi
   
-  # Ensure yq is available for programs.sh YAML parsing
-  if ! command -v yq >/dev/null 2>&1; then
-    ui_info "Installing yq for YAML configuration parsing..."
-    if ! pacman_install_single "yq" true; then
-      log_error "Failed to install yq. Please install it manually: sudo pacman -S yq"
-      return 1
-    fi
-    ui_success "yq installed successfully"
-  fi
+  # yq is now included in BASE_HELPER_UTILS and will be installed with helper utilities
   if ! command -v pacman >/dev/null; then
     log_error "This script is intended for Arch Linux systems with pacman."
     return 1
@@ -47,43 +38,34 @@ check_prerequisites() {
 configure_pacman() {
   step "Configuring pacman optimizations"
 
-  # Use network-speed-based parallel downloads value (default 10 if not set)
   local parallel_downloads="${PACMAN_PARALLEL:-10}"
 
-  # Handle ParallelDownloads - works whether commented or uncommented
   if grep -q "^#ParallelDownloads" /etc/pacman.conf; then
-    # Line is commented, uncomment and set value
     sudo sed -i "s/^#ParallelDownloads.*/ParallelDownloads = $parallel_downloads/" /etc/pacman.conf
     log_success "Uncommented and set ParallelDownloads = $parallel_downloads"
   elif grep -q "^ParallelDownloads" /etc/pacman.conf; then
-    # Line exists and is active, update value
     sudo sed -i "s/^ParallelDownloads.*/ParallelDownloads = $parallel_downloads/" /etc/pacman.conf
     log_success "Updated ParallelDownloads = $parallel_downloads"
   else
-    # Line doesn't exist at all, add it
     sudo sed -i "/^\[options\]/a ParallelDownloads = $parallel_downloads" /etc/pacman.conf
     log_success "Added ParallelDownloads = $parallel_downloads"
   fi
 
-  # Handle Color setting
   if grep -q "^#Color" /etc/pacman.conf; then
     sudo sed -i 's/^#Color/Color/' /etc/pacman.conf
     log_success "Uncommented Color setting"
   fi
 
-  # Handle VerbosePkgLists setting
   if grep -q "^#VerbosePkgLists" /etc/pacman.conf; then
     sudo sed -i 's/^#VerbosePkgLists/VerbosePkgLists/' /etc/pacman.conf
     log_success "Uncommented VerbosePkgLists setting"
   fi
 
-  # Add ILoveCandy if not already present
   if ! grep -q "^ILoveCandy" /etc/pacman.conf; then
     sudo sed -i '/^Color/a ILoveCandy' /etc/pacman.conf
     log_success "Added ILoveCandy setting"
   fi
 
-  # Enable multilib if not already enabled
   if ! grep -q "^\[multilib\]" /etc/pacman.conf; then
     echo -e "\n[multilib]\nInclude = /etc/pacman.d/mirrorlist" | sudo tee -a /etc/pacman.conf >/dev/null
     log_success "Enabled multilib repository"
@@ -95,10 +77,8 @@ configure_pacman() {
 }
 
 install_all_packages() {
-  # Start with the full list of helper utilities
   local packages_to_install=("${HELPER_UTILS[@]}")
 
-  # If in server mode, filter out desktop-specific helper utilities
   if [[ "${INSTALL_MODE:-}" == "server" ]]; then
     ui_info "Server mode: Filtering out desktop-specific helper utilities (bluetooth)..."
     local server_filtered_packages=()
@@ -111,18 +91,14 @@ install_all_packages() {
   fi
 
   local all_packages=(
-    # Helper utilities from the (potentially filtered) list
     "${packages_to_install[@]}"
-    # ZSH and plugins
     zsh zsh-autosuggestions zsh-syntax-highlighting
-    # Starship
     starship
   )
 
   step "Installing all packages"
   echo -e "${CYAN}Installing ${#packages_to_install[@]} helper utilities + ${#all_packages[@]} total packages via Pacman...${RESET}"
 
-  # Try batch install first for speed
   printf "${CYAN}Attempting batch installation...${RESET}\n"
   if sudo pacman -S --noconfirm --needed "${all_packages[@]}" >/dev/null 2>&1; then
     printf "${GREEN} ✓ Batch installation successful${RESET}\n"
@@ -132,7 +108,6 @@ install_all_packages() {
 
   printf "${YELLOW} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
 
-  # Validate that we have packages to install individually
   if [ ${#all_packages[@]} -eq 0 ]; then
     log_warning "No packages to install individually"
     return 0
@@ -143,14 +118,12 @@ install_all_packages() {
   local failed_packages=()
 
   for pkg in "${all_packages[@]}"; do
-    # Check if already installed
     if pacman -Q "$pkg" &>/dev/null; then
       log_to_file "$pkg already installed"
       INSTALLED_PACKAGES+=("$pkg")
       continue
     fi
 
-    # Try to install
     if sudo pacman -S --noconfirm --needed "$pkg" >/dev/null 2>&1; then
       log_success "$pkg installed successfully"
       INSTALLED_PACKAGES+=("$pkg")
@@ -173,7 +146,6 @@ install_all_packages() {
 }
 
 update_system() {
-  # Update system
   run_step "System update" sudo pacman -Syyu --noconfirm
 }
 
@@ -273,20 +245,16 @@ install_kernel_headers_for_all() {
 generate_locales() {
   step "Configuring system locales"
 
-  # Always enable en_US.UTF-8 as fallback/default
   if grep -q "^#en_US.UTF-8" /etc/locale.gen; then
     sudo sed -i 's/^#en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
     log_info "Uncommented en_US.UTF-8 locale (default)"
   fi
 
-  # Smart detection based on location
   log_info "Detecting location for local language support..."
   local country_code=""
 
-  # Try to get country code (ISO 3166-1 alpha-2)
   if command -v curl >/dev/null; then
     country_code=$(curl -s --connect-timeout 5 https://ifconfig.co/country-iso 2>/dev/null)
-    # Fallback if first service fails
     if [[ -z "$country_code" || ${#country_code} -ne 2 ]]; then
       country_code=$(curl -s --connect-timeout 5 http://ip-api.com/line/?fields=countryCode 2>/dev/null)
     fi
@@ -296,16 +264,12 @@ generate_locales() {
     log_success "Detected location: $country_code"
 
     # Find matching UTF-8 locale in /etc/locale.gen
-    # Look for lines like "#el_GR.UTF-8" or "#de_DE.UTF-8"
-    # We grep for "_<COUNTRY_CODE>.UTF-8"
     local locale_entry=$(grep "^#.*_${country_code}\.UTF-8" /etc/locale.gen | head -n 1)
 
     if [[ -n "$locale_entry" ]]; then
-      # Extract the locale name (remove # and trailing stuff)
       local locale_name=$(echo "$locale_entry" | awk '{print $1}' | sed 's/^#//')
 
       if [[ -n "$locale_name" ]]; then
-        # Uncomment the specific locale
         sudo sed -i "s/^#${locale_name}/${locale_name}/" /etc/locale.gen
         log_success "Enabled detected locale: $locale_name"
       else
@@ -321,7 +285,7 @@ generate_locales() {
   run_step "Regenerating locales" sudo locale-gen
 }
 
-# Execute ultra-fast preparation
+# Execute system preparation
 check_prerequisites
 detect_network_speed  # This now installs speedtest-cli silently before testing
 configure_pacman

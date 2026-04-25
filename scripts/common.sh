@@ -59,7 +59,7 @@ elif [[ -f /etc/arch-release ]]; then
 fi
 
 # Dynamic helper utilities based on distribution
-BASE_HELPER_UTILS=(base-devel bc bluez-utils cronie curl eza fastfetch flatpak fzf git openssh pacman-contrib rate-mirrors rsync usbutils zoxide)
+BASE_HELPER_UTILS=(base-devel bc bluez-utils cronie curl eza fastfetch flatpak fzf git openssh pacman-contrib rate-mirrors rsync usbutils yq zoxide)
 FIREWALL_UTILS=(ufw)  # For Arch Linux
 
 # Build final HELPER_UTILS array
@@ -442,22 +442,52 @@ is_laptop() {
 
 # Check if system uses UKI (Unified Kernel Image)
 is_uki_system() {
-  # Check for UKI files in /boot/efi/EFI/Linux/
+  # Method 1: Check for UKI files in /boot/efi/EFI/Linux/
   if [[ -d /boot/efi/EFI/Linux/ ]] && ls /boot/efi/EFI/Linux/*.efi >/dev/null 2>&1; then
     return 0
   fi
   
-  # Check for UKI entries in systemd-boot configuration
+  # Method 2: Check for UKI files in /boot/EFI/Linux/ (alternative path)
+  if [[ -d /boot/EFI/Linux/ ]] && ls /boot/EFI/Linux/*.efi >/dev/null 2>&1; then
+    return 0
+  fi
+  
+  # Method 3: Check for any .efi files in /boot that might be UKI
+  if find /boot -name "*.efi" -path "*linux*" 2>/dev/null | grep -q .; then
+    return 0
+  fi
+  
+  # Method 4: Check for UKI entries in systemd-boot configuration
   if [[ -d /boot/loader/entries ]]; then
-    local uki_entries=$(find /boot/loader/entries -name "*.conf" -exec grep -l "linux.*\.efi" {} \; 2>/dev/null)
+    local uki_entries=$(find /boot/loader/entries -name "*.conf" -exec grep -l "linux.*\.efi\|efi\|uki" {} \; 2>/dev/null)
     if [[ -n "$uki_entries" ]]; then
       return 0
     fi
   fi
   
-  # Check if systemd-boot is configured for UKI
-  if [[ -f /boot/loader/loader.conf ]] && grep -q "default.*\.efi" /boot/loader/loader.conf 2>/dev/null; then
+  # Method 5: Check if systemd-boot is configured for UKI
+  if [[ -f /boot/loader/loader.conf ]]; then
+    if grep -q "default.*\.efi\|efi\|uki" /boot/loader/loader.conf 2>/dev/null; then
+      return 0
+    fi
+  fi
+  
+  # Method 6: Check for UKI-related packages installed
+  if pacman -Q systemd-ukify >/dev/null 2>&1 || pacman -Q ukify >/dev/null 2>&1; then
     return 0
+  fi
+  
+  # Method 7: Check for UKI in kernel command line (running system)
+  if grep -q "uki\|efi\|unified" /proc/cmdline 2>/dev/null; then
+    return 0
+  fi
+  
+  # Method 8: Check for UKI in EFI variables
+  if command -v efibootmgr >/dev/null 2>&1; then
+    local efi_entries=$(efibootmgr 2>/dev/null | grep -i "linux\|arch\|uki")
+    if [[ -n "$efi_entries" ]]; then
+      return 0
+    fi
   fi
   
   return 1
@@ -488,7 +518,6 @@ update_system_mirrors() {
   # Return immediately without blocking
   return 0
 }
-
 
 # Function to check if system is headless (no display manager or X server)
 is_headless_system() {

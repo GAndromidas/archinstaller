@@ -39,17 +39,7 @@ check_and_enable_multilib() {
 }
 
 # ===== YAML Parsing Functions =====
-
-ensure_yq() {
-	if ! command -v yq &>/dev/null; then
-		ui_info "yq is required for YAML parsing. Installing..."
-		if ! pacman_install_single "yq" true; then
-			log_error "Failed to install yq. Please install it manually: sudo pacman -S yq"
-			return 1
-		fi
-	fi
-	return 0
-}
+# yq is now installed as part of BASE_HELPER_UTILS
 
 read_yaml_packages() {
 	local yaml_file="$1"
@@ -79,9 +69,7 @@ load_package_lists() {
 		return 1
 	fi
 
-	if ! ensure_yq; then
-		return 1
-	fi
+	# yq is now installed as part of BASE_HELPER_UTILS
 
 	read_yaml_packages "$GAMING_YAML" ".pacman.packages" pacman_gaming_programs
 	read_yaml_packages "$GAMING_YAML" ".flatpak.apps" flatpak_gaming_programs

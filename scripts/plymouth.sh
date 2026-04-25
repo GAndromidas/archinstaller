@@ -308,18 +308,29 @@ EOF
   fi
   
   # Check UKI files and ensure they have proper boot parameters
-  local uki_dir="/boot/efi/EFI/Linux"
-  if [[ -d "$uki_dir" ]]; then
-    local uki_files=("$uki_dir"/*.efi)
-    if [[ ${#uki_files[@]} -gt 0 ]]; then
-      log_info "Found UKI files: $(basename "${uki_files[0]}")"
-      log_success "UKI boot logo configuration completed"
-      log_info "The UKI embedded boot logo will display cleanly without text overlay"
+  local uki_dirs=("/boot/efi/EFI/Linux" "/boot/EFI/Linux")
+  local uki_found=false
+  
+  for uki_dir in "${uki_dirs[@]}"; do
+    if [[ -d "$uki_dir" ]]; then
+      local uki_files=("$uki_dir"/*.efi)
+      if [[ ${#uki_files[@]} -gt 0 ]]; then
+        log_info "Found UKI files in $(basename "$(dirname "$uki_dir")"): $(basename "${uki_files[0]}")"
+        log_success "UKI boot logo configuration completed"
+        log_info "The UKI embedded boot logo will display cleanly without text overlay"
+        uki_found=true
+        break
+      else
+        log_info "No UKI files found in $uki_dir"
+      fi
     else
-      log_warning "No UKI files found in $uki_dir"
+      log_info "UKI directory $uki_dir not found"
     fi
-  else
-    log_warning "UKI directory $uki_dir not found"
+  done
+  
+  if [[ "$uki_found" = false ]]; then
+    log_warning "No UKI files found in any standard location"
+    log_info "Checked: /boot/efi/EFI/Linux and /boot/EFI/Linux"
   fi
 }
 

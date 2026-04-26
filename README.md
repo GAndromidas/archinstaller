@@ -160,6 +160,18 @@ Automatically detects connected peripherals and installs appropriate management 
 | **Razer Devices** | Vendor ID | OpenRazer + Polychromatic |
 | **Generic HID** | USB/HID tree | hidapi + udev rules |
 
+### Wake-on-LAN Configuration
+
+Intelligent Wake-on-LAN setup for desktop systems with multi-adapter support:
+
+| Feature | Detection | Configuration |
+|---------|------------|-------------|
+| **Laptop Detection** | Battery + DMI chassis | Auto-skip WoL on laptops |
+| **Multi-Adapter Support** | All ethernet interfaces | Smart selection menu |
+| **Internet Testing** | Ping + route checking | Prioritizes active connection |
+| **Persistent Services** | systemd integration | Survives reboots automatically |
+| **MAC Display** | Interface enumeration | Easy remote wake-up setup |
+
 ---
 
 ## Installation Modes
@@ -256,7 +268,6 @@ custom:          # Optional additions
 - System monitoring tools
 
 ### Mode-Specific Packages
-
 | Mode | Desktop | Applications | Tools |
 |------|-------------|-------------|------|
 | **Standard** | Full DE (KDE/GNOME/Cosmic) | Multimedia, Office, IDEs | Performance monitoring |
@@ -264,16 +275,37 @@ custom:          # Optional additions
 | **Server** | No DE | Docker, Portainer | Server utilities |
 | **Gaming** | Gaming-optimized DE | Steam, Heroic Games Launcher, Faugus Launcher, Wine | Performance tools |
 
+### Installation Steps (Updated)
+
+The installer now includes 12 comprehensive steps for complete system setup:
+
+| Step | Description | Mode Coverage |
+|------|-------------|---------------|
+| **1. System Preparation** | Hardware detection, system validation | All modes |
+| **2. Shell Setup** | Zsh + Oh-My-Zsh + Starship | All modes |
+| **3. Plymouth Setup** | Boot screen configuration | Standard/Minimal/Gaming |
+| **4. Yay Installation** | AUR helper setup | All modes |
+| **5. Programs Installation** | Mode-specific applications | All modes |
+| **6. Smart Peripheral Detection** | Auto-configure peripherals | All modes |
+| **7. Gaming Mode** | Gaming optimizations | Gaming mode only |
+| **8. Bootloader Configuration** | GRUB/systemd-boot/Limine setup | All modes |
+| **9. Fail2ban Setup** | SSH security hardening | All modes |
+| **10. System Services** | Service optimization | All modes |
+| **11. Wake-on-LAN Configuration** | Multi-adapter WoL setup | Desktop systems |
+| **12. Maintenance** | Final cleanup and optimization | All modes |
+
 ---
 
 ## Security Features
 
 ### Enabled by Default
+```bash
 
 | Feature | Status | Configuration |
 |---------|--------|---------------|
 | **Firewall** | Active | UFW/Firewalld with secure policies |
 | **SSH Protection** | Active | Fail2ban with strict policies |
+| **Wake-on-LAN** | Desktop Only | Multi-adapter with smart selection |
 | **User Groups** | Active | Proper permissions configured |
 | **Bootloader** | Active | Security-hardened configuration |
 

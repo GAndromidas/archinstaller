@@ -42,6 +42,7 @@ FEATURES:
     - Advanced performance tuning (CachyOS-inspired optimizations)
     - Smart AMD P-State system with gaming mode detection
         - Smart peripheral detection (Logitech, Keychron, Razer, gaming devices)
+    - Wake-on-LAN configuration for ethernet devices (desktops only)
     - Plymouth boot screen configuration
     - Zsh shell with Oh-My-Zsh and Starship prompt
     - Resume functionality for interrupted installations
@@ -770,10 +771,27 @@ else
   fi
 fi
 
-# Step 11: Maintenance
+# Step 11: Wake-on-LAN Configuration
+# Check if step was previously completed successfully
+if is_step_complete "wakeonlan_config"; then
+  ui_info "Step 11 (Wake-on-LAN Configuration) already completed - skipping"
+else
+  step "Wake-on-LAN Configuration"
+  ui_info "Configuring Wake-on-LAN for ethernet devices..."
+  if step "Wake-on-LAN Configuration" && source "$SCRIPTS_DIR/wakeonlan_config.sh" && configure_wakeonlan; then
+    mark_step_complete_with_progress "wakeonlan_config" "completed"
+  else
+    mark_step_complete_with_progress "wakeonlan_config" "failed"
+    log_error "Wake-on-LAN configuration failed"
+    # Wake-on-LAN is optional for system functionality
+    ui_warn "Wake-on-LAN configuration failed but continuing installation"
+  fi
+fi
+
+# Step 12: Maintenance
 # Check if step was previously completed successfully
 if is_step_complete "maintenance"; then
-  ui_info "Step 11 (Maintenance) already completed - skipping"
+  ui_info "Step 12 (Maintenance) already completed - skipping"
 else
   step "Maintenance"
   ui_info "System optimization..."

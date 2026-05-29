@@ -39,7 +39,7 @@ STEP_START_TIME=0           # Start time of current step
 INSTALLATION_START_TIME=0   # Overall installation start time
 
 # UI/Flow configuration
-TOTAL_STEPS=12
+TOTAL_STEPS=11
 : "${VERBOSE:=false}"   # Can be overridden/exported by caller
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"  # Script directory
@@ -426,19 +426,6 @@ EOF
 # SECTION 7: MENU & INSTALLATION MODE SELECTION
 # ============================================================================
 
-# Check if system is a laptop (for skipping peripheral detection)
-is_laptop() {
-  # Check for common laptop indicators
-  if [[ -d /sys/class/dmi/id ]] && grep -q -i "laptop\|notebook\|portable\|mobile" /sys/class/dmi/id/chassis_type 2>/dev/null; then
-    return 0
-  elif [[ -d /sys/class/dmi/id ]] && grep -q -i "laptop\|notebook\|portable" /sys/class/dmi/id/product_name 2>/dev/null; then
-    return 0
-  elif command -v laptop-detect >/dev/null 2>&1 && laptop-detect >/dev/null 2>&1; then
-    return 0
-  else
-    return 1
-  fi
-}
 
 # Check if system uses UKI (Unified Kernel Image)
 is_uki_system() {

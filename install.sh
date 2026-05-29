@@ -41,7 +41,6 @@ FEATURES:
     - Security hardening (UFW/Firewalld + Fail2ban with SSH protection)
     - Advanced performance tuning (CachyOS-inspired optimizations)
     - Smart AMD P-State system with gaming mode detection
-        - Smart peripheral detection (Logitech, Keychron, Razer, gaming devices)
     - Wake-on-LAN configuration for ethernet devices (desktops only)
     - Plymouth boot screen configuration
     - Zsh shell with Oh-My-Zsh and Starship prompt
@@ -678,30 +677,14 @@ else
   fi
 fi
 
-# Step 6: Smart Peripheral Detection
-# Check if step was previously completed successfully
-if is_step_complete "peripheral_detection"; then
-  ui_info "Step 6 (Smart Peripheral Detection) already completed - skipping"
-else
-  step "Smart Peripheral Detection"
-  ui_info "Detecting peripherals..."
-  if step "Smart Peripheral Detection" && source "$SCRIPTS_DIR/peripheral_detection.sh" && smart_peripheral_detection; then
-    mark_step_complete_with_progress "peripheral_detection" "completed"
-  else
-    mark_step_complete_with_progress "peripheral_detection" "failed"
-    log_error "Smart peripheral detection failed"
-    # Peripheral detection is optional for system functionality
-    ui_warn "Smart peripheral detection failed but continuing installation"
-  fi
-fi
 
-# Step 7: Gaming Mode
+# Step 6: Gaming Mode
 if [[ "$INSTALL_MODE" == "server" ]]; then
   ui_info "Server mode selected, skipping Gaming Mode setup."
 else
   # Check if step was previously completed successfully
   if is_step_complete "gaming_mode"; then
-    ui_info "Step 7 (Gaming Mode) already completed - skipping"
+    ui_info "Step 6 (Gaming Mode) already completed - skipping"
   else
     step "Gaming Mode"
     ui_info "Setting up gaming tools (optional)..."
@@ -716,10 +699,10 @@ else
   fi
 fi
 
-# Step 8: Bootloader and Kernel Configuration
+# Step 7: Bootloader and Kernel Configuration
 # Check if step was previously completed successfully
 if is_step_complete "bootloader_config"; then
-  ui_info "Step 8 (Bootloader Configuration) already completed - skipping"
+  ui_info "Step 7 (Bootloader Configuration) already completed - skipping"
 else
   step "Bootloader and Kernel Configuration"
   ui_info "Configuring bootloader..."
@@ -738,10 +721,10 @@ else
   fi
 fi
 
-# Step 9: Fail2ban Setup
+# Step 8: Fail2ban Setup
 # Check if step was previously completed successfully
 if is_step_complete "fail2ban_setup"; then
-  ui_info "Step 9 (Fail2ban Setup) already completed - skipping"
+  ui_info "Step 8 (Fail2ban Setup) already completed - skipping"
 else
   step "Fail2ban Setup"
   ui_info "Setting up security protection for SSH..."
@@ -754,10 +737,10 @@ else
   fi
 fi
 
-# Step 10: System Services
+# Step 9: System Services
 # Check if step was previously completed successfully
 if is_step_complete "system_services"; then
-  ui_info "Step 10 (System Services) already completed - skipping"
+  ui_info "Step 9 (System Services) already completed - skipping"
 else
   step "System Services"
   ui_info "Configuring services..."
@@ -771,10 +754,10 @@ else
   fi
 fi
 
-# Step 11: Wake-on-LAN Configuration
+# Step 10: Wake-on-LAN Configuration
 # Check if step was previously completed successfully
 if is_step_complete "wakeonlan_config"; then
-  ui_info "Step 11 (Wake-on-LAN Configuration) already completed - skipping"
+  ui_info "Step 10 (Wake-on-LAN Configuration) already completed - skipping"
 else
   step "Wake-on-LAN Configuration"
   ui_info "Configuring Wake-on-LAN for ethernet devices..."
@@ -788,10 +771,10 @@ else
   fi
 fi
 
-# Step 12: Maintenance
+# Step 11: Maintenance
 # Check if step was previously completed successfully
 if is_step_complete "maintenance"; then
-  ui_info "Step 12 (Maintenance) already completed - skipping"
+  ui_info "Step 11 (Maintenance) already completed - skipping"
 else
   step "Maintenance"
   ui_info "System optimization..."

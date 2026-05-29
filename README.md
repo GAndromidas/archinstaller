@@ -70,25 +70,26 @@ Laptop Features:
 
 #### Advanced Performance Optimization (CachyOS-Inspired)
 
-- **Smart Memory Management**: Dynamic swappiness based on system RAM (1-3GB: 10, 4-7GB: 10, 8-15GB: 5, 16GB+: 1)
+- **Smart Memory Management**: Dynamic swappiness based on system RAM (2GB: 10, 4GB: 10, 8GB: 5, 16GB+: 1)
 - **Intelligent Storage Optimization**: Automatic I/O scheduler detection (NVMe: none, SSD: deadline, HDD: mq-deadline)
 - **Advanced Kernel Tuning**: Process scheduling, network stack optimization, filesystem-specific tuning
 - **Hardware-Aware Configuration**: NVMe detection, zRAM monitoring, virtualization awareness
 - **Transparent Hugepages**: Disabled for desktop systems to improve performance
 - **Persistent Settings**: All optimizations survive reboots via udev rules and systemd services
+- **GPU Driver Detection**: Automatic installation of AMD/Intel/NVIDIA drivers with Vulkan support
 
 #### Performance Optimization
 - **I/O Scheduling**: Automatic selection based on storage type
 - **Kernel Tuning**: `vm.swappiness=10`, `fs.inotify.max_user_watches=524288`
-- **Parallel Downloads**: Pacman parallel package fetching
+- **Parallel Downloads**: Pacman parallel package fetching (10 concurrent)
 - **Memory Management**: ZRAM compression + swap optimization
 
-#### Desktop Environment Integration
+### Desktop Environment Integration
 | Environment | Optimizations | Features |
 |-------------|---------------|----------|
-| **KDE Plasma 6+** | Qt6-based shortcuts, fullscreen automation | kglobalshortcutsrc + Konsole fullscreen |
-| **GNOME 46+** | Latest dark theme, modern tweaks | dconf settings + current extensions |
-| **Cosmic** | Latest alpha builds support | Experimental DE integration |
+| **KDE Plasma 6+** | DE-specific packages (bluedevil, dolphin, kate, okular, etc.) | KDE Connect integration, plasma-firewall, system monitor |
+| **GNOME 46+** | DE-specific packages (adw-gtk-theme, gnome-tweaks, seahorse, etc.) | Extension manager, dark theme, modern tweaks |
+| **Cosmic** | DE-specific packages (transmission-gtk) | Cosmic Tweaks via Flatpak |
 
 ### Security & Stability
 
@@ -96,41 +97,37 @@ Laptop Features:
 ```bash
 # Firewall Configuration
 UFW/Firewalld:
-  - Secure-by-default policies
-  - Deny incoming, allow outgoing
+  - Secure-by-default policies (deny incoming, allow outgoing)
   - SSH automatically allowed
-  - Service-aware port management
+  - KDE Connect ports opened when detected (1714-1764/tcp/udp)
+  - EndeavourOS uses firewalld by default, Arch uses UFW
 
 # SSH Protection
 Fail2ban:
-  - Strict SSH policies
-  - 15-minute ban on suspicious activity
+  - 1-hour ban duration (increased from default 10min)
+  - 3 retry limit (decreased from default 5)
+  - systemd backend for better integration
   - Automatic brute-force detection
-  - Customizable ban thresholds
 
 # User Security
 Sudo:
   - Password feedback enabled
-  - Proper user group membership
-  - Hardware access permissions
+  - User added to groups: wheel, video, storage, optical, scanner, lp, rfkill
+  - Hardware access permissions configured
 ```
 
-### Smart AMD P-State System (NEW)
+### System Services Configuration
 
-Intelligent CPU power management that automatically detects your system configuration:
+The system services step includes comprehensive service management:
 
-#### Detection Methods
-- **CPU Vendor Detection**: Intel vs AMD identification
-- **P-State Support Validation**: 3-method validation (sysfs, CPU capabilities, kernel version)
-- **Gaming Mode Detection**: 5-indicator system with 50% threshold
-- **Automatic Fallback**: Graceful degradation if configuration fails
-
-#### Configuration Logic
-| System Type | Detection | P-State Configuration | Performance Profile |
-|-------------|------------|---------------------|-------------------|
-| **Gaming Mode** | Zen kernel + gaming tools + services | Maximum performance (performance governor) |
-| **Standard System** | Regular desktop configuration | Balanced performance (power management) |
-| **Unsupported** | Zen 1 CPUs or older systems | ACPI CPUfreq fallback |
+| Service Type | Services Enabled | Notes |
+|--------------|------------------|-------|
+| **Essential** | cronie, sshd, fstrim.timer, paccache.timer | All modes |
+| **Desktop** | bluetooth.service | Standard/Minimal/Gaming (not Server) |
+| **Optional** | rustdesk.service, timeshift-autosnap.timer | If installed |
+| **Firewall** | UFW or Firewalld | UFW for Arch, Firewalld for EndeavourOS |
+| **Power Management** | power-profiles-daemon or tuned-ppd | Automatic power mode switching |
+| **GPU Drivers** | AMD/Intel/NVIDIA with Vulkan | Auto-detected and installed |
 
 ### Gaming Mode (Optional)
 
@@ -138,27 +135,17 @@ Transform your system into a gaming powerhouse with one click:
 
 | Component | Description |
 |-----------|-------------|
-| **Steam** | Native gaming platform with Proton |
-| **Heroic Games Launcher** | Epic Games + GOG support |
-| **Faugus Launcher** | Game management and launcher |
-| **MangoHud** | Performance overlay and monitoring |
+| **Steam** | Native gaming platform with Proton support |
+| **Heroic Games Launcher** | Epic Games + GOG support (Flatpak) |
+| **Faugus Launcher** | Game management and launcher (Flatpak) |
+| **ProtonPlus** | Proton-GE installer (Flatpak) |
+| **Discord** | Voice and text chat for gamers |
+| **MangoHud** | Vulkan/OpenGL overlay for monitoring FPS and performance |
 | **Goverlay** | MangoHud configuration GUI |
-| **GameMode** | Automatic performance tuning |
+| **GameMode** | Automatic performance tuning daemon |
 | **Wine** | Windows compatibility layer |
-| **Zen Kernel** | Optimized for gaming performance |
-| **Note**: AMD P-State handled automatically by system_services.sh |
-
-### Smart Peripheral Detection
-
-Automatically detects connected peripherals and installs appropriate management software:
-
-| Peripheral | Detection | Software |
-|------------|------------|----------|
-| **Logitech Devices** | USB vendor ID | Solaar (Unifying Receiver) |
-| **Keychron Keyboards** | Device name | VIA-bin (keyboard configuration) |
-| **Gaming Mice** | HID detection | libratbag + Piper |
-| **Razer Devices** | Vendor ID | OpenRazer + Polychromatic |
-| **Generic HID** | USB/HID tree | hidapi + udev rules |
+| **lib32 packages** | 32-bit libraries for gaming (gamemode, mangohud) |
+| **Multilib** | Automatically enabled for 32-bit gaming support | |
 
 ### Wake-on-LAN Configuration
 
@@ -249,11 +236,12 @@ custom:          # Optional additions
 
 | File | Purpose |
 |------|---------|
-| `.zshrc` | Zsh shell configuration |
-| `starship.toml` | Starship prompt theme |
-| `kglobalshortcutsrc` | KDE keyboard shortcuts |
-| `config.jsonc` | Fastfetch system info |
-| `gaming_mode.yaml` | Gaming package definitions |
+| `.zshrc` | Zsh shell configuration with Oh-My-Zsh |
+| `starship.toml` | Starship prompt theme configuration |
+| `config.jsonc` | Fastfetch system info configuration |
+| `gaming_mode.yaml` | Gaming package definitions (Steam, Wine, GameMode, etc.) |
+| `programs.yaml` | Package lists for all modes and desktop environments |
+| `MangoHud.conf` | MangoHud gaming overlay configuration |
 
 ---
 
@@ -261,38 +249,40 @@ custom:          # Optional additions
 
 ### Common Across All Modes
 
-- System utilities and tools
-- Development essentials
-- Zsh shell with Oh-My-Zsh
-- Starship terminal prompt
-- System monitoring tools
+- System utilities (android-tools, bat, btop, chromium, cmatrix, cpupower, dosfstools, duf, firefox, fwupd, gnome-disk-utility, hwinfo, inxi, ncdu, net-tools, nmap, noto-fonts-extra, samba, sl, speedtest-cli, sshfs, ttf-hack-nerd, ttf-liberation, unrar, wakeonlan, xdg-desktop-portal-gtk)
+- Development essentials (base-devel, git, curl)
+- Zsh shell with Oh-My-Zsh, Starship prompt, Fastfetch
+- System monitoring tools (btop, inxi, hwinfo)
+- Pacman optimization (ParallelDownloads, Color, VerbosePkgLists, ILoveCandy, multilib)
+- CPU microcode (intel-ucode or amd-ucode)
+- Kernel headers for all installed kernels
+- Locale generation (en_US.UTF-8 + auto-detected country locale)
 
 ### Mode-Specific Packages
 | Mode | Desktop | Applications | Tools |
 |------|-------------|-------------|------|
-| **Standard** | Full DE (KDE/GNOME/Cosmic) | Multimedia, Office, IDEs | Performance monitoring |
-| **Minimal** | Lightweight DE | Essential apps only | Basic utilities |
-| **Server** | No DE | Docker, Portainer | Server utilities |
-| **Gaming** | Gaming-optimized DE | Steam, Heroic Games Launcher, Faugus Launcher, Wine | Performance tools |
+| **Standard** | Full DE (KDE/GNOME/Cosmic) | Filezilla, Kdenlive, LibreOffice, Dropbox, RustDesk, Ventoy | Performance monitoring |
+| **Minimal** | Lightweight DE | MPV, RustDesk | Basic utilities |
+| **Server** | No DE | Docker, Docker Compose, Nano | Server utilities (btop, inxi, nmap, samba) |
+| **Gaming** | Gaming-optimized DE | Steam, Heroic Games Launcher, Faugus Launcher, Wine, Discord | GameMode, MangoHud, Goverlay |
 
-### Installation Steps (Updated)
+### Installation Steps
 
-The installer now includes 12 comprehensive steps for complete system setup:
+The installer includes 11 comprehensive steps for complete system setup:
 
 | Step | Description | Mode Coverage |
 |------|-------------|---------------|
-| **1. System Preparation** | Hardware detection, system validation | All modes |
-| **2. Shell Setup** | Zsh + Oh-My-Zsh + Starship | All modes |
-| **3. Plymouth Setup** | Boot screen configuration | Standard/Minimal/Gaming |
+| **1. System Preparation** | Pacman configuration, helper utilities, system update, CPU microcode, kernel headers, locales | All modes |
+| **2. Shell Setup** | Zsh + Oh-My-Zsh + Starship + Fastfetch | All modes |
+| **3. Plymouth Setup** | Boot screen configuration (bgrt/spinner themes) | Standard/Minimal/Gaming |
 | **4. Yay Installation** | AUR helper setup | All modes |
-| **5. Programs Installation** | Mode-specific applications | All modes |
-| **6. Smart Peripheral Detection** | Auto-configure peripherals | All modes |
-| **7. Gaming Mode** | Gaming optimizations | Gaming mode only |
-| **8. Bootloader Configuration** | GRUB/systemd-boot/Limine setup | All modes |
-| **9. Fail2ban Setup** | SSH security hardening | All modes |
-| **10. System Services** | Service optimization | All modes |
-| **11. Wake-on-LAN Configuration** | Multi-adapter WoL setup | Desktop systems |
-| **12. Maintenance** | Final cleanup and optimization | All modes |
+| **5. Programs Installation** | Mode-specific applications from YAML configs | All modes |
+| **6. Gaming Mode** | Steam, Wine, GameMode, MangoHud, Discord, gaming launchers | Gaming mode only |
+| **7. Bootloader Configuration** | GRUB/systemd-boot/Limine with kernel optimization | All modes |
+| **8. Fail2ban Setup** | SSH security hardening (1hr ban, 3 retries) | All modes |
+| **9. System Services** | Firewall (UFW/Firewalld), user groups, GPU drivers, power management | All modes |
+| **10. Wake-on-LAN Configuration** | Multi-adapter WoL setup with laptop detection | Desktop systems |
+| **11. Maintenance** | Cache cleanup, orphan removal, SSD optimization | All modes |
 
 ---
 
@@ -303,11 +293,12 @@ The installer now includes 12 comprehensive steps for complete system setup:
 
 | Feature | Status | Configuration |
 |---------|--------|---------------|
-| **Firewall** | Active | UFW/Firewalld with secure policies |
-| **SSH Protection** | Active | Fail2ban with strict policies |
-| **Wake-on-LAN** | Desktop Only | Multi-adapter with smart selection |
-| **User Groups** | Active | Proper permissions configured |
-| **Bootloader** | Active | Security-hardened configuration |
+| **Firewall** | Active | UFW (Arch) or Firewalld (EndeavourOS) with secure policies |
+| **SSH Protection** | Active | Fail2ban with 1hr ban, 3 retries, systemd backend |
+| **Wake-on-LAN** | Desktop Only | Multi-adapter with smart selection, laptop detection |
+| **User Groups** | Active | wheel, video, storage, optical, scanner, lp, rfkill |
+| **Bootloader** | Active | GRUB/systemd-boot/Limine with kernel optimization |
+| **Sudo** | Active | Password feedback enabled |
 
 ---
 
@@ -337,91 +328,27 @@ The installer now includes 12 comprehensive steps for complete system setup:
 
 ---
 
-## Laptop Optimizations
+### Laptop Optimizations
 
-### Intelligent Laptop Detection & Optimization
+The installer includes automatic laptop detection and optimizations:
 
-Archinstaller provides **manufacturer-specific optimizations** for 15+ laptop brands with automatic detection and tailored configuration.
+#### Detection Methods
+- Battery presence check (/sys/class/power_supply/BAT*)
+- DMI chassis type detection (laptop, notebook, portable, etc.)
+- Product name analysis for common laptop indicators
 
-#### Supported Manufacturers
+#### Optimizations Applied
+- Power profile management (power-profiles-daemon or tuned-ppd)
+- Battery vs AC power optimization
+- CPU frequency scaling
+- Thermal management
+- Suspend/resume functionality
 
-| Brand | Gaming Detection | Special Features |
-|-------|------------------|-----------------|
-| **Lenovo** | Legion, ThinkPad Gaming | thinkpad_acpi, lenovo-legion-tool, thinkfan |
-| **HP** | Omen, Pavilion Gaming | hp-wmi, omen-monitors, elitebook support |
-| **Dell** | Alienware, XPS Gaming | dell-wmi, dell-xps-firmware, alienware tools |
-| **Acer** | Predator, Nitro Gaming | acer-wmi, acer-nitro-optimizer, swift support |
-| **ASUS** | ROG, TUF Gaming | asus-wmi, asusctl, supergfxctl, zenbook support |
-| **MSI** | GE, GT, GL Gaming | msi-wmi, msi-ec, msi-per-keyboard, creator support |
-| **Razer** | Blade Gaming | razer-specific optimizations |
-| **LG** | Gram Ultra-light | lg-specific power management |
-| **Samsung** | Galaxy Book | samsung-specific optimizations |
-| **Huawei** | MateBook | huawei-specific features |
-| **Xiaomi** | Mi/RedmiBook | xiaomi-specific optimizations |
-| **Framework** | Modular Laptops | framework-specific features |
-| **System76** | Linux-native | system76 firmware support |
-| **Microsoft** | Surface | surface pen/touch support |
-
-#### Automatic Features
-
-**Gaming Laptop Detection:**
-- Automatic identification of gaming variants
-- Gaming-specific thermal management
-- Performance profile optimization
-- RGB lighting support (where applicable)
-
-**Power Management:**
-- Intel: thermald + Intel P-State driver
-- AMD: AMD P-State configuration
-- Universal: power-profiles-daemon or tuned-ppd
-
-**Function Keys & Hotkeys:**
+#### Supported Features
 - Manufacturer-specific WMI module loading
+- Function key and hotkey support
 - Brightness, volume, WiFi toggle support
-- Special function key mapping
-
-#### Usage
-
-**Interactive Mode:**
-```bash
-./install.sh
-# Script will detect your laptop and show available optimizations
-```
-
-**Automatic Mode:**
-```bash
-export AUTO_LAPTOP_OPTS=true
-./install.sh
-# Automatically applies all detected optimizations
-```
-
-**Check Detection:**
-```bash
-# Test laptop detection before running
-bash -c 'source scripts/system_services.sh && detect_laptop_manufacturer && get_laptop_model'
-```
-
-#### What Gets Optimized
-
-1. **Power Profile Management**
-   - power-profiles-daemon (preferred) or tuned-ppd
-   - Automatic power mode switching
-   - Battery vs AC power optimization
-
-2. **CPU-Specific Optimizations**
-   - Intel: thermald for thermal management
-   - AMD: P-State driver configuration
-   - CPU frequency scaling
-
-3. **Manufacturer-Specific Tools**
-   - Brand-specific function key support
-   - Gaming laptop optimizations (when detected)
-   - ACPI event handling
-
-4. **System Integration**
-   - ACPI daemon for hardware events
-   - Battery monitoring and management
-   - Suspend/resume functionality
+- ACPI event handling
 
 ---
 
@@ -478,12 +405,14 @@ bash -c 'source scripts/system_services.sh && detect_laptop_manufacturer && get_
 
 ### Recent Major Improvements
 
-#### Advanced Performance & Smart CPU Management
-- **🚀 CachyOS-Inspired Optimizations**: Advanced memory management, intelligent storage optimization, hardware-aware configuration
-- **🧠 Smart AMD P-State System**: Automatic gaming vs system detection with 3-method validation and fallback mechanisms
-- **📊 Dynamic Resource Management**: RAM-based swappiness, storage-type I/O scheduling, filesystem-specific tuning
-- **🛡️ Robust Error Handling**: Automatic fallbacks and graceful degradation for unsupported systems
-- **⚡ Persistent Configuration**: All optimizations survive reboots via udev rules and systemd services
+#### Comprehensive System Configuration
+- **🚀 Complete Package Management**: YAML-based configuration for all modes and desktop environments
+- **🎮 Gaming Mode**: Steam, Wine, GameMode, MangoHud, Discord with Flatpak integration
+- **🛡️ Enhanced Security**: Fail2ban with 1hr ban, 3 retries, systemd backend
+- **� Service Management**: Automatic firewall (UFW/Firewalld), user groups, GPU drivers
+- **� Laptop Detection**: Automatic laptop detection with power management optimizations
+- **🌐 Wake-on-LAN**: Multi-adapter support with smart selection and laptop detection
+- **🎨 Desktop Integration**: DE-specific packages for KDE Plasma 6+, GNOME 46+, Cosmic
 
 ---
 

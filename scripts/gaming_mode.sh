@@ -10,6 +10,7 @@ CONFIGS_DIR="$ARCHINSTALLER_ROOT/configs"
 GAMING_YAML="$CONFIGS_DIR/gaming_mode.yaml"
 
 source "$SCRIPT_DIR/common.sh"
+source "$SCRIPT_DIR/lib/config.sh"
 
 # ===== Globals =====
 GAMING_ERRORS=()
@@ -39,28 +40,7 @@ check_and_enable_multilib() {
 }
 
 # ===== YAML Parsing Functions =====
-# yq is now installed as part of BASE_HELPER_UTILS
-
-read_yaml_packages() {
-	local yaml_file="$1"
-	local yaml_path="$2"
-	local -n packages_array="$3"
-
-	packages_array=()
-	# Descriptions are not used in this script, but are part of the YAML structure
-	local descriptions_array=()
-
-	local yq_output
-	yq_output=$(yq -r "$yaml_path[] | [.name, .description] | @tsv" "$yaml_file" 2>/dev/null)
-
-	if [[ $? -eq 0 && -n "$yq_output" ]]; then
-		while IFS=$'\t' read -r name description; do
-			[[ -z "$name" ]] && continue
-			packages_array+=("$name")
-			descriptions_array+=("$description")
-		done <<<"$yq_output"
-	fi
-}
+# Using centralized functions from config.sh library
 
 # ===== Load All Package Lists from YAML =====
 load_package_lists() {
@@ -69,10 +49,9 @@ load_package_lists() {
 		return 1
 	fi
 
-	# yq is now installed as part of BASE_HELPER_UTILS
-
-	read_yaml_packages "$GAMING_YAML" ".pacman.packages" pacman_gaming_programs
-	read_yaml_packages "$GAMING_YAML" ".flatpak.apps" flatpak_gaming_programs
+	# Using config.sh library functions for YAML parsing
+	read_yaml_packages_with_desc "$GAMING_YAML" ".pacman.packages" pacman_gaming_programs temp_descriptions
+	read_yaml_packages_with_desc "$GAMING_YAML" ".flatpak.apps" flatpak_gaming_programs temp_descriptions
 	return 0
 }
 

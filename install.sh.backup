@@ -95,14 +95,6 @@ CONFIGS_DIR="$SCRIPT_DIR/configs"
 STATE_FILE="$HOME/.archinstaller.state"
 mkdir -p "$(dirname "$STATE_FILE")"
 
-# Source new modular libraries
-source "$SCRIPTS_DIR/lib/core.sh"
-source "$SCRIPTS_DIR/lib/ui.sh"
-source "$SCRIPTS_DIR/lib/system.sh"
-source "$SCRIPTS_DIR/lib/package.sh"
-source "$SCRIPTS_DIR/lib/config.sh"
-
-# Source common.sh for backward compatibility with existing scripts
 source "$SCRIPTS_DIR/common.sh"
 
 # Install gum silently for enhanced UI experience
@@ -115,8 +107,19 @@ if ! command -v gum >/dev/null 2>&1; then
   fi
 fi
 
-# Initialize core library
-init_core
+# Initialize log file
+{
+  echo "=========================================="
+  echo "Archinstaller Installation Log"
+  echo "Started: $(date)"
+  echo "=========================================="
+  echo ""
+} > "$INSTALL_LOG"
+
+# Function to log to both console and file
+log_both() {
+  echo "$1" | tee -a "$INSTALL_LOG"
+}
 
 START_TIME=$(date +%s)
 
@@ -150,44 +153,9 @@ export DRY_RUN
 export INSTALL_LOG
 export START_TIME
 
-# Show system information
-show_system_info() {
-    local cpu=$(detect_cpu_vendor)
-    local ram=$(get_ram_gb)
-    local gpu=$(detect_gpu)
-    local laptop
-    is_laptop && laptop="Yes" || laptop="No"
-    local bootloader=$(detect_bootloader)
-    local btrfs
-    is_btrfs_system && btrfs="Yes" || btrfs="No"
-    
-    if supports_gum; then
-        gum style --foreground 212 --border double --align center --margin "1 2" --padding "1 2" "System Information"
-        echo ""
-        gum format << EOF
-    CPU: $cpu
-    RAM: ${ram} GB
-    GPU: $gpu
-    Laptop: $laptop
-    Bootloader: $bootloader
-    Btrfs: $btrfs
-EOF
-        echo ""
-    else
-        echo ""
-        echo -e "${CYAN}### System Information ###${RESET}"
-        echo "CPU: $cpu"
-        echo "RAM: ${ram} GB"
-        echo "GPU: $gpu"
-        echo "Laptop: $laptop"
-        echo "Bootloader: $bootloader"
-        echo "Btrfs: $btrfs"
-        echo ""
-    fi
-}
+
 
 arch_ascii
-show_system_info
 
 # Enhanced system requirements checking with hardware compatibility
 check_system_requirements() {
@@ -195,8 +163,8 @@ check_system_requirements() {
   
   # Use the enhanced compatibility check from common.sh
   if ! check_system_compatibility; then
-    ui_error "System compatibility check failed!"
-    ui_info "Please address the issues listed above before continuing."
+    echo -e "${RED}Error: System compatibility check failed!${RESET}"
+    echo -e "${YELLOW}   Please address the issues listed above before continuing.${RESET}"
     exit 1
   fi
   
@@ -210,8 +178,7 @@ check_system_requirements() {
       log_to_file "Detected bootloader: $bootloader"
       ;;
     "unknown")
-      # Don't add as hardware issue - may be false positive
-      log_to_file "Bootloader detection returned: unknown (may be systemd-boot)"
+      hardware_issues+=("Unsupported or unknown bootloader detected")
       ;;
   esac
   
@@ -269,12 +236,12 @@ check_system_requirements() {
   
   # Report hardware issues if any
   if [ ${#hardware_issues[@]} -gt 0 ]; then
-    ui_warn "Hardware compatibility issues detected:"
+    echo -e "${YELLOW}Warning: Hardware compatibility issues detected:${RESET}"
     for issue in "${hardware_issues[@]}"; do
-      ui_info "  - $issue"
+      echo -e "${YELLOW}   - $issue${RESET}"
     done
     echo ""
-    if ! ui_confirm "Continue despite hardware compatibility issues?" "Some features may not work optimally."; then
+    if ! gum_confirm "Continue despite hardware compatibility issues?" "Some features may not work optimally."; then
       ui_info "Installation cancelled by user"
       exit 0
     fi
@@ -285,12 +252,6 @@ check_system_requirements() {
 
 check_system_requirements
 show_menu
-
-# Check if INSTALL_MODE was set (user might have exited menu)
-if [ -z "${INSTALL_MODE:-}" ]; then
-  echo "Installation cancelled."
-  exit 0
-fi
 
 # Validate INSTALL_MODE after menu selection
 if ! validate_install_mode "$INSTALL_MODE"; then
@@ -487,10 +448,13 @@ fi
 
 # Dry-run mode banner
 if [ "$DRY_RUN" = true ]; then
-  ui_header "DRY-RUN MODE ENABLED"
-  ui_info "Preview mode: No changes will be made"
-  ui_info "Package installations will be simulated"
-  ui_info "System configurations will be previewed"
+  echo ""
+  echo -e "${YELLOW}========================================${RESET}"
+  echo -e "${YELLOW}         DRY-RUN MODE ENABLED${RESET}"
+  echo -e "${YELLOW}========================================${RESET}"
+  echo -e "${CYAN}Preview mode: No changes will be made${RESET}"
+  echo -e "${CYAN}Package installations will be simulated${RESET}"
+  echo -e "${CYAN}System configurations will be previewed${RESET}"
   echo ""
   sleep 2
 fi
@@ -580,7 +544,7 @@ cleanup_on_error() {
     # Offer recovery options
     echo ""
     ui_error "Installation encountered an error!"
-    ui_header "Recovery Options"
+    ui_info "Options:"
     ui_info "1. Run the script again to resume from where it left off"
     ui_info "2. Check the log file: $INSTALL_LOG"
     ui_info "3. Start fresh installation: rm -f $STATE_FILE"
@@ -618,8 +582,7 @@ save_log_on_exit() {
 }
 
 # Installation start
-ui_header "Starting Installation"
-ui_info "ArchInstaller will now configure your system"
+echo "Starting ArchInstaller"
 
 # Step 1: System Preparation
 # Check if step was previously completed successfully
@@ -824,9 +787,8 @@ else
   fi
 fi
 if [ "$DRY_RUN" = true ]; then
-  ui_header "Dry-Run Complete"
-  ui_info "This was a preview run. No changes were made to your system."
-  ui_info "To perform the actual installation, run: ./install.sh"
+  echo -e "${YELLOW}This was a preview run. No changes were made to your system.${RESET}"
+  echo -e "${CYAN}To perform the actual installation, run:${RESET} ${GREEN}./install.sh${RESET}"
   echo ""
 fi
 

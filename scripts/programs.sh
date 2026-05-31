@@ -8,6 +8,7 @@ ARCHINSTALLER_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIGS_DIR="$ARCHINSTALLER_ROOT/configs"
 
 source "$SCRIPT_DIR/common.sh"
+source "$SCRIPT_DIR/lib/config.sh"
 
 export SUDO_ASKPASS= # Force sudo to prompt in terminal, not via GUI
 
@@ -39,45 +40,7 @@ pacman_remove() {
 }
 
 # ===== YAML Parsing Functions =====
-# yq is now installed as part of BASE_HELPER_UTILS
-
-read_yaml_packages() {
-	local yaml_file="$1"
-	local yaml_path="$2"
-	local -n packages_array="$3"
-	local -n descriptions_array="$4"
-
-	packages_array=()
-	descriptions_array=()
-
-	local yq_output
-	yq_output=$(yq -r "$yaml_path[] | [.name, .description] | @tsv" "$yaml_file" 2>/dev/null)
-
-	if [[ $? -eq 0 && -n "$yq_output" ]]; then
-		while IFS=$'\t' read -r name description; do
-			[[ -z "$name" ]] && continue
-			packages_array+=("$name")
-			descriptions_array+=("$description")
-		done <<<"$yq_output"
-	fi
-}
-
-read_yaml_simple_packages() {
-	local yaml_file="$1"
-	local yaml_path="$2"
-	local -n packages_array="$3"
-
-	packages_array=()
-	local yq_output
-	yq_output=$(yq -r "$yaml_path[]" "$yaml_file" 2>/dev/null)
-
-	if [[ $? -eq 0 && -n "$yq_output" ]]; then
-		while IFS= read -r package; do
-			[[ -z "$package" ]] && continue
-			packages_array+=("$package")
-		done <<<"$yq_output"
-	fi
-}
+# Using centralized functions from config.sh library
 
 # ===== Load All Package Lists from YAML =====
 load_package_lists_from_yaml() {
@@ -87,22 +50,21 @@ load_package_lists_from_yaml() {
 		return 1
 	fi
 
-	# yq is now installed as part of BASE_HELPER_UTILS
-
-	read_yaml_packages "$PROGRAMS_YAML" ".pacman.packages" pacman_programs pacman_descriptions
-	read_yaml_packages "$PROGRAMS_YAML" ".essential.default" essential_programs_default essential_descriptions_default
-	read_yaml_packages "$PROGRAMS_YAML" ".essential.minimal" essential_programs_minimal essential_descriptions_minimal
-	read_yaml_packages "$PROGRAMS_YAML" ".essential.server" essential_programs_server essential_descriptions_server
-	read_yaml_packages "$PROGRAMS_YAML" ".aur.default" yay_programs_default yay_descriptions_default
-	read_yaml_packages "$PROGRAMS_YAML" ".aur.minimal" yay_programs_minimal yay_descriptions_minimal
-	read_yaml_simple_packages "$PROGRAMS_YAML" ".desktop_environments.kde.install" kde_install_programs
-	read_yaml_simple_packages "$PROGRAMS_YAML" ".desktop_environments.kde.remove" kde_remove_programs
-	read_yaml_simple_packages "$PROGRAMS_YAML" ".desktop_environments.gnome.install" gnome_install_programs
-	read_yaml_simple_packages "$PROGRAMS_YAML" ".desktop_environments.gnome.remove" gnome_remove_programs
-	read_yaml_simple_packages "$PROGRAMS_YAML" ".desktop_environments.cosmic.install" cosmic_install_programs
-	read_yaml_simple_packages "$PROGRAMS_YAML" ".desktop_environments.cosmic.remove" cosmic_remove_programs
-	read_yaml_packages "$PROGRAMS_YAML" ".custom.essential" custom_selectable_essential_programs custom_selectable_essential_descriptions
-	read_yaml_packages "$PROGRAMS_YAML" ".custom.aur" custom_selectable_yay_programs custom_selectable_yay_descriptions
+	# Using config.sh library functions for YAML parsing
+	read_yaml_packages_with_desc "$PROGRAMS_YAML" ".pacman.packages" pacman_programs pacman_descriptions
+	read_yaml_packages_with_desc "$PROGRAMS_YAML" ".essential.default" essential_programs_default essential_descriptions_default
+	read_yaml_packages_with_desc "$PROGRAMS_YAML" ".essential.minimal" essential_programs_minimal essential_descriptions_minimal
+	read_yaml_packages_with_desc "$PROGRAMS_YAML" ".essential.server" essential_programs_server essential_descriptions_server
+	read_yaml_packages_with_desc "$PROGRAMS_YAML" ".aur.default" yay_programs_default yay_descriptions_default
+	read_yaml_packages_with_desc "$PROGRAMS_YAML" ".aur.minimal" yay_programs_minimal yay_descriptions_minimal
+	read_yaml_packages "$PROGRAMS_YAML" ".desktop_environments.kde.install" kde_install_programs
+	read_yaml_packages "$PROGRAMS_YAML" ".desktop_environments.kde.remove" kde_remove_programs
+	read_yaml_packages "$PROGRAMS_YAML" ".desktop_environments.gnome.install" gnome_install_programs
+	read_yaml_packages "$PROGRAMS_YAML" ".desktop_environments.gnome.remove" gnome_remove_programs
+	read_yaml_packages "$PROGRAMS_YAML" ".desktop_environments.cosmic.install" cosmic_install_programs
+	read_yaml_packages "$PROGRAMS_YAML" ".desktop_environments.cosmic.remove" cosmic_remove_programs
+	read_yaml_packages_with_desc "$PROGRAMS_YAML" ".custom.essential" custom_selectable_essential_programs custom_selectable_essential_descriptions
+	read_yaml_packages_with_desc "$PROGRAMS_YAML" ".custom.aur" custom_selectable_yay_programs custom_selectable_yay_descriptions
 }
 
 # ===== Custom Selection Functions =====
@@ -279,10 +241,10 @@ handle_flatpak_packages() {
 	local de_flatpaks=()
 	local de_descriptions=()
 
-	read_yaml_packages "$PROGRAMS_YAML" ".flatpak.$de.$INSTALL_MODE" de_flatpaks de_descriptions
+	read_yaml_packages_with_desc "$PROGRAMS_YAML" ".flatpak.$de.$INSTALL_MODE" de_flatpaks de_descriptions
 
 	if [[ ${#de_flatpaks[@]} -eq 0 && "$de" != "generic" ]]; then
-		read_yaml_packages "$PROGRAMS_YAML" ".flatpak.generic.$INSTALL_MODE" de_flatpaks de_descriptions
+		read_yaml_packages_with_desc "$PROGRAMS_YAML" ".flatpak.generic.$INSTALL_MODE" de_flatpaks de_descriptions
 	fi
 
 	if [[ ${#de_flatpaks[@]} -gt 0 ]]; then

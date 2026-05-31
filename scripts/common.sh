@@ -5,21 +5,23 @@ set -uo pipefail
 # SECTION 1: COLOR VARIABLES & BASIC FUNCTIONS
 # ============================================================================
 
-# Color variables for output formatting
-if [ -t 1 ]; then
-    RED='\033[0;31m'
-    GREEN='\033[0;32m'
-    YELLOW='\033[1;33m'
-    CYAN='\033[0;36m'
-    BLUE='\033[0;34m'
-    RESET='\033[0m'
-else
-    RED=''
-    GREEN=''
-    YELLOW=''
-    CYAN=''
-    BLUE=''
-    RESET=''
+# Color variables for output formatting (only define if not already set by core.sh)
+if [ -z "${RED:-}" ]; then
+    if [ -t 1 ]; then
+        RED='\033[0;31m'
+        GREEN='\033[0;32m'
+        YELLOW='\033[1;33m'
+        CYAN='\033[0;36m'
+        BLUE='\033[0;34m'
+        RESET='\033[0m'
+    else
+        RED=''
+        GREEN=''
+        YELLOW=''
+        CYAN=''
+        BLUE=''
+        RESET=''
+    fi
 fi
 
 # Terminal formatting helpers
@@ -992,28 +994,29 @@ install_package_generic() {
       continue
     fi
 
-    local install_cmd
+    # Build command array for safe execution (no eval)
+    local install_cmd_array=()
     case "$pkg_manager" in
       pacman)
-        install_cmd="sudo pacman -S --noconfirm --needed $pkg"
+        install_cmd_array=(sudo pacman -S --noconfirm --needed "$pkg")
         ;;
       aur)
-        install_cmd="yay -S --noconfirm --needed $pkg"
+        install_cmd_array=(yay -S --noconfirm --needed "$pkg")
         ;;
       flatpak)
-        install_cmd="sudo flatpak install --noninteractive -y $pkg"
+        install_cmd_array=(sudo flatpak install --noninteractive -y "$pkg")
         ;;
     esac
 
     # Dry-run mode: simulate installation
     if [ "${DRY_RUN:-false}" = true ]; then
       ui_info "Dry-run: Would install $pkg"
-      ui_info "  Would execute: $install_cmd"
+      ui_info "  Would execute: ${install_cmd_array[*]}"
       INSTALLED_PACKAGES+=("$pkg")
     else
       # Capture both stdout and stderr for better error diagnostics
       local error_output
-      if error_output=$(eval "$install_cmd" 2>&1); then
+      if error_output=$("${install_cmd_array[@]}" 2>&1); then
         INSTALLED_PACKAGES+=("$pkg")
       else
         ui_error "Failed to install $pkg"

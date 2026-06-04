@@ -69,8 +69,12 @@ add_kernel_parameters() {
   # Detect bootloader using the centralized function
   local BOOTLOADER=$(detect_bootloader)
   
+  log_info "Detected bootloader: $BOOTLOADER"
+  log_info "Checking if this is a UKI system..."
+  
   # Check if this is a UKI system
   if is_uki_system; then
+    log_info "UKI system detected - configuring for UKI"
     # UKI system: configure /etc/kernel/cmdline and rebuild UKI
     step "Configuring kernel parameters for UKI system"
     
@@ -81,6 +85,9 @@ add_kernel_parameters() {
     local existing_cmdline=""
     if [[ -f "$cmdline_file" ]]; then
       existing_cmdline=$(cat "$cmdline_file" 2>/dev/null || echo "")
+      log_info "Existing cmdline: $existing_cmdline"
+    else
+      log_warning "$cmdline_file not found"
     fi
     
     # Check if all required parameters are already present
@@ -88,6 +95,7 @@ add_kernel_parameters() {
     for param in $uki_params; do
       if [[ "$existing_cmdline" != *"$param"* ]]; then
         needs_update=true
+        log_info "Missing parameter: $param"
         break
       fi
     done
@@ -135,15 +143,20 @@ add_kernel_parameters() {
     return 0
   fi
   
+  log_info "Traditional (non-UKI) system detected - configuring bootloader entries"
+  
   # Traditional system: configure bootloader entries
   case "$BOOTLOADER" in
     "systemd-boot")
+      log_info "Configuring systemd-boot entries"
       # systemd-boot logic with consistent options
       local boot_entries_dir="/boot/loader/entries"
       if [ ! -d "$boot_entries_dir" ]; then
-        log_warning "Boot entries directory not found. Skipping kernel parameter addition."
+        log_warning "Boot entries directory not found: $boot_entries_dir"
         return
       fi
+      
+      log_info "Boot entries directory exists: $boot_entries_dir"
       
       # Find all kernel entries (excluding fallback)
       # archinstall creates files with date format like "2024-06-04_linux.conf"
@@ -153,7 +166,7 @@ add_kernel_parameters() {
       done < <(find "$boot_entries_dir" -name "*.conf" ! -name "*fallback*" -print0 2>/dev/null)
       
       if [ ${#kernel_entries[@]} -eq 0 ]; then
-        log_warning "No kernel entries found. Skipping kernel parameter addition."
+        log_warning "No kernel entries found in $boot_entries_dir"
         return
       fi
       
@@ -166,12 +179,14 @@ add_kernel_parameters() {
       
       # Plymouth parameters for traditional systemd-boot systems
       local plymouth_params="splash quiet loglevel=3 systemd.show_status=auto rd.udev.log_level=3"
+      log_info "Plymouth parameters to add: $plymouth_params"
       
       # Update each entry independently (don't use first entry as standard)
       # This handles archinstall's date-based naming scheme correctly
       local updated_count=0
       for entry in "${kernel_entries[@]}"; do
         local entry_name=$(basename "$entry")
+        log_info "Checking $entry_name..."
         
         # Extract current options from the entry
         local current_options=$(grep "^options " "$entry" | sed 's/^options //' || echo "")
@@ -181,11 +196,14 @@ add_kernel_parameters() {
           continue
         fi
         
+        log_info "Current options in $entry_name: $current_options"
+        
         # Check if all Plymouth parameters are already present
         local needs_update=false
         for param in $plymouth_params; do
           if [[ "$current_options" != *"$param"* ]]; then
             needs_update=true
+            log_info "Missing parameter in $entry_name: $param"
             break
           fi
         done
@@ -201,6 +219,8 @@ add_kernel_parameters() {
           new_options="$new_options $plymouth_params"
           # Clean up spaces again
           new_options=$(echo "$new_options" | sed 's/^ *//;s/ *$//')
+          
+          log_info "New options for $entry_name: $new_options"
           
           # Create a temporary file with updated options
           local temp_file=$(mktemp)

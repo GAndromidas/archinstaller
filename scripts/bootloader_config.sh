@@ -89,7 +89,7 @@ add_systemd_boot_kernel_params() {
     
     # Check for any of our target parameters to determine if update is needed
     local needs_update=false
-    if ! grep -q "quiet" "$entry" || ! grep -q "loglevel=3" "$entry" || ! grep -q "systemd.show_status=auto" "$entry" || ! grep -q "rd.udev.log_level=3" "$entry"; then
+    if ! grep -q "splash" "$entry" || ! grep -q "quiet" "$entry" || ! grep -q "loglevel=3" "$entry" || ! grep -q "systemd.show_status=auto" "$entry" || ! grep -q "rd.udev.log_level=3" "$entry"; then
       needs_update=true
     fi
     
@@ -101,7 +101,7 @@ add_systemd_boot_kernel_params() {
       sudo sed -i 's/  */ /g; s/^ *//; s/ *$//' "$entry" # Clean up extra spaces
       
       # For traditional systems, add full Plymouth-compatible parameters
-      if sudo sed -i '/^options / s/$/ quiet loglevel=3 systemd.show_status=auto rd.udev.log_level=3/' "$entry"; then
+      if sudo sed -i '/^options / s/$/ splash quiet loglevel=3 systemd.show_status=auto rd.udev.log_level=3/' "$entry"; then
         log_success "Updated kernel parameters in $entry_name"
         ((modified_count++))
       else

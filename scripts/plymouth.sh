@@ -146,6 +146,7 @@ add_kernel_parameters() {
       fi
       
       # Find all kernel entries (excluding fallback)
+      # archinstall creates files with date format like "2024-06-04_linux.conf"
       local kernel_entries=()
       while IFS= read -r -d '' entry; do
         kernel_entries+=("$entry")
@@ -163,46 +164,11 @@ add_kernel_parameters() {
         log_info "Processing: $(basename "$entry")"
       done
       
-      # Use the first entry as the standard for options
-      local standard_entry="${kernel_entries[0]}"
-      local standard_options=$(grep "^options " "$standard_entry" | sed 's/^options //' || echo "")
-      
-      if [[ -z "$standard_options" ]]; then
-        log_warning "No options found in standard entry: $(basename "$standard_entry")"
-        return
-      fi
-      
       # Plymouth parameters for traditional systemd-boot systems
       local plymouth_params="splash quiet loglevel=3 systemd.show_status=auto rd.udev.log_level=3"
       
-      # Check if all Plymouth parameters are already present
-      local needs_update=false
-      for param in $plymouth_params; do
-        if [[ "$standard_options" != *"$param"* ]]; then
-          needs_update=true
-          break
-        fi
-      done
-      
-      if [[ "$needs_update" = true ]]; then
-        # Remove any existing Plymouth parameters to avoid duplicates
-        standard_options=$(echo "$standard_options" | sed 's/splash//g; s/quiet//g; s/loglevel=[^ ]*//g; s/systemd\.show_status=[^ ]*//g; s/rd\.udev\.log_level=[^ ]*//g')
-        
-        # Clean up extra spaces
-        standard_options=$(echo "$standard_options" | sed 's/  */ /g; s/^ *//; s/ *$//')
-        
-        # Append the Plymouth parameters
-        standard_options="$standard_options $plymouth_params"
-        # Clean up spaces again
-        standard_options=$(echo "$standard_options" | sed 's/^ *//;s/ *$//')
-        
-        log_info "Adding Plymouth parameters to standard options"
-        log_info "Parameters: $plymouth_params"
-      else
-        log_info "All Plymouth parameters already present in standard options"
-      fi
-      
-      # Update all entries to have the same options with Plymouth parameters
+      # Update each entry independently (don't use first entry as standard)
+      # This handles archinstall's date-based naming scheme correctly
       local updated_count=0
       for entry in "${kernel_entries[@]}"; do
         local entry_name=$(basename "$entry")
@@ -210,29 +176,54 @@ add_kernel_parameters() {
         # Extract current options from the entry
         local current_options=$(grep "^options " "$entry" | sed 's/^options //' || echo "")
         
-        # Only update if options are different
-        if [[ "$current_options" != "$standard_options" ]]; then
+        if [[ -z "$current_options" ]]; then
+          log_warning "No options found in $entry_name - skipping"
+          continue
+        fi
+        
+        # Check if all Plymouth parameters are already present
+        local needs_update=false
+        for param in $plymouth_params; do
+          if [[ "$current_options" != *"$param"* ]]; then
+            needs_update=true
+            break
+          fi
+        done
+        
+        if [[ "$needs_update" = true ]]; then
+          # Remove any existing Plymouth parameters to avoid duplicates
+          local new_options=$(echo "$current_options" | sed 's/splash//g; s/quiet//g; s/loglevel=[^ ]*//g; s/systemd\.show_status=[^ ]*//g; s/rd\.udev\.log_level=[^ ]*//g')
+          
+          # Clean up extra spaces
+          new_options=$(echo "$new_options" | sed 's/  */ /g; s/^ *//; s/ *$//')
+          
+          # Append the Plymouth parameters
+          new_options="$new_options $plymouth_params"
+          # Clean up spaces again
+          new_options=$(echo "$new_options" | sed 's/^ *//;s/ *$//')
+          
           # Create a temporary file with updated options
           local temp_file=$(mktemp)
           
           # Copy all lines except options, then add new options
           grep -v "^options " "$entry" > "$temp_file"
-          echo "options $standard_options" >> "$temp_file"
+          echo "options $new_options" >> "$temp_file"
           
           # Replace the original file
           sudo mv "$temp_file" "$entry"
           
-          log_success "Updated options in $entry_name with Plymouth parameters"
+          log_success "Updated $entry_name with Plymouth parameters"
+          log_info "Parameters: $plymouth_params"
           ((updated_count++))
         else
-          log_info "Options already consistent in $entry_name"
+          log_info "All Plymouth parameters already present in $entry_name"
         fi
       done
       
       if [[ $updated_count -gt 0 ]]; then
-        echo -e "\n${GREEN}Kernel parameters updated consistently for all entries (${updated_count} modified)${RESET}\n"
+        echo -e "\n${GREEN}Kernel parameters updated for ${updated_count} kernel entries${RESET}\n"
       else
-        echo -e "\n${GREEN}All kernel entries already have consistent options with Plymouth parameters${RESET}\n"
+        echo -e "\n${GREEN}All kernel entries already have Plymouth parameters${RESET}\n"
       fi
       ;;
     "grub")

@@ -473,6 +473,27 @@ EOF
   fi
 }
 
+# Function to configure Plymouth for traditional (non-UKI) systems
+configure_traditional_plymouth() {
+  step "Configuring Plymouth for traditional system"
+  
+  # Install Plymouth packages first
+  step "Installing Plymouth packages"
+  install_packages_quietly plymouth
+  
+  # Configure Plymouth hook and rebuild initramfs
+  run_step "Configuring Plymouth hook and rebuilding initramfs" configure_plymouth_hook_and_initramfs
+  
+  # Set Plymouth theme
+  run_step "Setting Plymouth theme" set_plymouth_theme
+  
+  # Add kernel parameters for Plymouth
+  run_step "Adding 'splash' to all kernel parameters" add_kernel_parameters
+  
+  log_success "Traditional Plymouth configuration completed"
+  log_info "System will display boot splash screen with Plymouth"
+}
+
 # ======= Main =======
 main() {
   # Print simple banner (no figlet)
@@ -512,16 +533,8 @@ main() {
     return 0
   fi
 
-  ui_info "Traditional system detected - installing Plymouth for boot splash screen"
-  
-  # Install Plymouth packages first
-  step "Installing Plymouth packages"
-  install_packages_quietly plymouth
-  
-  # Use the centralized function from common.sh
-  run_step "Configuring Plymouth hook and rebuilding initramfs" configure_plymouth_hook_and_initramfs
-  run_step "Setting Plymouth theme" set_plymouth_theme
-  run_step "Adding 'splash' to all kernel parameters" add_kernel_parameters
+  # Configure Plymouth for traditional (non-UKI) systems
+  configure_traditional_plymouth
 }
 
 main "$@"

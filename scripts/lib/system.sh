@@ -174,9 +174,10 @@ is_uki_system() {
     
     local result="false"
     
-    # Check for UKI indicators
-    if [ -f "/etc/kernel/cmdline" ] || [ -f "/etc/kernel/uki.conf" ] || \
-       pacman -Q systemd-ukify &>/dev/null 2>&1 || \
+    # Check for UKI indicators - be more specific to avoid false positives
+    # Only consider it UKI if systemd-ukify or ukify is installed
+    # /etc/kernel/cmdline alone is not enough (can exist on traditional systems)
+    if pacman -Q systemd-ukify &>/dev/null 2>&1 || \
        pacman -Q ukify &>/dev/null 2>&1; then
         result="true"
     fi

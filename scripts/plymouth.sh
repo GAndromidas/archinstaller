@@ -156,7 +156,12 @@ add_kernel_parameters() {
         return
       fi
       
-      echo -e "${CYAN}Found ${#kernel_entries[@]} systemd-boot kernel entries${RESET}"
+      echo -e "${CYAN}Found ${#kernel_entries[@]} systemd-boot kernel entries to configure${RESET}"
+      
+      # List all kernel entries being processed
+      for entry in "${kernel_entries[@]}"; do
+        log_info "Processing: $(basename "$entry")"
+      done
       
       # Use the first entry as the standard for options
       local standard_entry="${kernel_entries[0]}"
@@ -167,15 +172,37 @@ add_kernel_parameters() {
         return
       fi
       
-      # Add splash to standard options if not already present
-      if [[ "$standard_options" != *"splash"* ]]; then
-        standard_options="$standard_options splash"
-        log_info "Adding 'splash' to standard options"
+      # Plymouth parameters for traditional systemd-boot systems
+      local plymouth_params="splash quiet loglevel=3 systemd.show_status=auto rd.udev.log_level=3"
+      
+      # Check if all Plymouth parameters are already present
+      local needs_update=false
+      for param in $plymouth_params; do
+        if [[ "$standard_options" != *"$param"* ]]; then
+          needs_update=true
+          break
+        fi
+      done
+      
+      if [[ "$needs_update" = true ]]; then
+        # Remove any existing Plymouth parameters to avoid duplicates
+        standard_options=$(echo "$standard_options" | sed 's/splash//g; s/quiet//g; s/loglevel=[^ ]*//g; s/systemd\.show_status=[^ ]*//g; s/rd\.udev\.log_level=[^ ]*//g')
+        
+        # Clean up extra spaces
+        standard_options=$(echo "$standard_options" | sed 's/  */ /g; s/^ *//; s/ *$//')
+        
+        # Append the Plymouth parameters
+        standard_options="$standard_options $plymouth_params"
+        # Clean up spaces again
+        standard_options=$(echo "$standard_options" | sed 's/^ *//;s/ *$//')
+        
+        log_info "Adding Plymouth parameters to standard options"
+        log_info "Parameters: $plymouth_params"
       else
-        log_info "'splash' already present in standard options"
+        log_info "All Plymouth parameters already present in standard options"
       fi
       
-      # Update all entries to have the same options with splash
+      # Update all entries to have the same options with Plymouth parameters
       local updated_count=0
       for entry in "${kernel_entries[@]}"; do
         local entry_name=$(basename "$entry")
@@ -195,7 +222,7 @@ add_kernel_parameters() {
           # Replace the original file
           sudo mv "$temp_file" "$entry"
           
-          log_success "Updated options in $entry_name with splash"
+          log_success "Updated options in $entry_name with Plymouth parameters"
           ((updated_count++))
         else
           log_info "Options already consistent in $entry_name"
@@ -205,7 +232,7 @@ add_kernel_parameters() {
       if [[ $updated_count -gt 0 ]]; then
         echo -e "\n${GREEN}Kernel parameters updated consistently for all entries (${updated_count} modified)${RESET}\n"
       else
-        echo -e "\n${GREEN}All kernel entries already have consistent options with splash${RESET}\n"
+        echo -e "\n${GREEN}All kernel entries already have consistent options with Plymouth parameters${RESET}\n"
       fi
       ;;
     "grub")

@@ -89,7 +89,7 @@ add_systemd_boot_kernel_params() {
     
     # Check for any of our target parameters to determine if update is needed
     local needs_update=false
-    if ! grep -q "splash" "$entry" || ! grep -q "quiet" "$entry" || ! grep -q "loglevel=3" "$entry" || ! grep -q "systemd.show_status=auto" "$entry" || ! grep -q "rd.udev.log_level=3" "$entry"; then
+    if ! grep -q "splash" "$entry" || ! grep -q "quiet" "$entry" || ! grep -q "loglevel=0" "$entry" || ! grep -q "systemd.show_status=false" "$entry" || ! grep -q "rd.udev.log_level=0" "$entry"; then
       needs_update=true
     fi
     
@@ -97,11 +97,11 @@ add_systemd_boot_kernel_params() {
       # Update entry without backup
       
       # Remove existing parameters if they exist, then add all parameters
-      sudo sed -i 's/quiet//g; s/loglevel=[^ ]*//g; s/systemd\.show_status=[^ ]*//g; s/rd\.udev\.log_level=[^ ]*//g' "$entry"
+      sudo sed -i 's/quiet//g; s/loglevel=[^ ]*//g; s/systemd\.show_status=[^ ]*//g; s/rd\.udev\.log_level=[^ ]*//g; s/rd\.systemd\.show_status=[^ ]*//g' "$entry"
       sudo sed -i 's/  */ /g; s/^ *//; s/ *$//' "$entry" # Clean up extra spaces
       
-      # For traditional systems, add full Plymouth-compatible parameters
-      if sudo sed -i '/^options / s/$/ splash quiet loglevel=3 systemd.show_status=auto rd.udev.log_level=3/' "$entry"; then
+      # For traditional systems, add full Plymouth-compatible parameters (same quieting as UKI)
+      if sudo sed -i '/^options / s/$/ quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash/' "$entry"; then
         log_success "Updated kernel parameters in $entry_name"
         ((modified_count++))
       else
@@ -549,8 +549,8 @@ configure_grub() {
 
     set_grub_config "GRUB_SAVEDEFAULT" "true"
     
-    # For traditional systems, add full Plymouth-compatible parameters
-    set_grub_config "GRUB_CMDLINE_LINUX_DEFAULT" '"quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 plymouth.ignore-serial-consoles"'
+    # For traditional systems, add full Plymouth-compatible parameters (same quieting as UKI)
+    set_grub_config "GRUB_CMDLINE_LINUX_DEFAULT" '"quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash plymouth.ignore-serial-consoles"'
     ui_info "Traditional system detected - using Plymouth-compatible kernel parameters"
     
     set_grub_config "GRUB_DISABLE_SUBMENU" "notlinux"
@@ -704,8 +704,8 @@ configure_limine_basic() {
   # Build kernel command line for traditional systems
   local cmdline="root=UUID=$root_uuid rw"
   
-  # For traditional systems, add full Plymouth-compatible parameters
-  cmdline="$cmdline quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3"
+  # For traditional systems, add full Plymouth-compatible parameters (same quieting as UKI)
+  cmdline="$cmdline quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash"
   ui_info "Traditional system detected - using Plymouth-compatible kernel parameters for Limine"
   
   # Add filesystem-specific options

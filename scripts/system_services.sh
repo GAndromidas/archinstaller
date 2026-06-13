@@ -138,7 +138,6 @@ enable_services() {
     fi
     
     exit 0
-    exit 0
   fi
 
   local services=(

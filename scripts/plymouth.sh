@@ -79,7 +79,7 @@ add_kernel_parameters() {
     step "Configuring kernel parameters for UKI system"
     
     local cmdline_file="/etc/kernel/cmdline"
-    local uki_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash"
+    local uki_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash plymouth.ignore-serial-consoles"
     
     # Read existing cmdline if it exists
     local existing_cmdline=""
@@ -179,7 +179,7 @@ add_kernel_parameters() {
       
       # Plymouth parameters for traditional systemd-boot systems
       # Use aggressive quieting (same as UKI) to suppress boot text and show clean Plymouth theme
-      local plymouth_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash"
+      local plymouth_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash plymouth.ignore-serial-consoles"
       log_info "Plymouth parameters to add: $plymouth_params"
       
       # Update each entry independently (don't use first entry as standard)
@@ -193,7 +193,10 @@ add_kernel_parameters() {
         local current_options=$(grep "^options " "$entry" | sed 's/^options //' || echo "")
         
         if [[ -z "$current_options" ]]; then
-          log_warning "No options found in $entry_name - skipping"
+          log_warning "No options found in $entry_name - adding options line"
+          echo "options $plymouth_params" | sudo tee -a "$entry" >/dev/null
+          log_success "Created options line in $entry_name with Plymouth parameters"
+          ((updated_count++))
           continue
         fi
         
@@ -315,7 +318,7 @@ add_kernel_parameters() {
         return
       fi
       
-      local limine_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash nowatchdog"
+      local limine_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash plymouth.ignore-serial-consoles nowatchdog"
       local modified_count=0
       
       # Get current cmdline from limine.conf
@@ -368,7 +371,7 @@ is_plymouth_configured() {
     # Check if /etc/kernel/cmdline has proper parameters
     if [[ -f /etc/kernel/cmdline ]]; then
       local cmdline_content=$(cat /etc/kernel/cmdline 2>/dev/null || echo "")
-      local required_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash"
+      local required_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash plymouth.ignore-serial-consoles"
       local all_params_present=true
       
       for param in $required_params; do
@@ -550,14 +553,12 @@ main() {
     install_packages_quietly plymouth
     
     # Configure Plymouth for UKI
-    # Note: Theme is NOT set here to avoid overriding the user's custom theme.
-    # The user should set their desired theme separately (e.g., with their own script).
     run_step "Configuring Plymouth hook and rebuilding initramfs" configure_plymouth_hook_and_initramfs
+    run_step "Setting Plymouth theme" set_plymouth_theme
     run_step "Adding kernel parameters for UKI + Plymouth" add_kernel_parameters
     
     ui_info "UKI + Plymouth configuration completed"
     ui_info "System will display clean boot logo with Plymouth suppressing text overlay"
-    ui_info "No Plymouth theme was set — configure your own theme with: sudo plymouth-set-default-theme -R <theme>"
     return 0
   else
     ui_info "Traditional system detected - installing Plymouth for boot splash screen"

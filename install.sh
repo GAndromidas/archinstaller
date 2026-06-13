@@ -513,7 +513,7 @@ else
   trap 'cleanup_on_error $LINENO; save_log_on_exit' EXIT INT TERM ERR
 fi
 
-# Function to mark step as completed with atomic write
+# Function to mark step as completed with atomic append
 mark_step_complete() {
   local step_name="$1"
   
@@ -523,12 +523,11 @@ mark_step_complete() {
     return 1
   fi
   
-  # Atomic write with file locking to prevent corruption
-  local temp_state_file="$STATE_FILE.tmp.$$"
+  # Atomic append with file locking to prevent corruption
   (
     flock -x 200
-    echo "$step_name" >> "$temp_state_file"
-  ) 200>"$temp_state_file" && mv "$temp_state_file" "$STATE_FILE" 2>/dev/null || {
+    echo "$step_name" >> "$STATE_FILE"
+  ) 200>>"$STATE_FILE" 2>/dev/null || {
     log_error "Failed to update state file for step: $step_name"
     return 1
   }
@@ -626,7 +625,6 @@ ui_info "ArchInstaller will now configure your system"
 if is_step_complete "system_preparation"; then
   ui_info "Step 1 (System Preparation) already completed - skipping"
 else
-  step "System Preparation"
   ui_info "Installing system utilities..."
   if step "System Preparation" && source "$SCRIPTS_DIR/system_preparation.sh"; then
     mark_step_complete_with_progress "system_preparation" "completed"
@@ -648,9 +646,8 @@ fi
 if is_step_complete "shell_setup"; then
   ui_info "Step 2 (Shell Setup) already completed - skipping"
 else
-  step "Shell Setup"
-  ui_info "Installing shell environment..."
-  if step "Shell Setup" && source "$SCRIPTS_DIR/shell_setup.sh"; then
+    ui_info "Installing shell environment..."
+    if step "Shell Setup" && source "$SCRIPTS_DIR/shell_setup.sh"; then
     mark_step_complete_with_progress "shell_setup" "completed"
   else
     mark_step_complete_with_progress "shell_setup" "failed"
@@ -668,7 +665,6 @@ else
   if is_step_complete "plymouth_setup"; then
     ui_info "Step 3 (Plymouth Setup) already completed - skipping"
   else
-    step "Plymouth Setup"
     ui_info "Configuring boot..."
     if step "Plymouth Setup" && source "$SCRIPTS_DIR/plymouth.sh"; then
       mark_step_complete_with_progress "plymouth_setup" "completed"
@@ -685,7 +681,6 @@ fi
 if is_step_complete "yay_installation"; then
   ui_info "Step 4 (Yay Installation) already completed - skipping"
 else
-  step "Yay Installation"
   ui_info "Installing AUR helper..."
   if step "Yay Installation" && source "$SCRIPTS_DIR/yay.sh"; then
     mark_step_complete_with_progress "yay_installation" "completed"
@@ -702,7 +697,6 @@ fi
 if is_step_complete "programs_installation"; then
   ui_info "Step 5 (Programs Installation) already completed - skipping"
 else
-  step "Programs Installation"
   ui_info "Installing applications..."
   if step "Programs Installation" && source "$SCRIPTS_DIR/programs.sh"; then
     mark_step_complete_with_progress "programs_installation" "completed"
@@ -723,7 +717,6 @@ else
   if is_step_complete "gaming_mode"; then
     ui_info "Step 6 (Gaming Mode) already completed - skipping"
   else
-    step "Gaming Mode"
     ui_info "Setting up gaming tools (optional)..."
     
     if step "Gaming Mode" && source "$SCRIPTS_DIR/gaming_mode.sh"; then
@@ -741,7 +734,6 @@ fi
 if is_step_complete "bootloader_config"; then
   ui_info "Step 7 (Bootloader Configuration) already completed - skipping"
 else
-  step "Bootloader and Kernel Configuration"
   ui_info "Configuring bootloader..."
   if step "Bootloader and Kernel Configuration" && source "$SCRIPTS_DIR/bootloader_config.sh"; then
     mark_step_complete_with_progress "bootloader_config" "completed"
@@ -763,7 +755,6 @@ fi
 if is_step_complete "fail2ban_setup"; then
   ui_info "Step 8 (Fail2ban Setup) already completed - skipping"
 else
-  step "Fail2ban Setup"
   ui_info "Setting up security protection for SSH..."
   if step "Fail2ban Setup" && source "$SCRIPTS_DIR/fail2ban.sh"; then
     mark_step_complete_with_progress "fail2ban_setup" "completed"
@@ -779,7 +770,6 @@ fi
 if is_step_complete "system_services"; then
   ui_info "Step 9 (System Services) already completed - skipping"
 else
-  step "System Services"
   ui_info "Configuring services..."
   if step "System Services" && source "$SCRIPTS_DIR/system_services.sh"; then
     mark_step_complete_with_progress "system_services" "completed"
@@ -796,7 +786,6 @@ fi
 if is_step_complete "wakeonlan_config"; then
   ui_info "Step 10 (Wake-on-LAN Configuration) already completed - skipping"
 else
-  step "Wake-on-LAN Configuration"
   ui_info "Configuring Wake-on-LAN for ethernet devices..."
   if step "Wake-on-LAN Configuration" && source "$SCRIPTS_DIR/wakeonlan_config.sh" && configure_wakeonlan; then
     mark_step_complete_with_progress "wakeonlan_config" "completed"
@@ -813,7 +802,6 @@ fi
 if is_step_complete "maintenance"; then
   ui_info "Step 11 (Maintenance) already completed - skipping"
 else
-  step "Maintenance"
   ui_info "System optimization..."
   if step "Maintenance" && source "$SCRIPTS_DIR/maintenance.sh"; then
     mark_step_complete_with_progress "maintenance" "completed"

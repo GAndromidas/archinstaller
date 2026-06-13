@@ -12,7 +12,7 @@ add_systemd_boot_kernel_params() {
     step "Configuring kernel parameters for UKI system"
     
     local cmdline_file="/etc/kernel/cmdline"
-    local uki_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash"
+    local uki_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash plymouth.ignore-serial-consoles"
     
     # Read existing cmdline if it exists
     local existing_cmdline=""
@@ -101,7 +101,7 @@ add_systemd_boot_kernel_params() {
       sudo sed -i 's/  */ /g; s/^ *//; s/ *$//' "$entry" # Clean up extra spaces
       
       # For traditional systems, add full Plymouth-compatible parameters (same quieting as UKI)
-      if sudo sed -i '/^options / s/$/ quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash/' "$entry"; then
+      if sudo sed -i '/^options / s/$/ quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash plymouth.ignore-serial-consoles/' "$entry"; then
         log_success "Updated kernel parameters in $entry_name"
         ((modified_count++))
       else
@@ -485,7 +485,7 @@ configure_grub() {
       step "Configuring kernel parameters for UKI system"
       
       local cmdline_file="/etc/kernel/cmdline"
-      local uki_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash"
+      local uki_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash plymouth.ignore-serial-consoles"
       
       # Read existing cmdline if it exists
       local existing_cmdline=""
@@ -549,9 +549,16 @@ configure_grub() {
 
     set_grub_config "GRUB_SAVEDEFAULT" "true"
     
-    # For traditional systems, add full Plymouth-compatible parameters (same quieting as UKI)
-    set_grub_config "GRUB_CMDLINE_LINUX_DEFAULT" '"quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash plymouth.ignore-serial-consoles"'
-    ui_info "Traditional system detected - using Plymouth-compatible kernel parameters"
+    # For traditional systems, merge Plymouth-compatible parameters with existing ones
+    local grub_cmdline_current=""
+    if [[ -f /etc/default/grub ]]; then
+      grub_cmdline_current=$(grep "^GRUB_CMDLINE_LINUX_DEFAULT=" /etc/default/grub | sed 's/^GRUB_CMDLINE_LINUX_DEFAULT="//' | sed 's/"$//' || echo "")
+    fi
+    local grub_plymouth_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash plymouth.ignore-serial-consoles"
+    local merged_cmdline="$grub_cmdline_current $grub_plymouth_params"
+    merged_cmdline=$(echo "$merged_cmdline" | tr ' ' '\n' | sort -u | tr '\n' ' ' | sed 's/^ *//;s/ *$//')
+    set_grub_config "GRUB_CMDLINE_LINUX_DEFAULT" "\"$merged_cmdline\""
+    ui_info "Traditional system detected - merged Plymouth-compatible kernel parameters"
     
     set_grub_config "GRUB_DISABLE_SUBMENU" "notlinux"
     set_grub_config "GRUB_GFXMODE" "auto"
@@ -618,7 +625,7 @@ configure_limine_basic() {
     step "Configuring kernel parameters for UKI system"
     
     local cmdline_file="/etc/kernel/cmdline"
-    local uki_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash"
+    local uki_params="quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash plymouth.ignore-serial-consoles"
     
     # Read existing cmdline if it exists
     local existing_cmdline=""
@@ -705,7 +712,7 @@ configure_limine_basic() {
   local cmdline="root=UUID=$root_uuid rw"
   
   # For traditional systems, add full Plymouth-compatible parameters (same quieting as UKI)
-  cmdline="$cmdline quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash"
+  cmdline="$cmdline quiet loglevel=0 rd.udev.log_level=0 rd.systemd.show_status=false systemd.show_status=false splash plymouth.ignore-serial-consoles"
   ui_info "Traditional system detected - using Plymouth-compatible kernel parameters for Limine"
   
   # Add filesystem-specific options

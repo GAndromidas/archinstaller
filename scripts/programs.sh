@@ -414,10 +414,10 @@ main() {
 	determine_package_lists
 	handle_de_packages
 	handle_flatpak_packages
-	remove_pacman_packages "${specific_remove_programs[@]}"
-	install_pacman_packages "${essential_programs[@]}"
-	install_aur_packages "${yay_programs[@]}"
-	install_flatpak_packages "${flatpak_programs[@]}"
+	remove_pacman_packages
+	install_pacman_packages
+	install_aur_packages
+	install_flatpak_packages
 
 	if [[ "$INSTALL_MODE" == "server" ]]; then
 		configure_server_applications

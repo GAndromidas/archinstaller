@@ -430,6 +430,7 @@ EOF
 
 
 # Check if system uses UKI (Unified Kernel Image)
+# Uses a strict, reliable detection to avoid false positives on non-UKI systems
 is_uki_system() {
   # Method 1: Check for UKI files in /boot/efi/EFI/Linux/
   if [[ -d /boot/efi/EFI/Linux/ ]] && ls /boot/efi/EFI/Linux/*.efi >/dev/null 2>&1; then
@@ -441,42 +442,18 @@ is_uki_system() {
     return 0
   fi
   
-  # Method 3: Check for any .efi files in /boot that might be UKI
-  if find /boot -name "*.efi" -path "*linux*" 2>/dev/null | grep -q .; then
-    return 0
-  fi
-  
-  # Method 4: Check for UKI entries in systemd-boot configuration
-  if [[ -d /boot/loader/entries ]]; then
-    local uki_entries=$(find /boot/loader/entries -name "*.conf" -exec grep -l "linux.*\.efi\|efi\|uki" {} \; 2>/dev/null)
-    if [[ -n "$uki_entries" ]]; then
-      return 0
-    fi
-  fi
-  
-  # Method 5: Check if systemd-boot is configured for UKI
-  if [[ -f /boot/loader/loader.conf ]]; then
-    if grep -q "default.*\.efi\|efi\|uki" /boot/loader/loader.conf 2>/dev/null; then
-      return 0
-    fi
-  fi
-  
-  # Method 6: Check for UKI-related packages installed
+  # Method 3: Check for UKI-related packages installed (most reliable)
   if pacman -Q systemd-ukify >/dev/null 2>&1 || pacman -Q ukify >/dev/null 2>&1; then
     return 0
   fi
   
-  # Method 7: Check for UKI in kernel command line (running system)
-  if grep -q "uki\|efi\|unified" /proc/cmdline 2>/dev/null; then
-    return 0
-  fi
-  
-  # Method 8: Check for UKI in EFI variables
-  if command -v efibootmgr >/dev/null 2>&1; then
-    local efi_entries=$(efibootmgr 2>/dev/null | grep -i "linux\|arch\|uki")
-    if [[ -n "$efi_entries" ]]; then
-      return 0
-    fi
+  # Method 4: Check for UKI entries in systemd-boot config pointing to .efi files
+  if [[ -d /boot/loader/entries ]]; then
+    while IFS= read -r -d '' entry; do
+      if grep -qE "^\s*efi\s+/" "$entry" 2>/dev/null; then
+        return 0
+      fi
+    done < <(find /boot/loader/entries -name "*.conf" -print0 2>/dev/null)
   fi
   
   return 1
@@ -916,7 +893,10 @@ run_step() {
   shift
   step "$description"
 
-  if "$@" 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
+  local ret
+  "$@" 2>&1 | tee -a "$INSTALL_LOG" >/dev/null
+  ret=${PIPESTATUS[0]}
+  if [ "$ret" -eq 0 ]; then
     log_success "$description"
 
     # Track installed packages

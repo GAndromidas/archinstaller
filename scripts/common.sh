@@ -344,7 +344,11 @@ supports_gum() {
 
 ui_info() {
   local message="$1"
-  echo -e "$message"
+  if supports_gum; then
+    gum style --foreground 36 "$message"
+  else
+    echo -e "${CYAN}$message${RESET}"
+  fi
 }
 
 ui_success() {
@@ -358,7 +362,11 @@ ui_success() {
 
 ui_warn() {
   local message="$1"
-  echo -e "$message"
+  if supports_gum; then
+    gum style --foreground 226 "⚠ $message"
+  else
+    echo -e "${YELLOW}⚠ $message${RESET}"
+  fi
 }
 
 ui_error() {
@@ -718,9 +726,13 @@ show_traditional_menu() {
 # SECTION 9: UTILITY & HELPER FUNCTIONS
 # ============================================================================
 step() {
-  local msg="\n${CYAN}> $1${RESET}"
-  echo -e "$msg"
-  log_to_file "STEP: $1"
+  local message="$1"
+  if supports_gum; then
+    gum style --foreground 212 "▶ $message"
+  else
+    echo -e "${PURPLE}▶ $message${RESET}"
+  fi
+  log_to_file "STEP: $message"
   ((CURRENT_STEP++))
 }
 
@@ -743,7 +755,7 @@ log_success() {
 log_warning() {
   local message="$1"
   local context="${2:-}"
-  echo -e "! $message"
+  echo -e "${YELLOW}⚠ $message${RESET}"
   if [ -n "$context" ]; then
     echo -e "  Note: $context"
   fi
@@ -754,7 +766,7 @@ log_warning() {
 log_error() {
   local message="$1"
   local hint="${2:-}"
-  echo -e "$message"
+  echo -e "${RED}✗ $message${RESET}"
   if [ -n "$hint" ]; then
     echo -e "  Tip: $hint"
   fi

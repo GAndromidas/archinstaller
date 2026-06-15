@@ -170,7 +170,6 @@ Choose the perfect setup for your use case:
 | **Standard** | Full-featured desktop | General users, enthusiasts |
 | **Minimal** | Lightweight essentials | Low-spec hardware, minimal bloat |
 | **Server** | Headless configuration | Docker, SSH, server utilities |
-| **Custom** | Interactive selection | Power users, specific requirements |
 | **Gaming** | Gaming-optimized | Steam, Heroic Games Launcher, Faugus Launcher, performance tools |
 
 ---
@@ -222,7 +221,6 @@ essential:       # Mode-specific packages
 desktop_environments:  # DE-specific packages
 aur:             # AUR packages
 flatpak:         # Flatpak applications
-custom:          # Optional additions
 ```
 
 **Easy Customization:**

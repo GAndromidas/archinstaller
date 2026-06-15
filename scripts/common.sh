@@ -574,11 +574,11 @@ validate_install_mode() {
   local mode="$1"
 
   case "$mode" in
-    "default"|"minimal"|"server"|"custom")
+    "default"|"minimal"|"server")
       return 0
       ;;
     *)
-      log_error "Invalid INSTALL_MODE: '$mode'. Valid modes are: default, minimal, server, custom"
+      log_error "Invalid INSTALL_MODE: '$mode'. Valid modes are: default, minimal, server"
       return 1
       ;;
   esac
@@ -605,7 +605,6 @@ show_gum_menu() {
     "Standard - Complete setup with all packages (intermediate users)" \
     "Minimal - Essential tools only (recommended for new users)" \
     "Server - Headless server setup (Docker, SSH, etc.)" \
-    "Custom - Interactive selection (choose what to install) (advanced users)" \
     "Exit - Cancel installation")
 
   case "$choice" in
@@ -631,15 +630,6 @@ show_gum_menu() {
       INSTALL_MODE="server"
       if validate_install_mode "$INSTALL_MODE"; then
         echo "Installation Mode: Server - Headless server setup"
-      else
-        log_error "Failed to validate installation mode"
-        exit 1
-      fi
-      ;;
-    "Custom"*)
-      INSTALL_MODE="custom"
-      if validate_install_mode "$INSTALL_MODE"; then
-        echo "Installation Mode: Custom - Interactive selection (choose what to install) (advanced users)"
       else
         log_error "Failed to validate installation mode"
         exit 1
@@ -675,12 +665,11 @@ show_traditional_menu() {
   printf "  1) Standard%-12s - Complete setup with all packages (intermediate users)\n" ""
   printf "  2) Minimal%-13s - Essential tools only (recommended for new users)\n" ""
   printf "  3) Server%-13s - Headless server setup (Docker, SSH, etc.)\n" ""
-  printf "  4) Custom%-14s - Interactive selection (choose what to install) (advanced users)\n" ""
-  printf "  5) Exit%-16s - Cancel installation\n" ""
+  printf "  4) Exit%-16s - Cancel installation\n" ""
   echo ""
 
   while true; do
-    read -r -p "$(echo -e "${THEME_SECONDARY}Enter your choice [1-5]: ${RESET}")" menu_choice
+    read -r -p "$(echo -e "${THEME_SECONDARY}Enter your choice [1-4]: ${RESET}")" menu_choice
           case "$menu_choice" in
         1)
           INSTALL_MODE="default"
@@ -712,22 +701,12 @@ show_traditional_menu() {
             exit 1
           fi
           ;;
-        4)
-          INSTALL_MODE="custom"
-          if validate_install_mode "$INSTALL_MODE"; then
-            echo "Installation Mode: Custom - Interactive selection (choose what to install) (advanced users)"
-            break
-          else
-            log_error "Failed to validate installation mode"
-            exit 1
-          fi
-          ;;
-      5)
+      4)
         echo -e "\n${YELLOW}Installation cancelled. You can run this script again anytime.${RESET}"
         exit 0
         ;;
       *)
-        echo -e "\n${RED}Invalid choice! Please enter 1, 2, 3, 4, or 5.${RESET}\n"
+        echo -e "\n${RED}Invalid choice! Please enter 1, 2, 3, or 4.${RESET}\n"
         ;;
     esac
   done

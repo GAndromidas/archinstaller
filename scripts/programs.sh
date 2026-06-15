@@ -63,104 +63,6 @@ load_package_lists_from_yaml() {
 	read_yaml_packages "$PROGRAMS_YAML" ".desktop_environments.gnome.remove" gnome_remove_programs
 	read_yaml_packages "$PROGRAMS_YAML" ".desktop_environments.cosmic.install" cosmic_install_programs
 	read_yaml_packages "$PROGRAMS_YAML" ".desktop_environments.cosmic.remove" cosmic_remove_programs
-	read_yaml_packages_with_desc "$PROGRAMS_YAML" ".custom.essential" custom_selectable_essential_programs custom_selectable_essential_descriptions
-	read_yaml_packages_with_desc "$PROGRAMS_YAML" ".custom.aur" custom_selectable_yay_programs custom_selectable_yay_descriptions
-}
-
-# ===== Custom Selection Functions =====
-show_checklist() {
-	local title="$1"
-	shift
-	local whiptail_choices=("$@")
-
-	local gum_options=()
-	for ((i = 0; i < ${#whiptail_choices[@]}; i += 3)); do
-		gum_options+=("${whiptail_choices[i + 1]}")
-	done
-
-	local selected_output
-	selected_output=$(printf "%s\\n" "${gum_options[@]}" | gum filter \
-		--no-limit \
-		--height 15 \
-		--placeholder "Filter packages..." \
-		--prompt "Use space to select, enter to confirm:" \
-		--header "$title")
-
-	if [[ $? -ne 0 ]]; then
-		echo ""
-		return
-	fi
-
-	local final_selected_pkgs=()
-	while IFS= read -r line; do
-		if [[ -n "$line" ]]; then
-			final_selected_pkgs+=("$(echo "$line" | cut -d' ' -f1)")
-		fi
-	done <<<"$selected_output"
-
-	printf "%s\\n" "${final_selected_pkgs[@]}"
-}
-
-custom_essential_selection() {
-	local choices=()
-	for i in "${!custom_selectable_essential_programs[@]}"; do
-		local pkg="${custom_selectable_essential_programs[$i]}"
-		[[ -z "$pkg" ]] && continue
-		choices+=("$pkg" "$pkg - ${custom_selectable_essential_descriptions[$i]}" "off")
-	done
-
-	if [[ ${#choices[@]} -eq 0 ]]; then return; fi
-	local selected=$(show_checklist "Select additional essential packages:" "${choices[@]}")
-
-	while IFS= read -r pkg; do
-		if [[ -n "$pkg" && ! " ${essential_programs[*]} " =~ " $pkg " ]]; then
-			essential_programs+=("$pkg")
-		fi
-	done <<<"$selected"
-}
-
-custom_aur_selection() {
-	local choices=()
-	for i in "${!custom_selectable_yay_programs[@]}"; do
-		local pkg="${custom_selectable_yay_programs[$i]}"
-		[[ -z "$pkg" ]] && continue
-		choices+=("$pkg" "$pkg - ${custom_selectable_yay_descriptions[$i]}" "off")
-	done
-
-	if [[ ${#choices[@]} -eq 0 ]]; then return; fi
-	local selected=$(show_checklist "Select AUR packages:" "${choices[@]}")
-
-	while IFS= read -r pkg; do
-		if [[ -n "$pkg" && ! " ${yay_programs[*]} " =~ " $pkg " ]]; then
-			yay_programs+=("$pkg")
-		fi
-	done <<<"$selected"
-}
-
-custom_flatpak_selection() {
-	local de_lower
-	de_lower=$(echo "$XDG_CURRENT_DESKTOP" | tr '[:upper:]' '[:lower:]')
-	[[ -z "$de_lower" ]] && de_lower="generic"
-
-	local de_flatpak_names=()
-	local de_flatpak_descriptions=()
-	read_yaml_packages "$PROGRAMS_YAML" ".custom.flatpak.$de_lower" de_flatpak_names de_flatpak_descriptions
-
-	local choices=()
-	for i in "${!de_flatpak_names[@]}"; do
-		local pkg="${de_flatpak_names[$i]}"
-		[[ -z "$pkg" ]] && continue
-		choices+=("$pkg" "$pkg - ${de_flatpak_descriptions[$i]}" "off")
-	done
-
-	if [[ ${#choices[@]} -eq 0 ]]; then return; fi
-	local selected=$(show_checklist "Select Flatpak applications:" "${choices[@]}")
-
-	while IFS= read -r pkg; do
-		if [[ -n "$pkg" && ! " ${flatpak_programs[*]} " =~ " $pkg " ]]; then
-			flatpak_programs+=("$pkg")
-		fi
-	done <<<"$selected"
 }
 
 # ===== Package List Determination =====
@@ -181,12 +83,6 @@ determine_package_lists() {
 	"server")
 		essential_programs=("${essential_programs_server[@]}")
 		# No AUR or Flatpak packages for server mode by default
-		;;
-	"custom")
-		ui_info "Presenting menus for additional package selection..."
-		custom_essential_selection
-		custom_aur_selection
-		custom_flatpak_selection
 		;;
 	*)
 		log_error "Unknown installation mode: $INSTALL_MODE"

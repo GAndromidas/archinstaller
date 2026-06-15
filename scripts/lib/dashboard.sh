@@ -16,21 +16,31 @@ DASHBOARD_INNER_W=60
 DASHBOARD_CURRENT_STEP=0
 DASHBOARD_STEP_START=0
 DASHBOARD_FRAME_END=0
+DASHBOARD_ROW_OFFSET=0
 
 dashboard_init() {
-    clear
     DASHBOARD_START_TIME=$(date +%s)
     DASHBOARD_STEP_TIMES=()
     DASHBOARD_STEP_NAMES=()
     DASHBOARD_STEP_STATUSES=()
     DASHBOARD_STEP_ROWS=()
 
+    # Remember where we are so dashboard_step can overwrite lines in-place
+    local cursor_row=0
+    if echo -ne '\033[6n' > /dev/tty 2>/dev/null; then
+        local pos
+        IFS=';' read -sdR pos < /dev/tty 2>/dev/null
+        cursor_row=${pos#*[}
+        cursor_row=${cursor_row:-0}
+    fi
+    DASHBOARD_ROW_OFFSET=$((cursor_row > 0 ? cursor_row - 1 : 0))
+
     local total=${TOTAL_STEPS:-11}
     local cols
     cols=$(tput cols 2>/dev/null || echo 80)
     local w=$((cols - 4))
     (( w < 50 )) && w=50
-    (( w > 80 )) && w=80
+    (( w > 120 )) && w=120
     DASHBOARD_INNER_W=$w
 
     local row=0
@@ -59,8 +69,7 @@ dashboard_init() {
     echo -e "${THEME_BORDER}  ├$(printf '─%.0s' $(seq 1 $w))┤${RESET}"
     row=5
 
-    # Step lines — fixed prefix: "  │  NN  ○ " (11 chars), suffix: "  │" (3 chars)
-    # Available for name = w - 14
+    # Step lines
     local name_w=$((w - 14))
     for ((i = 1; i <= total; i++)); do
         DASHBOARD_STEP_ROWS[$i]=$row
@@ -86,7 +95,7 @@ dashboard_init() {
     echo -e "${THEME_BORDER}  └$(printf '─%.0s' $(seq 1 $w))┘${RESET}"
     DASHBOARD_FRAME_END=$row
 
-    tput cup $((DASHBOARD_FRAME_END + 1)) 0
+    tput cup $((DASHBOARD_ROW_OFFSET + DASHBOARD_FRAME_END + 1)) 0
 }
 
 dashboard_step() {
@@ -101,10 +110,10 @@ dashboard_step() {
 
     local pct=$(( (num - 1) * 100 / total ))
 
-    # Progress bar: proportional width, capped at 40
+    # Progress bar: proportional width, capped at 50
     local bar_w=$((w * 2 / 5))
     (( bar_w < 15 )) && bar_w=15
-    (( bar_w > 40 )) && bar_w=40
+    (( bar_w > 50 )) && bar_w=50
     local filled=$(( pct * bar_w / 100 ))
     (( filled < 0 )) && filled=0
     (( filled > bar_w )) && filled=$bar_w
@@ -119,18 +128,18 @@ dashboard_step() {
     local step_info="Step ${num}/${total}"
     local title_pad=$((w - ${#title} - ${#step_info} - 2))
     (( title_pad < 1 )) && title_pad=1
-    tput cup 1 0
+    tput cup $((DASHBOARD_ROW_OFFSET + 1)) 0
     tput el
     printf "${THEME_BORDER}  │${RESET} ${THEME_HEADER}%s${RESET}%*s ${THEME_MUTED}%s${RESET} ${THEME_BORDER}│${RESET}" \
         "$title" $title_pad "" "$step_info"
 
     # Progress bar line: "  │  ███░░░  NAME  36%  │"
-    # Fixed: 5 ("  │  ") + bar_w + 2 ("  ") + 1 (" ") + 5 ("  36%") + 3 ("  │") = 16 + bar_w
-    local name_w=$((w - 16 - bar_w))
+    # Fixed: 5 ("  │  ") + bar_w + 2 ("  ") + 1 (" ") + 3 ("%3d") + 1 ("%") + 3 ("  │") = 15 + bar_w
+    local name_w=$((w - 15 - bar_w))
     (( name_w < 1 )) && name_w=1
     local disp_name="$name"
     (( ${#disp_name} > name_w )) && disp_name="${disp_name:0:$((name_w-1))}…"
-    tput cup 3 0
+    tput cup $((DASHBOARD_ROW_OFFSET + 3)) 0
     tput el
     printf "${THEME_BORDER}  │${RESET}  ${THEME_SUCCESS}%s${RESET}  ${THEME_TEXT}%-*s${RESET} %3d%%${RESET}  ${THEME_BORDER}│${RESET}" \
         "$bar" $name_w "$disp_name" $pct
@@ -139,12 +148,12 @@ dashboard_step() {
     # Fixed: 11 ("  │  NN  ● ") + 3 ("  │") = 14
     local name_w2=$((w - 14))
     local step_row="${DASHBOARD_STEP_ROWS[$num]}"
-    tput cup $step_row 0
+    tput cup $((DASHBOARD_ROW_OFFSET + step_row)) 0
     tput el
     printf "${THEME_BORDER}  │${RESET}  %2d  ● %-${name_w2}s  ${THEME_BORDER}│${RESET}" \
         "$num" "Running..."
 
-    tput cup $((DASHBOARD_FRAME_END + 1)) 0
+    tput cup $((DASHBOARD_ROW_OFFSET + DASHBOARD_FRAME_END + 1)) 0
 
     DASHBOARD_STEP_START=$(date +%s)
 }
@@ -174,12 +183,12 @@ dashboard_ok() {
     # "  │  NN  ✓ NAME            TIMEs  │"
     # Fixed: 11 ("  │  NN  ✓ ") + 1 (" ") + 6 (time) + 3 ("  │") = 21
     local name_w=$((w - 21))
-    tput cup $step_row 0
+    tput cup $((DASHBOARD_ROW_OFFSET + step_row)) 0
     tput el
     printf "${THEME_BORDER}  │${RESET}  %2d  ${THEME_SUCCESS}✓${RESET} %-${name_w}s ${THEME_MUTED}%6s${RESET}  ${THEME_BORDER}│${RESET}" \
         "$num" "$name" "$time_str"
 
-    tput cup $((DASHBOARD_FRAME_END + 1)) 0
+    tput cup $((DASHBOARD_ROW_OFFSET + DASHBOARD_FRAME_END + 1)) 0
 }
 
 dashboard_fail() {
@@ -195,12 +204,12 @@ dashboard_fail() {
     local name="${DASHBOARD_STEP_NAMES[$num]}"
 
     local name_w=$((w - 21))
-    tput cup $step_row 0
+    tput cup $((DASHBOARD_ROW_OFFSET + step_row)) 0
     tput el
     printf "${THEME_BORDER}  │${RESET}  %2d  ${THEME_ERROR}✗${RESET} %-${name_w}s ${THEME_MUTED}%6s${RESET}  ${THEME_BORDER}│${RESET}" \
         "$num" "$name" "$time_str"
 
-    tput cup $((DASHBOARD_FRAME_END + 1)) 0
+    tput cup $((DASHBOARD_ROW_OFFSET + DASHBOARD_FRAME_END + 1)) 0
 }
 
 dashboard_skip() {
@@ -218,12 +227,12 @@ dashboard_skip() {
     local disp_msg="$msg"
     (( ${#disp_msg} > name_w )) && disp_msg="${disp_msg:0:$((name_w-1))}…"
 
-    tput cup $step_row 0
+    tput cup $((DASHBOARD_ROW_OFFSET + step_row)) 0
     tput el
     printf "${THEME_BORDER}  │${RESET}  %2d  ${THEME_MUTED}◇${RESET} %-${name_w}s  ${THEME_BORDER}│${RESET}" \
         "$num" "$disp_msg"
 
-    tput cup $((DASHBOARD_FRAME_END + 1)) 0
+    tput cup $((DASHBOARD_ROW_OFFSET + DASHBOARD_FRAME_END + 1)) 0
 }
 
 dashboard_finish() {
@@ -246,7 +255,7 @@ dashboard_finish() {
     cols=$(tput cols 2>/dev/null || echo 80)
     local w=$((cols - 4))
     (( w < 50 )) && w=50
-    (( w > 80 )) && w=80
+    (( w > 120 )) && w=120
 
     local title
     if [ "$fail" -gt 0 ]; then

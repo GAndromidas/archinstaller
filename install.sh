@@ -29,8 +29,7 @@ INSTALLATION MODES:
     Standard        Complete setup with all recommended packages (intermediate users)
     Minimal         Essential tools only for lightweight installations (new users)
     Server          Headless configuration (Docker, SSH, server utilities)
-    Custom          Interactive selection of packages to install (advanced users)
-    Gaming          Gaming-optimized setup with Steam, Heroic Games Launcher, 
+    Gaming          Gaming-optimized setup with Steam, Heroic Games Launcher,
                     Faugus Launcher, and performance tools
 
 FEATURES:

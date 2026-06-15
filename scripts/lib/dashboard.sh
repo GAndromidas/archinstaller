@@ -19,21 +19,13 @@ DASHBOARD_FRAME_END=0
 DASHBOARD_ROW_OFFSET=0
 
 dashboard_init() {
+    clear
     DASHBOARD_START_TIME=$(date +%s)
     DASHBOARD_STEP_TIMES=()
     DASHBOARD_STEP_NAMES=()
     DASHBOARD_STEP_STATUSES=()
     DASHBOARD_STEP_ROWS=()
-
-    # Remember where we are so dashboard_step can overwrite lines in-place
-    local cursor_row=0
-    if echo -ne '\033[6n' > /dev/tty 2>/dev/null; then
-        local pos
-        IFS=';' read -sdR pos < /dev/tty 2>/dev/null
-        cursor_row=${pos#*[}
-        cursor_row=${cursor_row:-0}
-    fi
-    DASHBOARD_ROW_OFFSET=$((cursor_row > 0 ? cursor_row - 1 : 0))
+    DASHBOARD_ROW_OFFSET=0
 
     local total=${TOTAL_STEPS:-11}
     local cols

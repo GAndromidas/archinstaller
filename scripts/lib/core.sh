@@ -40,7 +40,7 @@ readonly GUM_HEADER="33"
 readonly GUM_BORDER="33"
 
 # Global variables
-INSTALL_LOG="${INSTALL_LOG:-$HOME/.archinstaller.log}"
+export INSTALL_LOG="${INSTALL_LOG:-$HOME/.archinstaller.log}"
 STATE_FILE="${STATE_FILE:-$HOME/.archinstaller.state}"
 ERRORS=()
 INSTALLED_PACKAGES=()

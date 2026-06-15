@@ -105,6 +105,9 @@ source "$SCRIPTS_DIR/lib/config.sh"
 # Source common.sh for backward compatibility with existing scripts
 source "$SCRIPTS_DIR/common.sh"
 
+# Source dashboard module for professional wizard-style display
+source "$SCRIPTS_DIR/lib/dashboard.sh"
+
 # Install gum silently for enhanced UI experience
 if ! command -v gum >/dev/null 2>&1; then
   log_to_file "Installing gum for enhanced UI experience..."
@@ -627,21 +630,21 @@ save_log_on_exit() {
   } >> "$INSTALL_LOG"
 }
 
-# Installation start
-ui_header "Starting Installation"
-ui_info "ArchInstaller will now configure your system"
+# Installation start — enter dashboard wizard mode
+dashboard_init
 
 # Step 1: System Preparation
-# Check if step was previously completed successfully
+dashboard_step "System Preparation" 1
 if is_step_complete "system_preparation"; then
-  ui_info "Step 1 (System Preparation) already completed - skipping"
+  dashboard_skip
 else
-  if step "System Preparation" && source "$SCRIPTS_DIR/system_preparation.sh"; then
+  if dashboard_run "System Preparation" "$SCRIPTS_DIR/system_preparation.sh"; then
     mark_step_complete_with_progress "system_preparation" "completed"
+    dashboard_ok
   else
     mark_step_complete_with_progress "system_preparation" "failed"
+    dashboard_fail
     log_error "System preparation failed"
-    # For critical steps, ask user if they want to continue
     if gum_confirm "System preparation failed. Continue with installation?" "This may cause issues with subsequent steps."; then
       ui_warn "Continuing installation despite system preparation failure"
     else
@@ -652,96 +655,101 @@ else
 fi
 
 # Step 2: Shell Setup
+dashboard_step "Shell Setup" 2
 if is_step_complete "shell_setup"; then
-  ui_info "Step 2 (Shell Setup) already completed - skipping"
+  dashboard_skip
 else
-  if step "Shell Setup" && source "$SCRIPTS_DIR/shell_setup.sh"; then
+  if dashboard_run "Shell Setup" "$SCRIPTS_DIR/shell_setup.sh"; then
     mark_step_complete_with_progress "shell_setup" "completed"
+    dashboard_ok
   else
     mark_step_complete_with_progress "shell_setup" "failed"
+    dashboard_fail
     log_error "Shell setup failed"
     ui_warn "Shell setup failed but continuing installation"
   fi
 fi
 
 # Step 3: Plymouth Setup
+dashboard_step "Plymouth Setup" 3
 if [[ "$INSTALL_MODE" == "server" ]]; then
-  ui_info "Server mode selected, skipping Plymouth (graphical boot) setup."
+  dashboard_skip "Skipped — server mode"
+elif is_step_complete "plymouth_setup"; then
+  dashboard_skip
 else
-  # Check if step was previously completed successfully
-  if is_step_complete "plymouth_setup"; then
-    ui_info "Step 3 (Plymouth Setup) already completed - skipping"
+  if dashboard_run "Plymouth Setup" "$SCRIPTS_DIR/plymouth.sh"; then
+    mark_step_complete_with_progress "plymouth_setup" "completed"
+    dashboard_ok
   else
-    if step "Plymouth Setup" && source "$SCRIPTS_DIR/plymouth.sh"; then
-      mark_step_complete_with_progress "plymouth_setup" "completed"
-    else
-      mark_step_complete_with_progress "plymouth_setup" "failed"
-      log_error "Plymouth setup failed"
-      ui_warn "Plymouth setup failed but continuing installation"
-    fi
+    mark_step_complete_with_progress "plymouth_setup" "failed"
+    dashboard_fail
+    log_error "Plymouth setup failed"
+    ui_warn "Plymouth setup failed but continuing installation"
   fi
 fi
 
 # Step 4: Yay Installation
-# Check if step was previously completed successfully
+dashboard_step "Yay Installation" 4
 if is_step_complete "yay_installation"; then
-  ui_info "Step 4 (Yay Installation) already completed - skipping"
+  dashboard_skip
 else
-  if step "Yay Installation" && source "$SCRIPTS_DIR/yay.sh"; then
+  if dashboard_run "Yay Installation" "$SCRIPTS_DIR/yay.sh"; then
     mark_step_complete_with_progress "yay_installation" "completed"
+    dashboard_ok
   else
     mark_step_complete_with_progress "yay_installation" "failed"
+    dashboard_fail
     log_error "Yay installation failed"
-    # AUR helper is optional for basic functionality
     ui_warn "Yay installation failed but continuing installation (AUR packages will not be available)"
   fi
 fi
 
 # Step 5: Programs Installation
-# Check if step was previously completed successfully
+dashboard_step "Programs Installation" 5
 if is_step_complete "programs_installation"; then
-  ui_info "Step 5 (Programs Installation) already completed - skipping"
+  dashboard_skip
 else
-  if step "Programs Installation" && source "$SCRIPTS_DIR/programs.sh"; then
+  if dashboard_run "Programs Installation" "$SCRIPTS_DIR/programs.sh"; then
     mark_step_complete_with_progress "programs_installation" "completed"
+    dashboard_ok
   else
     mark_step_complete_with_progress "programs_installation" "failed"
+    dashboard_fail
     log_error "Programs installation failed"
-    # Programs are optional for system functionality
     ui_warn "Programs installation failed but continuing installation"
   fi
 fi
 
-
 # Step 6: Gaming Mode
+dashboard_step "Gaming Mode" 6
 if [[ "$INSTALL_MODE" == "server" ]]; then
-  ui_info "Server mode selected, skipping Gaming Mode setup."
+  dashboard_skip "Skipped — server mode"
+elif is_step_complete "gaming_mode"; then
+  dashboard_skip
 else
-  # Check if step was previously completed successfully
-  if is_step_complete "gaming_mode"; then
-    ui_info "Step 6 (Gaming Mode) already completed - skipping"
+  if dashboard_run "Gaming Mode" "$SCRIPTS_DIR/gaming_mode.sh"; then
+    mark_step_complete_with_progress "gaming_mode" "completed"
+    dashboard_ok
   else
-    if step "Gaming Mode" && source "$SCRIPTS_DIR/gaming_mode.sh"; then
-      mark_step_complete_with_progress "gaming_mode" "completed"
-    else
-      mark_step_complete_with_progress "gaming_mode" "failed"
-      log_error "Gaming Mode failed"
-      ui_warn "Gaming Mode failed but continuing installation (gaming optimizations not applied)"
-    fi
+    mark_step_complete_with_progress "gaming_mode" "failed"
+    dashboard_fail
+    log_error "Gaming Mode failed"
+    ui_warn "Gaming Mode failed but continuing installation (gaming optimizations not applied)"
   fi
 fi
 
 # Step 7: Bootloader and Kernel Configuration
-# Check if step was previously completed successfully
+dashboard_step "Bootloader and Kernel Configuration" 7
 if is_step_complete "bootloader_config"; then
-  ui_info "Step 7 (Bootloader Configuration) already completed - skipping"
+  dashboard_skip
 else
-  if step "Bootloader and Kernel Configuration" && source "$SCRIPTS_DIR/bootloader_config.sh"; then
+  if dashboard_run "Bootloader and Kernel Configuration" "$SCRIPTS_DIR/bootloader_config.sh"; then
     mark_step_complete_with_progress "bootloader_config" "completed"
+    dashboard_ok
   else
     mark_step_complete_with_progress "bootloader_config" "failed"
+    dashboard_fail
     log_error "Bootloader and kernel configuration failed"
-    # Bootloader is critical for system boot
     if gum_confirm "Bootloader configuration failed. Continue with installation?" "This may prevent your system from booting properly."; then
       ui_warn "Continuing installation despite bootloader configuration failure"
     else
@@ -752,64 +760,89 @@ else
 fi
 
 # Step 8: Fail2ban Setup
-# Check if step was previously completed successfully
+dashboard_step "Fail2ban Setup" 8
 if is_step_complete "fail2ban_setup"; then
-  ui_info "Step 8 (Fail2ban Setup) already completed - skipping"
+  dashboard_skip
 else
-  if step "Fail2ban Setup" && source "$SCRIPTS_DIR/fail2ban.sh"; then
+  if dashboard_run "Fail2ban Setup" "$SCRIPTS_DIR/fail2ban.sh"; then
     mark_step_complete_with_progress "fail2ban_setup" "completed"
+    dashboard_ok
   else
     mark_step_complete_with_progress "fail2ban_setup" "failed"
+    dashboard_fail
     log_error "Fail2ban setup failed"
     ui_warn "Fail2ban setup failed but continuing installation (SSH security protection not applied)"
   fi
 fi
 
 # Step 9: System Services
-# Check if step was previously completed successfully
+dashboard_step "System Services" 9
 if is_step_complete "system_services"; then
-  ui_info "Step 9 (System Services) already completed - skipping"
+  dashboard_skip
 else
-  if step "System Services" && source "$SCRIPTS_DIR/system_services.sh"; then
+  if dashboard_run "System Services" "$SCRIPTS_DIR/system_services.sh"; then
     mark_step_complete_with_progress "system_services" "completed"
+    dashboard_ok
   else
     mark_step_complete_with_progress "system_services" "failed"
+    dashboard_fail
     log_error "System services failed"
-    # System services are important but not always critical
     ui_warn "System services failed but continuing installation"
   fi
 fi
 
 # Step 10: Wake-on-LAN Configuration
-# Check if step was previously completed successfully
+dashboard_step "Wake-on-LAN Configuration" 10
 if is_step_complete "wakeonlan_config"; then
-  ui_info "Step 10 (Wake-on-LAN Configuration) already completed - skipping"
+  dashboard_skip
 else
-  if step "Wake-on-LAN Configuration" && source "$SCRIPTS_DIR/wakeonlan_config.sh" && configure_wakeonlan; then
+  if supports_gum; then
+    gum spin --spinner dot --title "Wake-on-LAN Configuration" -- bash -c "
+      source '$SCRIPTS_DIR/wakeonlan_config.sh' >> '$INSTALL_LOG' 2>&1
+      configure_wakeonlan >> '$INSTALL_LOG' 2>&1
+    "
+    local step10_ret=$?
+  else
+    echo -n "  Wake-on-LAN Configuration... "
+    source "$SCRIPTS_DIR/wakeonlan_config.sh" >> "$INSTALL_LOG" 2>&1 && configure_wakeonlan >> "$INSTALL_LOG" 2>&1
+    local step10_ret=$?
+    if [ $step10_ret -eq 0 ]; then
+      echo -e "${THEME_SUCCESS}done${RESET}"
+    else
+      echo -e "${THEME_ERROR}failed${RESET}"
+    fi
+  fi
+  if [ $step10_ret -eq 0 ]; then
     mark_step_complete_with_progress "wakeonlan_config" "completed"
+    dashboard_ok
   else
     mark_step_complete_with_progress "wakeonlan_config" "failed"
+    dashboard_fail
     log_error "Wake-on-LAN configuration failed"
-    # Wake-on-LAN is optional for system functionality
     ui_warn "Wake-on-LAN configuration failed but continuing installation"
   fi
 fi
 
 # Step 11: Maintenance
-# Check if step was previously completed successfully
+dashboard_step "Maintenance" 11
 if is_step_complete "maintenance"; then
-  ui_info "Step 11 (Maintenance) already completed - skipping"
+  dashboard_skip
 else
-  if step "Maintenance" && source "$SCRIPTS_DIR/maintenance.sh"; then
+  if dashboard_run "Maintenance" "$SCRIPTS_DIR/maintenance.sh"; then
     mark_step_complete_with_progress "maintenance" "completed"
+    dashboard_ok
   else
     mark_step_complete_with_progress "maintenance" "failed"
+    dashboard_fail
     log_error "Maintenance failed"
     ui_warn "Maintenance failed but installation completed"
   fi
 fi
+
+dashboard_finish
+
 if [ "$DRY_RUN" = true ]; then
-  ui_header "Dry-Run Complete"
+  echo ""
   ui_info "This was a preview run. No changes were made to your system."
   ui_info "To perform the actual installation, run: ./install.sh"
   echo ""

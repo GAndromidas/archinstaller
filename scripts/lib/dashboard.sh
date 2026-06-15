@@ -152,7 +152,9 @@ dashboard_step() {
 dashboard_run() {
     local script_path=$1
 
-    source "$script_path" >> "$INSTALL_LOG" 2>&1
+    # Only redirect stdout to log; stderr passes through so interactive
+    # prompts (gum confirm, read -p) remain visible on the terminal.
+    source "$script_path" >> "$INSTALL_LOG"
     local ret=$?
     return $ret
 }

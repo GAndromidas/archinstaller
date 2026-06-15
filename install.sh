@@ -749,8 +749,8 @@ if is_step_complete "wakeonlan_config"; then
   dashboard_skip
 else
   # Source first to define configure_wakeonlan, then call it
-  source "$SCRIPTS_DIR/wakeonlan_config.sh" >> "$INSTALL_LOG" 2>&1
-  if configure_wakeonlan >> "$INSTALL_LOG" 2>&1; then
+  source "$SCRIPTS_DIR/wakeonlan_config.sh" >> "$INSTALL_LOG"
+  if configure_wakeonlan >> "$INSTALL_LOG"; then
     mark_step_complete_with_progress "wakeonlan_config" "completed"
     dashboard_ok
   else

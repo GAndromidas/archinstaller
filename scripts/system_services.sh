@@ -1240,7 +1240,7 @@ detect_bluetooth_hardware() {
     # Professional red UI message for no Bluetooth
     if supports_gum; then
       echo ""
-      gum style --foreground 196 --border thick --padding "1 2" \
+      gum style --foreground "$GUM_ERROR" --border thick --padding "1 2" \
         "  No Bluetooth hardware detected in your system" \
         "  Check if Bluetooth adapter is properly connected" \
         "  Bluetooth packages installed but service will not be started"
@@ -1717,17 +1717,17 @@ setup_laptop_optimizations() {
   elif command -v gum >/dev/null 2>&1; then
     # Interactive mode with gum
     echo ""
-    gum style --foreground 226 "Laptop-specific optimizations available for $(echo $manufacturer | tr '[:lower:]' '[:upper]') $laptop_model:"
-    gum style --margin "0 2" --foreground 15 "Power profile management (tuned-ppd or power-profiles-daemon)"
-    gum style --margin "0 2" --foreground 15 "CPU-specific optimizations ($(echo $cpu_vendor | tr '[:lower:]' '[:upper]'))"
+    gum style --foreground "$GUM_WARN" "Laptop-specific optimizations available for $(echo $manufacturer | tr '[:lower:]' '[:upper]') $laptop_model:"
+    gum style --margin "0 2" --foreground "$GUM_TEXT" "Power profile management (tuned-ppd or power-profiles-daemon)"
+    gum style --margin "0 2" --foreground "$GUM_TEXT" "CPU-specific optimizations ($(echo $cpu_vendor | tr '[:lower:]' '[:upper]'))"
     
     # Show manufacturer-specific optimizations
     for opt in "${manufacturer_opts[@]}"; do
-      gum style --margin "0 2" --foreground 15 "$opt"
+      gum style --margin "0 2" --foreground "$GUM_TEXT" "$opt"
     done
     
     echo ""
-    gum style --foreground 11 "Tip: Set AUTO_LAPTOP_OPTS=true to skip this prompt in future"
+    gum style --foreground "$GUM_WARN" "Tip: Set AUTO_LAPTOP_OPTS=true to skip this prompt in future"
     if gum confirm --default=true "Enable laptop optimizations?"; then
       enable_laptop_opts=true
     fi

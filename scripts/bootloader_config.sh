@@ -210,8 +210,8 @@ check_kernel_options_consistency() {
     if command -v gum >/dev/null 2>&1; then
       # Interactive mode - ask user
       echo ""
-      gum style --foreground 226 "Kernel options are inconsistent across entries"
-      gum style --foreground 15 "This may cause boot issues or Plymouth display problems"
+      gum style --foreground "$GUM_WARN" "Kernel options are inconsistent across entries"
+      gum style --foreground "$GUM_TEXT" "This may cause boot issues or Plymouth display problems"
       echo ""
       if gum confirm "Sync all kernel entries to use the same options?"; then
         sync_all_kernel_options

@@ -361,7 +361,7 @@ show_resume_menu() {
 
     echo ""
     if supports_gum; then
-      gum style --foreground 220 "Installation Progress Summary"
+      gum style --foreground "$GUM_HEADER" "Installation Progress Summary"
       echo ""
       for i in "${!completed_steps[@]}"; do
         local step="${completed_steps[$i]}"
@@ -370,10 +370,10 @@ show_resume_menu() {
         
         case "$status" in
           "completed")
-            gum style --foreground 10 "  [COMPLETED] $display_step" >/dev/null
+            gum style --foreground "$GUM_SUCCESS" "  [COMPLETED] $display_step" >/dev/null
             ;;
           "failed")
-            gum style --foreground 196 "  [FAILED] $display_step" >/dev/null
+            gum style --foreground "$GUM_ERROR" "  [FAILED] $display_step" >/dev/null
             ;;
         esac
       done

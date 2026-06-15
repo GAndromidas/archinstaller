@@ -595,13 +595,13 @@ show_gum_menu() {
     detected_os="Unknown"
   fi
   
-  gum style --margin "1 0" --foreground 11 "Your OS is: $detected_os"
+  gum style --margin "1 0" --foreground "$GUM_WARN" "Your OS is: $detected_os"
   echo ""
   
-  gum style --margin "1 0" --foreground 226 "This script will transform your fresh Arch Linux installation into a"
-  gum style --margin "0 0 1 0" --foreground 226 "fully configured, optimized system with all the tools you need!"
+  gum style --margin "1 0" --foreground "$GUM_WARN" "This script will transform your fresh Arch Linux installation into a"
+  gum style --margin "0 0 1 0" --foreground "$GUM_WARN" "fully configured, optimized system with all the tools you need!"
 
-  local choice=$(gum choose --cursor="-> " --selected.foreground 51 --cursor.foreground 51 \
+  local choice=$(gum choose --cursor="-> " --selected.foreground "$GUM_PRIMARY" --cursor.foreground "$GUM_PRIMARY" \
     "Standard - Complete setup with all packages (intermediate users)" \
     "Minimal - Essential tools only (recommended for new users)" \
     "Server - Headless server setup (Docker, SSH, etc.)" \
@@ -646,7 +646,7 @@ show_gum_menu() {
       fi
       ;;
     "Exit"*)
-      gum style --foreground 226 "Installation cancelled. You can run this script again anytime."
+      gum style --foreground "$GUM_WARN" "Installation cancelled. You can run this script again anytime."
       exit 0
       ;;
   esac

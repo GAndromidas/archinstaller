@@ -23,9 +23,10 @@ __dashboard_progress_bar() {
     (( filled > width )) && filled=$width
     (( empty < 0 )) && empty=0
 
-    local bar
-    bar=$(printf '%*s' "$filled" '' | tr ' ' '#')
-    bar+=$(printf '%*s' "$empty" '')
+    local bar=""
+    local i
+    for ((i=0; i<filled; i++)); do bar+="#"; done
+    for ((i=0; i<empty; i++)); do bar+="."; done
     echo "$bar"
 }
 
@@ -93,25 +94,13 @@ dashboard_run() {
     local script_path=$2
 
     if supports_gum; then
-        local wrapper
-        wrapper=$(mktemp)
-        printf '#!/bin/bash\nsource "%s" >> "%s" 2>&1\nexit $?\n' "$script_path" "$INSTALL_LOG" > "$wrapper"
-        chmod +x "$wrapper"
-
-        gum spin --spinner dot --title "$step_name" -- "$wrapper"
-        local ret=$?
-        rm -f "$wrapper"
-        return $ret
+        gum spin --spinner dot --title "$step_name" -- bash -c "
+            source '$script_path' >> '$INSTALL_LOG' 2>&1
+        "
+        return $?
     else
-        echo -n "  $step_name... "
         source "$script_path" >> "$INSTALL_LOG" 2>&1
-        local ret=$?
-        if [ $ret -eq 0 ]; then
-            echo -e "${THEME_SUCCESS}done${RESET}"
-        else
-            echo -e "${THEME_ERROR}failed${RESET}"
-        fi
-        return $ret
+        return $?
     fi
 }
 

@@ -10,10 +10,8 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
-# Ensure color variables are available for standalone execution
-if [[ -z "${BOLD:-}" ]]; then
-    BOLD='\033[1m'
-fi
+# Color binding for prompt
+BOLD="${THEME_TEXT_BOLD}"
 
 # Function to detect if system is a laptop
 is_laptop() {
@@ -204,8 +202,8 @@ show_wol_status() {
         return 1
     fi
     
-    echo -e "${CYAN}Wake-on-LAN Status:${RESET}"
-    echo -e "${YELLOW}==================${RESET}"
+    echo -e "${THEME_TEXT}Wake-on-LAN Status:${RESET}"
+    echo -e "${THEME_WARN}==================${RESET}"
     
     for iface in "${interfaces[@]}"; do
         local mac_addr=$(get_interface_mac "$iface")
@@ -214,18 +212,18 @@ show_wol_status() {
         if supports_wol "$iface"; then
             wol_status=$(sudo ethtool "$iface" 2>/dev/null | awk '/Wake-on:/ {print $2}')
             if [[ "$wol_status" == *"g"* ]]; then
-                wol_status="${GREEN}Enabled${RESET}"
+                wol_status="${THEME_SUCCESS}Enabled${RESET}"
             else
-                wol_status="${YELLOW}Disabled${RESET}"
+                wol_status="${THEME_WARN}Disabled${RESET}"
             fi
         else
-            wol_status="${RED}Not Supported${RESET}"
+            wol_status="${THEME_ERROR}Not Supported${RESET}"
         fi
         
-        echo -e "${CYAN}Interface: ${RESET}$iface"
-        echo -e "${CYAN}MAC Address: ${RESET}${mac_addr:-N/A}"
-        echo -e "${CYAN}WoL Status: ${RESET}$wol_status"
-        echo -e "${YELLOW}------------------${RESET}"
+        echo -e "${THEME_TEXT}Interface: ${RESET}$iface"
+        echo -e "${THEME_TEXT}MAC Address: ${RESET}${mac_addr:-N/A}"
+        echo -e "${THEME_TEXT}WoL Status: ${RESET}$wol_status"
+        echo -e "${THEME_WARN}------------------${RESET}"
     done
 }
 
@@ -248,24 +246,24 @@ prompt_interface_selection() {
         local mac_addr=$(get_interface_mac "$iface")
         
         if [[ "$iface" == "$active_iface" ]]; then
-            status="${GREEN}[ACTIVE - Internet]${RESET}"
+            status="${THEME_SUCCESS}[ACTIVE - Internet]${RESET}"
         else
-            status="${YELLOW}[No Internet]${RESET}"
+            status="${THEME_WARN}[No Internet]${RESET}"
         fi
         
-        echo -e "${CYAN}$i)${RESET} $iface $status"
+        echo -e "${THEME_TEXT}$i)${RESET} $iface $status"
         echo -e "   MAC: ${mac_addr:-N/A}"
         echo ""
         choices+=("$iface")
         i=$((i + 1))
     done
     
-    echo -e "${CYAN}a)${RESET} Configure ALL interfaces"
-    echo -e "${CYAN}s)${RESET} Skip Wake-on-LAN configuration"
+    echo -e "${THEME_TEXT}a)${RESET} Configure ALL interfaces"
+    echo -e "${THEME_TEXT}s)${RESET} Skip Wake-on-LAN configuration"
     echo ""
     
     while true; do
-        echo -ne "${BOLD}Select option [1-${#interfaces[@]}, a, s]:${RESET} "
+        echo -ne "${THEME_TEXT_BOLD}Select option [1-${#interfaces[@]}, a, s]:${RESET} "
         read -r choice
         
         case "$choice" in

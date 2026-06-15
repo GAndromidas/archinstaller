@@ -162,7 +162,7 @@ show_system_info() {
     is_btrfs_system && btrfs="Yes" || btrfs="No"
     
     if supports_gum; then
-        gum style --foreground 212 --border double --align center --margin "1 2" --padding "1 2" "System Information"
+        gum style --foreground "$GUM_HEADER" --border double --align center --margin "1 2" --padding "1 2" "System Information"
         echo ""
         gum format << EOF
     CPU: $cpu
@@ -174,14 +174,19 @@ show_system_info() {
 EOF
         echo ""
     else
+        local w=$(tput cols 2>/dev/null || echo 80)
+        local line=$(printf '%*s' $((w - 2)) '' | tr ' ' '=')
         echo ""
-        echo -e "${CYAN}### System Information ###${RESET}"
-        echo "CPU: $cpu"
-        echo "RAM: ${ram} GB"
-        echo "GPU: $gpu"
-        echo "Laptop: $laptop"
-        echo "Bootloader: $bootloader"
-        echo "Btrfs: $btrfs"
+        echo -e "${THEME_BORDER}#${line}#${RESET}"
+        echo -e "${THEME_BORDER}#${RESET}  ${THEME_HEADER}System Information${RESET}"
+        echo -e "${THEME_BORDER}#${line}#${RESET}"
+        echo -e "${THEME_BORDER}#${RESET}  CPU: $cpu"
+        echo -e "${THEME_BORDER}#${RESET}  RAM: ${ram} GB"
+        echo -e "${THEME_BORDER}#${RESET}  GPU: $gpu"
+        echo -e "${THEME_BORDER}#${RESET}  Laptop: $laptop"
+        echo -e "${THEME_BORDER}#${RESET}  Bootloader: $bootloader"
+        echo -e "${THEME_BORDER}#${RESET}  Btrfs: $btrfs"
+        echo -e "${THEME_BORDER}#${line}#${RESET}"
         echo ""
     fi
 }
@@ -416,10 +421,10 @@ show_resume_menu() {
         
         case "$status" in
           "completed")
-            echo -e "${GREEN}[COMPLETED]${RESET} $display_step"
+            echo -e "${THEME_SUCCESS}[COMPLETED]${RESET} $display_step"
             ;;
           "failed")
-            echo -e "${RED}[FAILED]${RESET} $display_step"
+            echo -e "${THEME_ERROR}[FAILED]${RESET} $display_step"
             ;;
         esac
       done

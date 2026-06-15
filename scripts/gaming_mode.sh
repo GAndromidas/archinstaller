@@ -64,16 +64,16 @@ install_pacman_packages() {
 	ui_info "Installing ${#pacman_gaming_programs[@]} pacman packages for gaming..."
 
 	# Try batch install first
-	printf "${CYAN}Attempting batch installation...${RESET}\n"
+	printf "${THEME_TEXT}Attempting batch installation...${RESET}\n"
 	# We capture stderr to a variable to print if it fails
 	local batch_output
 	if batch_output=$(sudo pacman -S --noconfirm --needed "${pacman_gaming_programs[@]}" 2>&1); then
-		printf "${GREEN} ✓ Batch installation successful${RESET}\n"
+		printf "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
 		GAMING_INSTALLED+=("${pacman_gaming_programs[@]}")
 		return
 	fi
 
-	printf "${YELLOW} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
+	printf "${THEME_WARN} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
 
 	for pkg in "${pacman_gaming_programs[@]}"; do
 		if pacman_install_single "$pkg" true; then GAMING_INSTALLED+=("$pkg"); else GAMING_ERRORS+=("$pkg (pacman)"); fi

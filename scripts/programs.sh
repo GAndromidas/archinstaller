@@ -29,12 +29,12 @@ specific_remove_programs=() # DE-specific removals
 
 pacman_remove() {
 	local pkg="$1"
-	printf "${YELLOW}Removing Pacman package:${RESET} %-30s" "$pkg"
+	printf "${THEME_WARN}Removing Pacman package:${RESET} %-30s" "$pkg"
 	if sudo pacman -Rns --noconfirm "$pkg" >/dev/null 2>&1; then
-		printf "${GREEN} ✓ Success${RESET}\n"
+		printf "${THEME_SUCCESS} ✓ Success${RESET}\n"
 		return 0
 	else
-		printf "${RED} ✗ Failed${RESET}\n"
+		printf "${THEME_ERROR} ✗ Failed${RESET}\n"
 		return 1
 	fi
 }
@@ -334,14 +334,14 @@ install_pacman_packages() {
 	ui_info "Installing ${#essential_programs[@]} pacman packages..."
 
 	# Try batch install first for speed
-	printf "${CYAN}Attempting batch installation...${RESET}\n"
+	printf "${THEME_TEXT}Attempting batch installation...${RESET}\n"
 	if sudo pacman -S --noconfirm --needed "${essential_programs[@]}" >/dev/null 2>&1; then
-		printf "${GREEN} ✓ Batch installation successful${RESET}\n"
+		printf "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
 		PROGRAMS_INSTALLED+=("${essential_programs[@]}")
 		return
 	fi
 
-	printf "${YELLOW} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
+	printf "${THEME_WARN} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
 	for pkg in "${essential_programs[@]}"; do
 		if pacman_install_single "$pkg" true; then PROGRAMS_INSTALLED+=("$pkg"); else PROGRAMS_ERRORS+=("$pkg (pacman)"); fi
 	done
@@ -353,16 +353,16 @@ install_aur_packages() {
 	ui_info "Installing ${#yay_programs[@]} AUR packages with yay..."
 
 	# Try batch install first
-	printf "${CYAN}Attempting batch installation...${RESET}\n"
+	printf "${THEME_TEXT}Attempting batch installation...${RESET}\n"
 	if yay -S --noconfirm --needed "${yay_programs[@]}" >/dev/null 2>&1; then
-		printf "${GREEN} ✓ Batch installation successful${RESET}\n"
+		printf "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
 		for pkg in "${yay_programs[@]}"; do
 			PROGRAMS_INSTALLED+=("$pkg (AUR)")
 		done
 		return
 	fi
 
-	printf "${YELLOW} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
+	printf "${THEME_WARN} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
 	for pkg in "${yay_programs[@]}"; do
 		if yay_install_single "$pkg" true; then PROGRAMS_INSTALLED+=("$pkg (AUR)"); else PROGRAMS_ERRORS+=("$pkg (AUR)"); fi
 	done
@@ -394,15 +394,15 @@ print_programs_summary() {
 	echo ""
 	ui_header "Programs Installation Summary"
 	if [[ ${#PROGRAMS_INSTALLED[@]} -gt 0 ]]; then
-		echo -e "${GREEN}Installed:${RESET}"
+		echo -e "${THEME_SUCCESS}Installed:${RESET}"
 		printf "  - %s\n" "${PROGRAMS_INSTALLED[@]}"
 	fi
 	if [[ ${#PROGRAMS_REMOVED[@]} -gt 0 ]]; then
-		echo -e "${YELLOW}Removed:${RESET}"
+		echo -e "${THEME_WARN}Removed:${RESET}"
 		printf "  - %s\n" "${PROGRAMS_REMOVED[@]}"
 	fi
 	if [[ ${#PROGRAMS_ERRORS[@]} -gt 0 ]]; then
-		echo -e "${RED}Errors:${RESET}"
+		echo -e "${THEME_ERROR}Errors:${RESET}"
 		printf "  - %s\n" "${PROGRAMS_ERRORS[@]}"
 	fi
 	echo ""

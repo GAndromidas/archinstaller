@@ -2,9 +2,50 @@
 set -uo pipefail
 
 # ============================================================================
-# UI Library - Enhanced Terminal Interface
+# UI Library - Unified Terminal Interface with Blue/White Theme
 # Provides unified UI functions using gum with fallback to traditional prompts
 # ============================================================================
+
+# Terminal helpers
+__term_width() {
+    tput cols 2>/dev/null || echo 80
+}
+
+__print_top_border() {
+    local w=$(__term_width)
+    echo -e "${THEME_BORDER}+$(printf '%*s' $((w - 2)) '' | tr ' ' '-')+${RESET}"
+}
+
+__print_bottom_border() {
+    local w=$(__term_width)
+    echo -e "${THEME_BORDER}+$(printf '%*s' $((w - 2)) '' | tr ' ' '-')+${RESET}"
+}
+
+__print_border_line() {
+    local content="$1"
+    local w=$(__term_width)
+    local pad=$((w - ${#content} - 4))
+    (( pad < 1 )) && pad=1
+    echo -e "${THEME_BORDER}|${RESET} ${content}$(printf '%*s' $pad '') ${THEME_BORDER}|${RESET}"
+}
+
+__print_thick_top_border() {
+    local w=$(__term_width)
+    echo -e "${THEME_BORDER}#$(printf '%*s' $((w - 2)) '' | tr ' ' '=')#${RESET}"
+}
+
+__print_thick_bottom_border() {
+    local w=$(__term_width)
+    echo -e "${THEME_BORDER}#$(printf '%*s' $((w - 2)) '' | tr ' ' '=')#${RESET}"
+}
+
+__print_thick_border_line() {
+    local content="$1"
+    local w=$(__term_width)
+    local pad=$((w - ${#content} - 4))
+    (( pad < 1 )) && pad=1
+    echo -e "${THEME_BORDER}#${RESET} ${content}$(printf '%*s' $pad '') ${THEME_BORDER}#${RESET}"
+}
 
 # Check if gum is available
 supports_gum() {
@@ -18,39 +59,34 @@ ui_menu() {
     local description="${2:-}"
     shift 2
     local options=("$@")
-    
+
     if supports_gum; then
-        # Use gum for beautiful menu
         if [ -n "$description" ]; then
-            gum style --foreground 226 --margin "1 0" "$description"
+            gum style --foreground "$GUM_WARN" --margin "1 0" "$description"
             echo ""
         fi
-        
-        gum choose --header="$title" "${options[@]}"
+        gum choose --header="$title" --cursor.foreground "$GUM_PRIMARY" --selected.foreground "$GUM_PRIMARY" "${options[@]}"
     else
-        # Fallback to numbered menu
         echo ""
-        echo -e "${CYAN}$title${RESET}"
+        echo -e "${THEME_HEADER}$title${RESET}"
         if [ -n "$description" ]; then
-            echo -e "${DIM}$description${RESET}"
+            echo -e "${THEME_MUTED}$description${RESET}"
         fi
         echo ""
-        
         local i=1
         for opt in "${options[@]}"; do
-            echo -e "  ${CYAN}$i)${RESET} $opt"
+            echo -e "  ${THEME_SECONDARY}$i)${RESET} $opt"
             ((i++))
         done
         echo ""
-        
         local selection
         while true; do
-            read -r -p "$(echo -e "${CYAN}Select option [1-$((i-1))]: ${RESET}")" selection
+            read -r -p "$(echo -e "${THEME_SECONDARY}Select option [1-$((i-1))]: ${RESET}")" selection
             if [[ "$selection" =~ ^[0-9]+$ ]] && [ "$selection" -ge 1 ] && [ "$selection" -le "$((i-1))" ]; then
                 echo "${options[$((selection-1))]}"
                 return 0
             fi
-            echo -e "${RED}Invalid selection. Try again.${RESET}"
+            echo -e "${THEME_ERROR}Invalid selection. Try again.${RESET}"
         done
     fi
 }
@@ -61,26 +97,22 @@ ui_multiselect() {
     local title="$1"
     shift
     local options=("$@")
-    
+
     if supports_gum; then
-        gum choose --header="$title" --no-limit "${options[@]}"
+        gum choose --header="$title" --no-limit --cursor.foreground "$GUM_PRIMARY" --selected.foreground "$GUM_PRIMARY" "${options[@]}"
     else
-        # Fallback to space-separated selection
         echo ""
-        echo -e "${CYAN}$title${RESET}"
-        echo -e "${DIM}(Space to select, Enter to confirm)${RESET}"
+        echo -e "${THEME_HEADER}$title${RESET}"
+        echo -e "${THEME_MUTED}(Enter numbers space-separated)${RESET}"
         echo ""
-        
         local i=1
         for opt in "${options[@]}"; do
             echo -e "  [ ] $i) $opt"
             ((i++))
         done
         echo ""
-        
         local selection
-        read -r -p "$(echo -e "${CYAN}Enter numbers (space-separated): ${RESET}")" selection
-        
+        read -r -p "$(echo -e "${THEME_SECONDARY}Enter numbers (space-separated): ${RESET}")" selection
         for num in $selection; do
             if [[ "$num" =~ ^[0-9]+$ ]] && [ "$num" -ge 1 ] && [ "$num" -le "$((i-1))" ]; then
                 echo "${options[$((num-1))]}"
@@ -94,13 +126,12 @@ ui_multiselect() {
 ui_confirm() {
     local question="$1"
     local description="${2:-}"
-    
+
     if supports_gum; then
         if [ -n "$description" ]; then
-            gum style --foreground 226 "$description"
+            gum style --foreground "$GUM_WARN" "$description"
         fi
-        
-        if gum confirm --default=true "$question"; then
+        if gum confirm --default=true --prompt.foreground "$GUM_PRIMARY" --selected.background "$GUM_PRIMARY" "$question"; then
             return 0
         else
             return 1
@@ -108,17 +139,16 @@ ui_confirm() {
     else
         echo ""
         if [ -n "$description" ]; then
-            echo -e "${YELLOW}${description}${RESET}"
+            echo -e "${THEME_WARN}${description}${RESET}"
         fi
-        
         local response
         while true; do
-            read -r -p "$(echo -e "${CYAN}${question} [Y/n]: ${RESET}")" response
+            read -r -p "$(echo -e "${THEME_SECONDARY}${question} [Y/n]: ${RESET}")" response
             response=${response,,}
             case "$response" in
                 ""|y|yes) return 0 ;;
                 n|no) return 1 ;;
-                *) echo -e "\n${RED}Please answer Y (yes) or N (no).${RESET}\n" ;;
+                *) echo -e "\n${THEME_ERROR}Please answer Y (yes) or N (no).${RESET}\n" ;;
             esac
         done
     fi
@@ -130,11 +160,11 @@ ui_spinner() {
     local message="$1"
     shift
     local command=("$@")
-    
+
     if supports_gum; then
         gum spin --spinner dot --title="$message" -- "${command[@]}"
     else
-        echo -e "${CYAN}$message...${RESET}"
+        echo -e "${THEME_TEXT}$message...${RESET}"
         "${command[@]}"
     fi
 }
@@ -145,7 +175,7 @@ ui_progress() {
     local total="$1"
     local current="$2"
     local message="$3"
-    
+
     if supports_gum; then
         local percent=$((current * 100 / total))
         gum format --template "progress" \
@@ -156,7 +186,7 @@ ui_progress() {
         local bar_width=40
         local filled=$((current * bar_width / total))
         local empty=$((bar_width - filled))
-        printf "\r${CYAN}%s${RESET} [%s%s] %d/%d" \
+        printf "\r${THEME_SECONDARY}%s${RESET} [%s%s] %d/%d" \
             "$message" \
             "$(printf '#%.0s' $(seq 1 $filled))" \
             "$(printf ' %.0s' $(seq 1 $empty))" \
@@ -164,60 +194,63 @@ ui_progress() {
     fi
 }
 
-# Styled header
+# Styled header with bordered box
 # Usage: ui_header "Title"
 ui_header() {
     local title="$1"
+
+    echo ""
     if supports_gum; then
-        gum style --border normal --margin "1 2" --padding "1 2" --align center "$title"
+        gum style --border normal --margin "1 2" --padding "1 2" --align center --foreground "$GUM_HEADER" "$title"
     else
-        echo ""
-        echo -e "${CYAN}### ${title} ###${RESET}"
-        echo ""
+        __print_top_border
+        __print_border_line "${THEME_HEADER}${title}${RESET}"
+        __print_bottom_border
     fi
+    echo ""
 }
 
-# Info message
+# Info message (white)
 # Usage: ui_info "Message"
 ui_info() {
     local message="$1"
     if supports_gum; then
-        gum style --foreground 36 "$message"
+        gum style --foreground "$GUM_TEXT" "$message"
     else
-        echo -e "${CYAN}$message${RESET}"
+        echo -e "${THEME_TEXT}$message${RESET}"
     fi
 }
 
-# Success message
+# Success message (green)
 # Usage: ui_success "Message"
 ui_success() {
     local message="$1"
     if supports_gum; then
-        gum style --foreground 46 "✓ $message"
+        gum style --foreground "$GUM_SUCCESS" "✓ $message"
     else
-        echo -e "${GREEN}✓ $message${RESET}"
+        echo -e "${THEME_SUCCESS}✓ $message${RESET}"
     fi
 }
 
-# Warning message
+# Warning message (yellow)
 # Usage: ui_warn "Message"
 ui_warn() {
     local message="$1"
     if supports_gum; then
-        gum style --foreground 226 "⚠ $message"
+        gum style --foreground "$GUM_WARN" "⚠ $message"
     else
-        echo -e "${YELLOW}⚠ $message${RESET}"
+        echo -e "${THEME_WARN}⚠ $message${RESET}"
     fi
 }
 
-# Error message
+# Error message (red)
 # Usage: ui_error "Message"
 ui_error() {
     local message="$1"
     if supports_gum; then
-        gum style --foreground 196 "✗ $message"
+        gum style --foreground "$GUM_ERROR" "✗ $message"
     else
-        echo -e "${RED}✗ $message${RESET}"
+        echo -e "${THEME_ERROR}✗ $message${RESET}"
     fi
 }
 
@@ -226,12 +259,12 @@ ui_error() {
 ui_input() {
     local prompt="$1"
     local default="${2:-}"
-    
+
     if supports_gum; then
-        gum input --prompt="$prompt" --value="$default"
+        gum input --prompt="$prompt" --prompt.foreground "$GUM_PRIMARY" --value="$default"
     else
         local response
-        read -r -p "$(echo -e "${CYAN}${prompt}${RESET}")" response
+        read -r -p "$(echo -e "${THEME_SECONDARY}${prompt}${RESET}")" response
         echo "${response:-$default}"
     fi
 }
@@ -240,28 +273,29 @@ ui_input() {
 # Usage: ui_password "Prompt"
 ui_password() {
     local prompt="$1"
-    
+
     if supports_gum; then
-        gum input --password --prompt="$prompt"
+        gum input --password --prompt="$prompt" --prompt.foreground "$GUM_PRIMARY"
     else
         local response
-        read -r -s -p "$(echo -e "${CYAN}${prompt}${RESET}")" response
+        read -r -s -p "$(echo -e "${THEME_SECONDARY}${prompt}${RESET}")" response
         echo ""
         echo "$response"
     fi
 }
 
-# Simple banner
+# Simple banner with double-line box
 # Usage: simple_banner "Title"
 simple_banner() {
     local title="$1"
+
     echo ""
     if supports_gum; then
-        gum style --border double --align center --padding "1 2" "$title"
+        gum style --border double --align center --padding "1 2" --foreground "$GUM_HEADER" "$title"
     else
-        echo -e "${CYAN}========================================${RESET}"
-        echo -e "${CYAN}  ${title}${RESET}"
-        echo -e "${CYAN}========================================${RESET}"
+        __print_thick_top_border
+        __print_thick_border_line "${THEME_HEADER}  ${title}${RESET}"
+        __print_thick_bottom_border
     fi
     echo ""
 }
@@ -271,8 +305,8 @@ simple_banner() {
 step() {
     local message="$1"
     if supports_gum; then
-        gum style --foreground 212 "▶ $message"
+        gum style --foreground "$GUM_PRIMARY" "▶ $message"
     else
-        echo -e "${PURPLE}▶ $message${RESET}"
+        echo -e "${THEME_SECONDARY}▶ $message${RESET}"
     fi
 }

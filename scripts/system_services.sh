@@ -260,17 +260,17 @@ detect_and_install_gpu_drivers() {
   install_packages_quietly mesa lib32-mesa
 
   if lspci | grep -Eiq 'vga.*amd|3d.*amd|display.*amd'; then
-    echo -e "${CYAN}AMD GPU detected. Installing AMD drivers and Vulkan support...${RESET}"
+    echo -e "${THEME_TEXT}AMD GPU detected. Installing AMD drivers and Vulkan support...${RESET}"
     install_packages_quietly xf86-video-amdgpu vulkan-radeon lib32-vulkan-radeon
     log_success "AMD drivers and Vulkan support installed"
     log_info "AMD GPU will use AMDGPU driver after reboot"
   elif lspci | grep -Eiq 'vga.*intel|3d.*intel|display.*intel'; then
-    echo -e "${CYAN}Intel GPU detected. Installing Intel drivers and Vulkan support...${RESET}"
+    echo -e "${THEME_TEXT}Intel GPU detected. Installing Intel drivers and Vulkan support...${RESET}"
     install_packages_quietly vulkan-intel lib32-vulkan-intel
     log_success "Intel drivers and Vulkan support installed"
     log_info "Intel GPU will use i915 or xe driver after reboot"
   elif lspci | grep -qi nvidia; then
-    echo -e "${YELLOW}NVIDIA GPU detected.${RESET}"
+    echo -e "${THEME_WARN}NVIDIA GPU detected.${RESET}"
 
     # Get PCI ID and map to family
     nvidia_pciid=$(lspci -n -d ::0300 | grep -i nvidia | awk '{print $3}' | head -n1)
@@ -305,11 +305,11 @@ detect_and_install_gpu_drivers() {
       nvidia_note="(defaulting to latest proprietary driver)"
     fi
 
-    echo -e "${CYAN}Detected NVIDIA family: $nvidia_family $nvidia_note${RESET}"
-    echo -e "${CYAN}Installing: $nvidia_pkg${RESET}"
+    echo -e "${THEME_TEXT}Detected NVIDIA family: $nvidia_family $nvidia_note${RESET}"
+    echo -e "${THEME_TEXT}Installing: $nvidia_pkg${RESET}"
 
     if [[ "$nvidia_family" == "Kepler" || "$nvidia_family" == "Fermi" || "$nvidia_family" == "Tesla" ]]; then
-      echo -e "${YELLOW}Your NVIDIA GPU is legacy and may not be well supported by the proprietary driver, especially on Wayland.${RESET}"
+      echo -e "${THEME_WARN}Your NVIDIA GPU is legacy and may not be well supported by the proprietary driver, especially on Wayland.${RESET}"
       echo "For best Wayland support, it is recommended to use the open-source Nouveau driver."
       echo "Choose driver to install:"
       echo "  1) Nouveau (open source, best for Wayland, basic 3D support)"
@@ -319,13 +319,13 @@ detect_and_install_gpu_drivers() {
         read -r -p "Enter your choice [1-2]: " legacy_choice
         case "$legacy_choice" in
           1)
-            echo -e "${CYAN}Installing Nouveau drivers...${RESET}"
+            echo -e "${THEME_TEXT}Installing Nouveau drivers...${RESET}"
             install_packages_quietly xf86-video-nouveau vulkan-nouveau lib32-vulkan-nouveau
             log_success "Nouveau drivers installed."
             break
             ;;
           2)
-            echo -e "${CYAN}Installing legacy proprietary NVIDIA drivers...${RESET}"
+            echo -e "${THEME_TEXT}Installing legacy proprietary NVIDIA drivers...${RESET}"
             if [[ "$nvidia_family" == "Kepler" ]]; then
               yay -S --noconfirm --needed nvidia-470xx-dkms
             elif [[ "$nvidia_family" == "Fermi" ]]; then
@@ -337,7 +337,7 @@ detect_and_install_gpu_drivers() {
             break
             ;;
           *)
-            echo -e "${RED}Invalid choice! Please enter 1 or 2.${RESET}"
+            echo -e "${THEME_ERROR}Invalid choice! Please enter 1 or 2.${RESET}"
             ;;
         esac
       done
@@ -359,7 +359,7 @@ detect_and_install_gpu_drivers() {
     log_success "NVIDIA drivers installed."
     return
   else
-    echo -e "${YELLOW}No AMD, Intel, or NVIDIA GPU detected. Using basic Mesa drivers already installed.${RESET}"
+    echo -e "${THEME_WARN}No AMD, Intel, or NVIDIA GPU detected. Using basic Mesa drivers already installed.${RESET}"
   fi
 
   # Verify GPU driver is loaded
@@ -1247,9 +1247,9 @@ detect_bluetooth_hardware() {
       echo ""
     else
       echo ""
-      echo -e "${RED}  No Bluetooth hardware detected in your system${RESET}"
-      echo -e "${RED}  Check if Bluetooth adapter is properly connected${RESET}"
-      echo -e "${RED}  Bluetooth packages installed but service will not be started${RESET}"
+      echo -e "${THEME_ERROR}  No Bluetooth hardware detected in your system${RESET}"
+      echo -e "${THEME_ERROR}  Check if Bluetooth adapter is properly connected${RESET}"
+      echo -e "${THEME_ERROR}  Bluetooth packages installed but service will not be started${RESET}"
       echo ""
     fi
     log_warning "No Bluetooth hardware detected - service will not be started"
@@ -1734,7 +1734,7 @@ setup_laptop_optimizations() {
   else
     # Non-interactive mode
     echo ""
-    echo -e "${YELLOW}Laptop-specific optimizations available for $(echo $manufacturer | tr '[:lower:]' '[:upper]') $laptop_model:${RESET}"
+    echo -e "${THEME_WARN}Laptop-specific optimizations available for $(echo $manufacturer | tr '[:lower:]' '[:upper]') $laptop_model:${RESET}"
     echo -e "  \u2022 Power profile management (tuned-ppd or power-profiles-daemon)"
     echo -e "  \u2022 CPU-specific optimizations ($(echo $cpu_vendor | tr '[:lower:]' '[:upper]'))"
     
@@ -1744,7 +1744,7 @@ setup_laptop_optimizations() {
     done
     
     echo ""
-    echo -e "${CYAN}Tip: Set AUTO_LAPTOP_OPTS=true to enable optimizations automatically${RESET}"
+    echo -e "${THEME_TEXT}Tip: Set AUTO_LAPTOP_OPTS=true to enable optimizations automatically${RESET}"
     read -r -p "Enable laptop optimizations? [Y/n]: " response
     response=${response,,}
     if [[ "$response" != "n" && "$response" != "no" ]]; then
@@ -1856,7 +1856,7 @@ show_laptop_summary() {
   echo ""
   log_success "Laptop optimizations completed successfully"
   echo ""
-  echo -e "${CYAN}Laptop features configured:${RESET}"
+  echo -e "${THEME_TEXT}Laptop features configured:${RESET}"
   echo -e "  • Kernel-based power management (automatic)"
   if command -v tuned-adm >/dev/null 2>&1; then
     echo -e "  • tuned-ppd for power profile switching"
@@ -1879,18 +1879,18 @@ show_laptop_summary() {
       ;;
   esac
   echo ""
-  echo -e "${YELLOW}Tips:${RESET}"
+  echo -e "${THEME_WARN}Tips:${RESET}"
   if command -v tuned-adm >/dev/null 2>&1; then
-    echo -e "  • List power profiles: ${CYAN}tuned-adm list${RESET}"
-    echo -e "  • Switch to powersave: ${CYAN}tuned-adm profile powersave${RESET}"
-    echo -e "  • Switch to performance: ${CYAN}tuned-adm profile performance${RESET}"
-    echo -e "  • Check active profile: ${CYAN}tuned-adm active${RESET}"
+    echo -e "  • List power profiles: ${THEME_SECONDARY}tuned-adm list${RESET}"
+    echo -e "  • Switch to powersave: ${THEME_SECONDARY}tuned-adm profile powersave${RESET}"
+    echo -e "  • Switch to performance: ${THEME_SECONDARY}tuned-adm profile performance${RESET}"
+    echo -e "  • Check active profile: ${THEME_SECONDARY}tuned-adm active${RESET}"
   elif command -v powerprofilesctl >/dev/null 2>&1; then
-    echo -e "  • List power profiles: ${CYAN}powerprofilesctl list${RESET}"
-    echo -e "  • Switch profile: ${CYAN}powerprofilesctl set performance${RESET}"
+    echo -e "  • List power profiles: ${THEME_SECONDARY}powerprofilesctl list${RESET}"
+    echo -e "  • Switch profile: ${THEME_SECONDARY}powerprofilesctl set performance${RESET}"
   fi
   if [ "$cpu_vendor" = "intel" ]; then
-    echo -e "  • Thermal status: ${CYAN}sudo systemctl status thermald${RESET}"
+    echo -e "  • Thermal status: ${THEME_SECONDARY}sudo systemctl status thermald${RESET}"
   fi
   echo ""
 }

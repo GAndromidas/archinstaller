@@ -66,7 +66,7 @@ status_fail2ban() {
 
 # ======= Main =======
 main() {
-  echo -e "${CYAN}=== Fail2ban Setup ===${RESET}"
+  echo -e "${THEME_BORDER}=== Fail2ban Setup ===${RESET}"
 
   run_step "Installing fail2ban" install_fail2ban
   run_step "Enabling and starting fail2ban" enable_and_start_fail2ban

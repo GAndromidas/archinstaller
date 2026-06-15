@@ -97,16 +97,16 @@ install_all_packages() {
   )
 
   step "Installing all packages"
-  echo -e "${CYAN}Installing ${#packages_to_install[@]} helper utilities + ${#all_packages[@]} total packages via Pacman...${RESET}"
+  echo -e "${THEME_TEXT}Installing ${#packages_to_install[@]} helper utilities + ${#all_packages[@]} total packages via Pacman...${RESET}"
 
-  printf "${CYAN}Attempting batch installation...${RESET}\n"
+  printf "${THEME_TEXT}Attempting batch installation...${RESET}\n"
   if sudo pacman -S --noconfirm --needed "${all_packages[@]}" >/dev/null 2>&1; then
-    printf "${GREEN} ✓ Batch installation successful${RESET}\n"
+    printf "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
     INSTALLED_PACKAGES+=("${all_packages[@]}")
     return 0
   fi
 
-  printf "${YELLOW} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
+  printf "${THEME_WARN} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
 
   if [ ${#all_packages[@]} -eq 0 ]; then
     log_warning "No packages to install individually"
@@ -133,10 +133,10 @@ install_all_packages() {
     fi
   done
 
-  echo -e "\n${GREEN}Package installation completed${RESET}"
+  echo -e "\n${THEME_SUCCESS}Package installation completed${RESET}"
 
   if [ ${#failed_packages[@]} -gt 0 ]; then
-    echo -e "${YELLOW}Failed packages: ${failed_packages[*]}${RESET}"
+    echo -e "${THEME_WARN}Failed packages: ${failed_packages[*]}${RESET}"
     log_warning "Some packages failed to install. Continuing with installation..."
     # Return non-zero to indicate partial failure
     return 1
@@ -204,7 +204,7 @@ install_kernel_headers_for_all() {
     return
   fi
 
-  echo -e "${CYAN}Detected kernels: ${kernel_types[*]}${RESET}"
+  echo -e "${THEME_TEXT}Detected kernels: ${kernel_types[*]}${RESET}"
 
   local total=${#kernel_types[@]}
   local current=0
@@ -215,14 +215,14 @@ install_kernel_headers_for_all() {
   done
 
   # Try batch install first
-  printf "${CYAN}Attempting batch installation for headers...${RESET}\n"
+  printf "${THEME_TEXT}Attempting batch installation for headers...${RESET}\n"
   if sudo pacman -S --noconfirm --needed "${header_packages[@]}" >/dev/null 2>&1; then
-    printf "${GREEN} ✓ Batch installation successful${RESET}\n"
+    printf "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
     INSTALLED_PACKAGES+=("${header_packages[@]}")
     return 0
   fi
 
-  printf "${YELLOW} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
+  printf "${THEME_WARN} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
 
   for kernel in "${kernel_types[@]}"; do
     local headers_package="${kernel}-headers"
@@ -239,7 +239,7 @@ install_kernel_headers_for_all() {
     fi
   done
 
-  echo -e "\\n${GREEN}Kernel headers installation completed${RESET}\\n"
+  echo -e "\\n${THEME_SUCCESS}Kernel headers installation completed${RESET}\\n"
 }
 
 generate_locales() {

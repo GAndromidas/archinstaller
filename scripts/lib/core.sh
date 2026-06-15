@@ -5,7 +5,7 @@ set -uo pipefail
 # Core Library - Logging, Error Handling, and Core Utilities
 # ============================================================================
 
-# Color definitions
+# Color definitions (kept for backward compatibility — use THEME_* for new code)
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly YELLOW='\033[0;33m'
@@ -15,6 +15,29 @@ readonly CYAN='\033[0;36m'
 readonly WHITE='\033[0;37m'
 readonly DIM='\033[0;2m'
 readonly RESET='\033[0m'
+
+# Theme colors — single source of truth for all UI output
+readonly THEME_PRIMARY='\033[0;34m'
+readonly THEME_SECONDARY='\033[1;34m'
+readonly THEME_TEXT='\033[0;37m'
+readonly THEME_TEXT_BOLD='\033[1;37m'
+readonly THEME_SUCCESS='\033[0;32m'
+readonly THEME_WARN='\033[0;33m'
+readonly THEME_ERROR='\033[0;31m'
+readonly THEME_MUTED='\033[0;2m'
+readonly THEME_BORDER='\033[1;34m'
+readonly THEME_HEADER='\033[1;37m'
+
+# Gum color mappings for blue/white theme
+readonly GUM_PRIMARY="33"
+readonly GUM_SECONDARY="39"
+readonly GUM_TEXT="15"
+readonly GUM_SUCCESS="46"
+readonly GUM_WARN="226"
+readonly GUM_ERROR="196"
+readonly GUM_MUTED="8"
+readonly GUM_HEADER="33"
+readonly GUM_BORDER="33"
 
 # Global variables
 INSTALL_LOG="${INSTALL_LOG:-$HOME/.archinstaller.log}"
@@ -164,5 +187,4 @@ check_arch() {
 # Initialize the core library
 init_core() {
     init_logging
-    # Silent initialization - no message needed
 }

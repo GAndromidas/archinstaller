@@ -38,7 +38,7 @@ install_yay() {
 
   # Build yay
   ui_info "Building and installing yay..."
-  echo -e "${YELLOW}Please enter your sudo password to build and install yay:${RESET}"
+  echo -e "${THEME_TEXT}Please enter your sudo password to build and install yay:${RESET}"
   sudo -v
   if makepkg -si --noconfirm --needed >/dev/null 2>&1; then
     log_success "yay built and installed successfully"

@@ -289,16 +289,20 @@ print_unified_step_header() {
   local step_num="$1"
   local total="$2"
   local title="$3"
+  local content="Step $step_num of $total: $title"
 
   if supports_gum; then
     echo ""
-    gum style --margin "1 2" --border thick --padding "1 2" --foreground 15 "Step $step_num of $total: $title"
+    gum style --margin "1 2" --border thick --padding "1 2" --foreground "$GUM_TEXT" "$content"
     echo ""
   else
+    local w=$(tput cols 2>/dev/null || echo 80)
     echo ""
-    echo -e "${CYAN}============================================================${RESET}"
-    echo -e "${CYAN}  Step $step_num of $total: $title${RESET}"
-    echo -e "${CYAN}============================================================${RESET}"
+    echo -e "${THEME_BORDER}#$(printf '%*s' $((w - 2)) '' | tr ' ' '=')#${RESET}"
+    local pad=$((w - ${#content} - 4))
+    (( pad < 1 )) && pad=1
+    echo -e "${THEME_BORDER}#${RESET} ${THEME_HEADER}${content}${RESET}$(printf '%*s' $pad '') ${THEME_BORDER}#${RESET}"
+    echo -e "${THEME_BORDER}#$(printf '%*s' $((w - 2)) '' | tr ' ' '=')#${RESET}"
     echo ""
   fi
 }
@@ -307,9 +311,9 @@ print_unified_substep() {
   local description="$1"
 
   if supports_gum; then
-    gum style --margin "0 2" --foreground 226 "> $description"
+    gum style --margin "0 2" --foreground "$GUM_WARN" "> $description"
   else
-    echo -e "${CYAN}> $description${RESET}"
+    echo -e "${THEME_SECONDARY}> $description${RESET}"
   fi
 }
 
@@ -317,9 +321,9 @@ print_unified_success() {
   local message="$1"
 
   if supports_gum; then
-    gum style --margin "0 4" --foreground 10 "✓ $message"
+    gum style --margin "0 4" --foreground "$GUM_SUCCESS" "\342\234\223 $message"
   else
-    echo -e "${GREEN}✓ $message${RESET}"
+    echo -e "${THEME_SUCCESS}\342\234\223 $message${RESET}"
   fi
 }
 
@@ -327,9 +331,9 @@ print_unified_error() {
   local message="$1"
 
   if supports_gum; then
-    gum style --margin "0 4" --foreground 196 "✗ $message"
+    gum style --margin "0 4" --foreground "$GUM_ERROR" "\342\234\227 $message"
   else
-    echo -e "${RED}✗ $message${RESET}"
+    echo -e "${THEME_ERROR}\342\234\227 $message${RESET}"
   fi
 }
 
@@ -338,45 +342,55 @@ print_unified_error() {
 # ============================================================================
 # SECTION 4: PROGRESS & TIMING FUNCTIONS
 # ============================================================================
+if ! declare -f supports_gum >/dev/null 2>&1; then
 supports_gum() {
   command -v gum >/dev/null 2>&1
 }
+fi
 
+if ! declare -f ui_info >/dev/null 2>&1; then
 ui_info() {
   local message="$1"
   if supports_gum; then
-    gum style --foreground 36 "$message"
+    gum style --foreground "$GUM_TEXT" "$message"
   else
-    echo -e "${CYAN}$message${RESET}"
+    echo -e "${THEME_TEXT}$message${RESET}"
   fi
 }
+fi
 
+if ! declare -f ui_success >/dev/null 2>&1; then
 ui_success() {
   local message="$1"
   if supports_gum; then
-    gum style --foreground 46 "$message"
+    gum style --foreground "$GUM_SUCCESS" "$message"
   else
-    echo -e "${GREEN}$message${RESET}"
+    echo -e "${THEME_SUCCESS}$message${RESET}"
   fi
 }
+fi
 
+if ! declare -f ui_warn >/dev/null 2>&1; then
 ui_warn() {
   local message="$1"
   if supports_gum; then
-    gum style --foreground 226 "⚠ $message"
+    gum style --foreground "$GUM_WARN" "\342\232\240 $message"
   else
-    echo -e "${YELLOW}⚠ $message${RESET}"
+    echo -e "${THEME_WARN}\342\232\240 $message${RESET}"
   fi
 }
+fi
 
+if ! declare -f ui_error >/dev/null 2>&1; then
 ui_error() {
   local message="$1"
   if supports_gum; then
-    gum style --foreground 196 "$message"
+    gum style --foreground "$GUM_ERROR" "$message"
   else
-    echo -e "${RED}$message${RESET}"
+    echo -e "${THEME_ERROR}$message${RESET}"
   fi
 }
+fi
 
 
 # ============================================================================
@@ -385,16 +399,16 @@ ui_error() {
 print_header() {
   local title="$1"; shift
   if supports_gum; then
-    gum style --border double --margin "1 2" --padding "1 4" --foreground 51 --border-foreground 51 "$title"
+    gum style --border double --margin "1 2" --padding "1 4" --foreground "$GUM_HEADER" --border-foreground "$GUM_BORDER" "$title"
     while (( "$#" )); do
-      gum style --margin "1 0 0 0" --foreground 226 "$1"
+      gum style --margin "1 0 0 0" --foreground "$GUM_WARN" "$1"
       shift
     done
   else
-    echo "$title"
-    echo "----------------------------------------"
+    echo -e "${THEME_HEADER}$title${RESET}"
+    echo -e "${THEME_BORDER}----------------------------------------${RESET}"
     while (( "$#" )); do
-      echo "$1"
+      echo -e "${THEME_TEXT}$1${RESET}"
       shift
     done
   fi
@@ -404,20 +418,21 @@ print_step_header() {
   local step_num="$1"; local total="$2"; local title="$3"
   if supports_gum; then
     echo ""
-    gum style --border normal --margin "1 0" --padding "0 2" --foreground 51 --border-foreground 51 "Step ${step_num}/${total}: ${title}"
+    gum style --border normal --margin "1 0" --padding "0 2" --foreground "$GUM_HEADER" --border-foreground "$GUM_BORDER" "Step ${step_num}/${total}: ${title}"
   else
-    echo -e "${CYAN}Step ${step_num}/${total}: ${title}${RESET}"
+    echo -e "${THEME_BORDER}Step ${step_num}/${total}: ${title}${RESET}"
   fi
 }
 simple_banner() {
   local title="$1"
-  echo -e "${CYAN}\n============================================================${RESET}"
-  echo -e "${CYAN}========== $title ==========${RESET}"
-  echo -e "${CYAN}============================================================${RESET}"
+  local w=$(tput cols 2>/dev/null || echo 80)
+  echo -e "\n${THEME_BORDER}#$(printf '%*s' $((w - 2)) '' | tr ' ' '=')#${RESET}"
+  echo -e "${THEME_BORDER}#${RESET}  ${THEME_HEADER}$title${RESET}"
+  echo -e "${THEME_BORDER}#$(printf '%*s' $((w - 2)) '' | tr ' ' '=')#${RESET}"
 }
 
 arch_ascii() {
-  echo -e "${CYAN}"
+  echo -e "${THEME_PRIMARY}"
   cat << "EOF"
       _             _     ___           _        _ _
      / \   _ __ ___| |__ |_ _|_ __  ___| |_ __ _| | | ___ _ __
@@ -540,7 +555,7 @@ show_menu() {
   # Check if system is headless and only offer server mode
   if is_headless_system; then
     ui_warn "Headless system detected. Only Server mode is available."
-    echo -e "${GREEN}Your OS is: $detected_os${RESET}"
+    echo -e "${THEME_TEXT}Your OS is: $detected_os${RESET}"
     INSTALL_MODE="server"
     echo "Installation Mode: Server - Headless server setup"
     return
@@ -655,7 +670,7 @@ show_traditional_menu() {
   echo "This script will transform your fresh Arch Linux installation into a"
   echo "fully configured, optimized system with all the tools you need!"
   echo ""
-  echo -e "${CYAN}Choose your installation mode:${RESET}"
+  echo -e "${THEME_HEADER}Choose your installation mode:${RESET}"
   echo ""
   printf "  1) Standard%-12s - Complete setup with all packages (intermediate users)\n" ""
   printf "  2) Minimal%-13s - Essential tools only (recommended for new users)\n" ""
@@ -665,7 +680,7 @@ show_traditional_menu() {
   echo ""
 
   while true; do
-    read -r -p "$(echo -e "${CYAN}Enter your choice [1-5]: ${RESET}")" menu_choice
+    read -r -p "$(echo -e "${THEME_SECONDARY}Enter your choice [1-5]: ${RESET}")" menu_choice
           case "$menu_choice" in
         1)
           INSTALL_MODE="default"
@@ -728,9 +743,9 @@ show_traditional_menu() {
 step() {
   local message="$1"
   if supports_gum; then
-    gum style --foreground 212 "▶ $message"
+    gum style --foreground "$GUM_PRIMARY" "\342\226\266 $message"
   else
-    echo -e "${PURPLE}▶ $message${RESET}"
+    echo -e "${THEME_SECONDARY}\342\226\266 $message${RESET}"
   fi
   log_to_file "STEP: $message"
   ((CURRENT_STEP++))
@@ -742,9 +757,9 @@ step() {
 log_success() {
   local message="$1"
   local context="${2:-}"
-  echo -e "${GREEN}$message${RESET}"
+  echo -e "${THEME_SUCCESS}$message${RESET}"
   if [ -n "$context" ]; then
-    echo -e "${CYAN}  Details: $context${RESET}"
+    echo -e "${THEME_MUTED}  Details: $context${RESET}"
   fi
   log_to_file "SUCCESS: $message"
 }
@@ -755,9 +770,9 @@ log_success() {
 log_warning() {
   local message="$1"
   local context="${2:-}"
-  echo -e "${YELLOW}⚠ $message${RESET}"
+  echo -e "${THEME_WARN}\342\232\240 $message${RESET}"
   if [ -n "$context" ]; then
-    echo -e "  Note: $context"
+    echo -e "${THEME_MUTED}  Note: $context${RESET}"
   fi
   log_to_file "WARNING: $message"
 }
@@ -766,9 +781,9 @@ log_warning() {
 log_error() {
   local message="$1"
   local hint="${2:-}"
-  echo -e "${RED}✗ $message${RESET}"
+  echo -e "${THEME_ERROR}\342\234\227 $message${RESET}"
   if [ -n "$hint" ]; then
-    echo -e "  Tip: $hint"
+    echo -e "${THEME_MUTED}  Tip: $hint${RESET}"
   fi
   ERRORS+=("$message")
   log_to_file "ERROR: $message"
@@ -781,9 +796,9 @@ log_debug() {
   if [ "${DEBUG:-0}" = "1" ]; then
     local message="$1"
     local context="${2:-}"
-    echo -e "${CYAN}[DEBUG] $message${RESET}"
+    echo -e "${THEME_MUTED}[DEBUG] $message${RESET}"
     if [ -n "$context" ]; then
-      echo -e "${CYAN}  Details: $context${RESET}"
+      echo -e "${THEME_MUTED}  Details: $context${RESET}"
     fi
     log_to_file "DEBUG: $message"
   fi
@@ -860,7 +875,7 @@ configure_plymouth_hook_and_initramfs() {
       return 0
     fi
 
-    echo -e "${CYAN}Detected kernels: ${kernel_types[*]}${RESET}"
+    echo -e "${THEME_TEXT}Detected kernels: ${kernel_types[*]}${RESET}"
 
     local total=${#kernel_types[@]}
     local current=0
@@ -888,10 +903,10 @@ configure_plymouth_hook_and_initramfs() {
 }
 
 # Function: log_info
-# Description: Prints info message in cyan
+# Description: Prints info message
 # Parameters: $1 - Info message
 log_info() {
-  echo -e "${CYAN}$1${RESET}"
+  echo -e "${THEME_TEXT}$1${RESET}"
   log_to_file "INFO: $1"
 }
 
@@ -960,9 +975,9 @@ install_package_generic() {
   esac
 
   if supports_gum; then
-    gum style --foreground 51 "Installing ${total} packages via ${manager_name}..."
+    gum style --foreground "$GUM_TEXT" "Installing ${total} packages via ${manager_name}..."
   else
-    echo -e "${CYAN}Installing ${total} packages via ${manager_name}...${RESET}"
+    echo -e "${THEME_TEXT}Installing ${total} packages via ${manager_name}...${RESET}"
   fi
 
   for pkg in "${pkgs[@]}"; do
@@ -1079,16 +1094,18 @@ install_package_groups() {
 
 # Function to display a styled header for summaries
 # Usage: ui_header "My Header"
+if ! declare -f ui_header >/dev/null 2>&1; then
 ui_header() {
     local title="$1"
     if supports_gum; then
-        gum style --border normal --margin "1 2" --padding "1 2" --align center "$title"
+        gum style --border normal --margin "1 2" --padding "1 2" --align center --foreground "$GUM_HEADER" "$title"
     else
         echo ""
-        echo -e "${CYAN}### ${title} ###${RESET}"
+        echo -e "${THEME_BORDER}### ${title} ###${RESET}"
         echo ""
     fi
 }
+fi
 
 
 # Function for user confirmation with gum (or fallback)
@@ -1104,10 +1121,10 @@ gum_confirm() {
     if supports_gum; then
         # Use gum for a nice UI
         if [ -n "$description" ]; then
-            gum style --foreground 226 "$description"
+            gum style --foreground "$GUM_WARN" "$description"
         fi
 
-        if gum confirm --default=true "$question"; then
+        if gum confirm --default=true --prompt.foreground "$GUM_PRIMARY" --selected.background "$GUM_PRIMARY" "$question"; then
             return 0 # User said yes
         else
             return 1 # User said no
@@ -1116,12 +1133,12 @@ gum_confirm() {
         # Fallback to traditional read prompt
         echo ""
         if [ -n "$description" ]; then
-            echo -e "${YELLOW}${description}${RESET}"
+            echo -e "${THEME_WARN}${description}${RESET}"
         fi
 
         local response
         while true; do
-            read -r -p "$(echo -e "${CYAN}${question} [Y/n]: ${RESET}")" response
+            read -r -p "$(echo -e "${THEME_SECONDARY}${question} [Y/n]: ${RESET}")" response
             response=${response,,} # tolower
             case "$response" in
                 ""|y|yes)
@@ -1131,7 +1148,7 @@ gum_confirm() {
                     return 1 # No
                     ;;
                 *)
-                    echo -e "\n${RED}Please answer Y (yes) or N (no).${RESET}\n"
+                    echo -e "\n${THEME_ERROR}Please answer Y (yes) or N (no).${RESET}\n"
                     ;;
             esac
         done
@@ -1140,44 +1157,44 @@ gum_confirm() {
 
 prompt_reboot() {
   simple_banner "Reboot System"
-  echo "Congratulations! Your Arch Linux system is now fully configured!"
+  echo -e "${THEME_TEXT}Congratulations! Your Arch Linux system is now fully configured!${RESET}"
   echo ""
-  echo "What happens after reboot:"
+  echo -e "${THEME_TEXT}What happens after reboot:${RESET}"
   echo "  - Boot screen will appear"
   echo "  - Performance optimizations will be enabled"
   echo "  - Gaming tools will be available (if installed)"
   echo ""
-  echo "It is strongly recommended to reboot now to apply all changes."
+  echo -e "${THEME_WARN}It is strongly recommended to reboot now to apply all changes.${RESET}"
   echo ""
 
   # Use gum menu for reboot confirmation
   if command -v gum >/dev/null 2>&1; then
     echo ""
-    gum style --foreground 226 "Ready to reboot your system?"
+    gum style --foreground "$GUM_WARN" "Ready to reboot your system?"
     echo ""
-    if gum confirm --default=true "Reboot now?"; then
+    if gum confirm --default=true --prompt.foreground "$GUM_PRIMARY" --selected.background "$GUM_PRIMARY" "Reboot now?"; then
       echo ""
-      echo "Rebooting your system..."
-      echo "Thank you for using Arch Installer!"
+      echo -e "${THEME_TEXT}Rebooting your system...${RESET}"
+      echo -e "${THEME_HEADER}Thank you for using Arch Installer!${RESET}"
       echo ""
       sleep 2
       sudo reboot
     else
       echo ""
-      echo "Reboot skipped. You can reboot manually at any time using:"
-      echo "   sudo reboot"
-      echo "   Or simply restart your computer."
+      echo -e "${THEME_TEXT}Reboot skipped. You can reboot manually at any time using:${RESET}"
+      echo -e "${THEME_SECONDARY}   sudo reboot${RESET}"
+      echo -e "${THEME_TEXT}   Or simply restart your computer.${RESET}"
     fi
   else
     # Fallback to text prompt if gum is not available
     while true; do
-      read -r -p "$(echo -e "${YELLOW}Reboot now? [Y/n]: ${RESET}")" reboot_ans
+      read -r -p "$(echo -e "${THEME_WARN}Reboot now? [Y/n]: ${RESET}")" reboot_ans
       reboot_ans=${reboot_ans,,}
       case "$reboot_ans" in
         ""|y|yes)
           echo ""
-          echo -e "${CYAN}Rebooting your system...${RESET}"
-          echo -e "${YELLOW}Thank you for using Arch Installer!${RESET}"
+          echo -e "${THEME_TEXT}Rebooting your system...${RESET}"
+          echo -e "${THEME_WARN}Thank you for using Arch Installer!${RESET}"
           echo ""
           sleep 2
           sudo reboot
@@ -1185,9 +1202,9 @@ prompt_reboot() {
           ;;
         n|no)
           echo ""
-          echo -e "${YELLOW}Reboot skipped. You can reboot manually at any time using:${RESET}"
-          echo -e "${CYAN}   sudo reboot${RESET}"
-          echo -e "${YELLOW}   Or simply restart your computer.${RESET}"
+          echo -e "${THEME_TEXT}Reboot skipped. You can reboot manually at any time using:${RESET}"
+          echo -e "${THEME_SECONDARY}   sudo reboot${RESET}"
+          echo -e "${THEME_TEXT}   Or simply restart your computer.${RESET}"
           break
           ;;
       esac
@@ -1199,11 +1216,11 @@ prompt_reboot() {
   if [ ${#ERRORS[@]} -eq 0 ]; then
     # Optional cleanup that doesn't destroy the repo
     if gum_confirm "Do you want to clean up temporary logs?" "This will remove the installation log and state file."; then
-      echo -e "${CYAN}Cleaning up temporary files...${RESET}"
+      echo -e "${THEME_TEXT}Cleaning up temporary files...${RESET}"
       rm -f "$STATE_FILE" "$INSTALL_LOG" 2>/dev/null || true
-      echo -e "${GREEN}✓ Temporary files cleaned up${RESET}"
+      echo -e "${THEME_SUCCESS}\342\234\223 Temporary files cleaned up${RESET}"
     else
-      echo -e "${CYAN}Skipping cleanup.${RESET}"
+      echo -e "${THEME_TEXT}Skipping cleanup.${RESET}"
     fi
   fi
 }
@@ -1241,7 +1258,7 @@ log_performance() {
   local elapsed=$((current_time - START_TIME))
   local minutes=$((elapsed / 60))
   local seconds=$((elapsed % 60))
-  echo -e "${CYAN}$step_name completed in ${minutes}m ${seconds}s (${elapsed}s)${RESET}"
+  echo -e "${THEME_TEXT}$step_name completed in ${minutes}m ${seconds}s (${elapsed}s)${RESET}"
 }
 
 # Function to collect errors from custom scripts
@@ -1369,16 +1386,16 @@ pacman_install_single() {
   local verbose="${2:-false}"
   
   if [ "$verbose" = true ]; then
-    printf "${CYAN}Installing Pacman package:${RESET} %-30s" "$pkg"
+    printf "${THEME_TEXT}Installing Pacman package:${RESET} %-30s" "$pkg"
   fi
   
   local output
   if output=$(sudo pacman -S --noconfirm --needed "$pkg" 2>&1); then
-    [ "$verbose" = true ] && printf "${GREEN} ✓ Success${RESET}\n"
+    [ "$verbose" = true ] && printf "${THEME_SUCCESS} \342\234\223 Success${RESET}\n"
     INSTALLED_PACKAGES+=("$pkg")
     return 0
   else
-    [ "$verbose" = true ] && printf "${RED} ✗ Failed${RESET}\n"
+    [ "$verbose" = true ] && printf "${THEME_ERROR} \342\234\227 Failed${RESET}\n"
     # Show output if verbose or if it's a critical error
     if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
       echo "$output" | sed 's/^/    /'
@@ -1393,16 +1410,16 @@ yay_install_single() {
   local verbose="${2:-false}"
   
   if [ "$verbose" = true ]; then
-    printf "${CYAN}Installing AUR package:${RESET} %-30s" "$pkg"
+    printf "${THEME_TEXT}Installing AUR package:${RESET} %-30s" "$pkg"
   fi
   
   local output
   if output=$(yay -S --noconfirm --needed "$pkg" 2>&1); then
-    [ "$verbose" = true ] && printf "${GREEN} ✓ Success${RESET}\n"
+    [ "$verbose" = true ] && printf "${THEME_SUCCESS} \342\234\223 Success${RESET}\n"
     INSTALLED_PACKAGES+=("$pkg")
     return 0
   else
-    [ "$verbose" = true ] && printf "${RED} ✗ Failed${RESET}\n"
+    [ "$verbose" = true ] && printf "${THEME_ERROR} \342\234\227 Failed${RESET}\n"
     if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
       echo "$output" | sed 's/^/    /'
     fi
@@ -1416,16 +1433,16 @@ flatpak_install_single() {
   local verbose="${2:-false}"
   
   if [ "$verbose" = true ]; then
-    printf "${CYAN}Installing Flatpak app:${RESET} %-30s" "$pkg"
+    printf "${THEME_TEXT}Installing Flatpak app:${RESET} %-30s" "$pkg"
   fi
   
   local output
   if output=$(sudo flatpak install -y --noninteractive flathub "$pkg" 2>&1); then
-    [ "$verbose" = true ] && printf "${GREEN} ✓ Success${RESET}\n"
+    [ "$verbose" = true ] && printf "${THEME_SUCCESS} \342\234\223 Success${RESET}\n"
     INSTALLED_PACKAGES+=("$pkg")
     return 0
   else
-    [ "$verbose" = true ] && printf "${RED} ✗ Failed${RESET}\n"
+    [ "$verbose" = true ] && printf "${THEME_ERROR} \342\234\227 Failed${RESET}\n"
     if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
       echo "$output" | sed 's/^/    /'
     fi

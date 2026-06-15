@@ -170,7 +170,7 @@ add_kernel_parameters() {
         return
       fi
       
-      echo -e "${CYAN}Found ${#kernel_entries[@]} systemd-boot kernel entries to configure${RESET}"
+      echo -e "${THEME_TEXT}Found ${#kernel_entries[@]} systemd-boot kernel entries to configure${RESET}"
       
       # List all kernel entries being processed
       for entry in "${kernel_entries[@]}"; do
@@ -245,9 +245,9 @@ add_kernel_parameters() {
       done
       
       if [[ $updated_count -gt 0 ]]; then
-        echo -e "\n${GREEN}Kernel parameters updated for ${updated_count} kernel entries${RESET}\n"
+        echo -e "\n${THEME_SUCCESS}Kernel parameters updated for ${updated_count} kernel entries${RESET}\n"
       else
-        echo -e "\n${GREEN}All kernel entries already have Plymouth parameters${RESET}\n"
+        echo -e "\n${THEME_SUCCESS}All kernel entries already have Plymouth parameters${RESET}\n"
       fi
       ;;
     "grub")
@@ -539,7 +539,7 @@ configure_traditional_plymouth() {
 # ======= Main =======
 main() {
   # Print simple banner (no figlet)
-  echo -e "${CYAN}=== Plymouth Configuration ===${RESET}"
+  echo -e "${THEME_BORDER}=== Plymouth Configuration ===${RESET}"
 
   # Check if this is a UKI system and configure UKI boot logo + Plymouth
   if is_uki_system; then
@@ -567,11 +567,11 @@ main() {
   # Check if plymouth is already fully configured
   if is_plymouth_configured; then
     log_success "Plymouth is already configured - skipping setup to save time"
-    echo -e "${GREEN}Plymouth configuration detected:${RESET}"
+    echo -e "${THEME_SUCCESS}Plymouth configuration detected:${RESET}"
     echo -e "  ✓ Plymouth hook present in mkinitcpio.conf"
     echo -e "  ✓ Plymouth theme is set"
     echo -e "  ✓ Splash parameter configured in bootloader"
-    echo -e "${CYAN}To reconfigure Plymouth, edit /etc/mkinitcpio.conf manually${RESET}"
+    echo -e "${THEME_TEXT}To reconfigure Plymouth, edit /etc/mkinitcpio.conf manually${RESET}"
     return 0
   fi
 

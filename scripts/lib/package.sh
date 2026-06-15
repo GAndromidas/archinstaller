@@ -26,16 +26,16 @@ pacman_install_single() {
     local verbose="${2:-false}"
     
     if [ "$verbose" = true ]; then
-        printf "${CYAN}Installing Pacman package:${RESET} %-30s" "$pkg"
+        printf "${THEME_TEXT}Installing Pacman package:${RESET} %-30s" "$pkg"
     fi
     
     local output
     if output=$(sudo pacman -S --noconfirm --needed "$pkg" 2>&1); then
-        [ "$verbose" = true ] && printf "${GREEN} ✓ Success${RESET}\n"
+        [ "$verbose" = true ] && printf "${THEME_SUCCESS} \342\234\223 Success${RESET}\n"
         INSTALLED_PACKAGES+=("$pkg")
         return 0
     else
-        [ "$verbose" = true ] && printf "${RED} ✗ Failed${RESET}\n"
+        [ "$verbose" = true ] && printf "${THEME_ERROR} \342\234\227 Failed${RESET}\n"
         if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
             echo "$output" | sed 's/^/    /'
         fi
@@ -55,16 +55,16 @@ yay_install_single() {
     fi
     
     if [ "$verbose" = true ]; then
-        printf "${CYAN}Installing AUR package:${RESET} %-30s" "$pkg"
+        printf "${THEME_TEXT}Installing AUR package:${RESET} %-30s" "$pkg"
     fi
     
     local output
     if output=$(yay -S --noconfirm --needed "$pkg" 2>&1); then
-        [ "$verbose" = true ] && printf "${GREEN} ✓ Success${RESET}\n"
+        [ "$verbose" = true ] && printf "${THEME_SUCCESS} \342\234\223 Success${RESET}\n"
         INSTALLED_PACKAGES+=("$pkg")
         return 0
     else
-        [ "$verbose" = true ] && printf "${RED} ✗ Failed${RESET}\n"
+        [ "$verbose" = true ] && printf "${THEME_ERROR} \342\234\227 Failed${RESET}\n"
         if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
             echo "$output" | sed 's/^/    /'
         fi
@@ -84,16 +84,16 @@ flatpak_install_single() {
     fi
     
     if [ "$verbose" = true ]; then
-        printf "${CYAN}Installing Flatpak app:${RESET} %-30s" "$pkg"
+        printf "${THEME_TEXT}Installing Flatpak app:${RESET} %-30s" "$pkg"
     fi
     
     local output
     if output=$(sudo flatpak install -y --noninteractive flathub "$pkg" 2>&1); then
-        [ "$verbose" = true ] && printf "${GREEN} ✓ Success${RESET}\n"
+        [ "$verbose" = true ] && printf "${THEME_SUCCESS} \342\234\223 Success${RESET}\n"
         INSTALLED_PACKAGES+=("$pkg")
         return 0
     else
-        [ "$verbose" = true ] && printf "${RED} ✗ Failed${RESET}\n"
+        [ "$verbose" = true ] && printf "${THEME_ERROR} \342\234\227 Failed${RESET}\n"
         if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
             echo "$output" | sed 's/^/    /'
         fi

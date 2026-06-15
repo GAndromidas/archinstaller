@@ -31,11 +31,11 @@ pacman_install_single() {
     
     local output
     if output=$(sudo pacman -S --noconfirm --needed "$pkg" 2>&1); then
-        [ "$verbose" = true ] && printf "${THEME_SUCCESS} \342\234\223 Success${RESET}\n"
+        [ "$verbose" = true ] && printf "${THEME_SUCCESS} ✓ Success${RESET}\n"
         INSTALLED_PACKAGES+=("$pkg")
         return 0
     else
-        [ "$verbose" = true ] && printf "${THEME_ERROR} \342\234\227 Failed${RESET}\n"
+        [ "$verbose" = true ] && printf "${THEME_ERROR} ✗ Failed${RESET}\n"
         if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
             echo "$output" | sed 's/^/    /'
         fi
@@ -60,11 +60,11 @@ yay_install_single() {
     
     local output
     if output=$(yay -S --noconfirm --needed "$pkg" 2>&1); then
-        [ "$verbose" = true ] && printf "${THEME_SUCCESS} \342\234\223 Success${RESET}\n"
+        [ "$verbose" = true ] && printf "${THEME_SUCCESS} ✓ Success${RESET}\n"
         INSTALLED_PACKAGES+=("$pkg")
         return 0
     else
-        [ "$verbose" = true ] && printf "${THEME_ERROR} \342\234\227 Failed${RESET}\n"
+        [ "$verbose" = true ] && printf "${THEME_ERROR} ✗ Failed${RESET}\n"
         if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
             echo "$output" | sed 's/^/    /'
         fi
@@ -89,11 +89,11 @@ flatpak_install_single() {
     
     local output
     if output=$(sudo flatpak install -y --noninteractive flathub "$pkg" 2>&1); then
-        [ "$verbose" = true ] && printf "${THEME_SUCCESS} \342\234\223 Success${RESET}\n"
+        [ "$verbose" = true ] && printf "${THEME_SUCCESS} ✓ Success${RESET}\n"
         INSTALLED_PACKAGES+=("$pkg")
         return 0
     else
-        [ "$verbose" = true ] && printf "${THEME_ERROR} \342\234\227 Failed${RESET}\n"
+        [ "$verbose" = true ] && printf "${THEME_ERROR} ✗ Failed${RESET}\n"
         if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
             echo "$output" | sed 's/^/    /'
         fi

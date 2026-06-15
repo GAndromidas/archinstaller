@@ -321,9 +321,9 @@ print_unified_success() {
   local message="$1"
 
   if supports_gum; then
-    gum style --margin "0 4" --foreground "$GUM_SUCCESS" "\342\234\223 $message"
+    gum style --margin "0 4" --foreground "$GUM_SUCCESS" "✓ $message"
   else
-    echo -e "${THEME_SUCCESS}\342\234\223 $message${RESET}"
+    echo -e "${THEME_SUCCESS}✓ $message${RESET}"
   fi
 }
 
@@ -331,9 +331,9 @@ print_unified_error() {
   local message="$1"
 
   if supports_gum; then
-    gum style --margin "0 4" --foreground "$GUM_ERROR" "\342\234\227 $message"
+    gum style --margin "0 4" --foreground "$GUM_ERROR" "✗ $message"
   else
-    echo -e "${THEME_ERROR}\342\234\227 $message${RESET}"
+    echo -e "${THEME_ERROR}✗ $message${RESET}"
   fi
 }
 
@@ -374,9 +374,9 @@ if ! declare -f ui_warn >/dev/null 2>&1; then
 ui_warn() {
   local message="$1"
   if supports_gum; then
-    gum style --foreground "$GUM_WARN" "\342\232\240 $message"
+    gum style --foreground "$GUM_WARN" "⚠ $message"
   else
-    echo -e "${THEME_WARN}\342\232\240 $message${RESET}"
+    echo -e "${THEME_WARN}⚠ $message${RESET}"
   fi
 }
 fi
@@ -743,9 +743,9 @@ show_traditional_menu() {
 step() {
   local message="$1"
   if supports_gum; then
-    gum style --foreground "$GUM_PRIMARY" "\342\226\266 $message"
+    gum style --foreground "$GUM_PRIMARY" "▶ $message"
   else
-    echo -e "${THEME_SECONDARY}\342\226\266 $message${RESET}"
+    echo -e "${THEME_SECONDARY}▶ $message${RESET}"
   fi
   log_to_file "STEP: $message"
   ((CURRENT_STEP++))
@@ -770,7 +770,7 @@ log_success() {
 log_warning() {
   local message="$1"
   local context="${2:-}"
-  echo -e "${THEME_WARN}\342\232\240 $message${RESET}"
+  echo -e "${THEME_WARN}⚠ $message${RESET}"
   if [ -n "$context" ]; then
     echo -e "${THEME_MUTED}  Note: $context${RESET}"
   fi
@@ -781,7 +781,7 @@ log_warning() {
 log_error() {
   local message="$1"
   local hint="${2:-}"
-  echo -e "${THEME_ERROR}\342\234\227 $message${RESET}"
+  echo -e "${THEME_ERROR}✗ $message${RESET}"
   if [ -n "$hint" ]; then
     echo -e "${THEME_MUTED}  Tip: $hint${RESET}"
   fi
@@ -1218,7 +1218,7 @@ prompt_reboot() {
     if gum_confirm "Do you want to clean up temporary logs?" "This will remove the installation log and state file."; then
       echo -e "${THEME_TEXT}Cleaning up temporary files...${RESET}"
       rm -f "$STATE_FILE" "$INSTALL_LOG" 2>/dev/null || true
-      echo -e "${THEME_SUCCESS}\342\234\223 Temporary files cleaned up${RESET}"
+      echo -e "${THEME_SUCCESS}✓ Temporary files cleaned up${RESET}"
     else
       echo -e "${THEME_TEXT}Skipping cleanup.${RESET}"
     fi
@@ -1391,11 +1391,11 @@ pacman_install_single() {
   
   local output
   if output=$(sudo pacman -S --noconfirm --needed "$pkg" 2>&1); then
-    [ "$verbose" = true ] && printf "${THEME_SUCCESS} \342\234\223 Success${RESET}\n"
+    [ "$verbose" = true ] && printf "${THEME_SUCCESS} ✓ Success${RESET}\n"
     INSTALLED_PACKAGES+=("$pkg")
     return 0
   else
-    [ "$verbose" = true ] && printf "${THEME_ERROR} \342\234\227 Failed${RESET}\n"
+    [ "$verbose" = true ] && printf "${THEME_ERROR} ✗ Failed${RESET}\n"
     # Show output if verbose or if it's a critical error
     if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
       echo "$output" | sed 's/^/    /'
@@ -1415,11 +1415,11 @@ yay_install_single() {
   
   local output
   if output=$(yay -S --noconfirm --needed "$pkg" 2>&1); then
-    [ "$verbose" = true ] && printf "${THEME_SUCCESS} \342\234\223 Success${RESET}\n"
+    [ "$verbose" = true ] && printf "${THEME_SUCCESS} ✓ Success${RESET}\n"
     INSTALLED_PACKAGES+=("$pkg")
     return 0
   else
-    [ "$verbose" = true ] && printf "${THEME_ERROR} \342\234\227 Failed${RESET}\n"
+    [ "$verbose" = true ] && printf "${THEME_ERROR} ✗ Failed${RESET}\n"
     if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
       echo "$output" | sed 's/^/    /'
     fi
@@ -1438,11 +1438,11 @@ flatpak_install_single() {
   
   local output
   if output=$(sudo flatpak install -y --noninteractive flathub "$pkg" 2>&1); then
-    [ "$verbose" = true ] && printf "${THEME_SUCCESS} \342\234\223 Success${RESET}\n"
+    [ "$verbose" = true ] && printf "${THEME_SUCCESS} ✓ Success${RESET}\n"
     INSTALLED_PACKAGES+=("$pkg")
     return 0
   else
-    [ "$verbose" = true ] && printf "${THEME_ERROR} \342\234\227 Failed${RESET}\n"
+    [ "$verbose" = true ] && printf "${THEME_ERROR} ✗ Failed${RESET}\n"
     if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
       echo "$output" | sed 's/^/    /'
     fi

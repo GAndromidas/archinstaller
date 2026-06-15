@@ -44,7 +44,7 @@ dashboard_init() {
     # Title line
     local title="● Arch Installer"
     local step_info="Step 1/${total}"
-    local title_pad=$((w - ${#title} - ${#step_info} - 2))
+    local title_pad=$((w - ${#title} - ${#step_info} - 3))
     (( title_pad < 1 )) && title_pad=1
     printf "${THEME_BORDER}  │${RESET} ${THEME_HEADER}%s${RESET}%*s ${THEME_MUTED}%s${RESET} ${THEME_BORDER}│${RESET}\n" \
         "$title" $title_pad "" "$step_info"
@@ -62,7 +62,7 @@ dashboard_init() {
     row=5
 
     # Step lines
-    local name_w=$((w - 14))
+    local name_w=$((w - 10))
     for ((i = 1; i <= total; i++)); do
         DASHBOARD_STEP_ROWS[$i]=$row
         printf "${THEME_BORDER}  │${RESET}  %2d  ○ %-${name_w}s  ${THEME_BORDER}│${RESET}\n" \
@@ -77,7 +77,7 @@ dashboard_init() {
     # Info line
     local log_info="Log: $INSTALL_LOG"
     local cancel_info="Ctrl+C to cancel"
-    local info_pad=$((w - ${#log_info} - ${#cancel_info} - 2))
+    local info_pad=$((w - ${#log_info} - ${#cancel_info} - 3))
     (( info_pad < 1 )) && info_pad=1
     printf "${THEME_BORDER}  │${RESET} ${THEME_MUTED}%s${RESET}%*s ${THEME_MUTED}%s${RESET} ${THEME_BORDER}│${RESET}\n" \
         "$log_info" $info_pad "" "$cancel_info"
@@ -118,7 +118,7 @@ dashboard_step() {
     # Update title with current step number
     local title="● Arch Installer"
     local step_info="Step ${num}/${total}"
-    local title_pad=$((w - ${#title} - ${#step_info} - 2))
+    local title_pad=$((w - ${#title} - ${#step_info} - 3))
     (( title_pad < 1 )) && title_pad=1
     tput cup $((DASHBOARD_ROW_OFFSET + 1)) 0
     tput el
@@ -126,8 +126,8 @@ dashboard_step() {
         "$title" $title_pad "" "$step_info"
 
     # Progress bar line: "  │  ███░░░  NAME  36%  │"
-    # Fixed: 5 ("  │  ") + bar_w + 2 ("  ") + 1 (" ") + 3 ("%3d") + 1 ("%") + 3 ("  │") = 15 + bar_w
-    local name_w=$((w - 15 - bar_w))
+    # Between ││: "  " + bar + "  " + name + " " + %3d + %% + "  " = 11 + bar_w + name_w
+    local name_w=$((w - 11 - bar_w))
     (( name_w < 1 )) && name_w=1
     local disp_name="$name"
     (( ${#disp_name} > name_w )) && disp_name="${disp_name:0:$((name_w-1))}…"
@@ -137,8 +137,8 @@ dashboard_step() {
         "$bar" $name_w "$disp_name" $pct
 
     # Current step line: "  │  NN  ● Running...                │"
-    # Fixed: 11 ("  │  NN  ● ") + 3 ("  │") = 14
-    local name_w2=$((w - 14))
+    # Between ││: "  " + %2d + "  " + ● + " " + name + "  " = 10 + name_w2
+    local name_w2=$((w - 10))
     local step_row="${DASHBOARD_STEP_ROWS[$num]}"
     tput cup $((DASHBOARD_ROW_OFFSET + step_row)) 0
     tput el
@@ -173,8 +173,8 @@ dashboard_ok() {
     local name="${DASHBOARD_STEP_NAMES[$num]}"
 
     # "  │  NN  ✓ NAME            TIMEs  │"
-    # Fixed: 11 ("  │  NN  ✓ ") + 1 (" ") + 6 (time) + 3 ("  │") = 21
-    local name_w=$((w - 21))
+    # Between ││: "  " + %2d + "  " + ✓ + " " + name + " " + %6s + "  " = 17 + name_w
+    local name_w=$((w - 17))
     tput cup $((DASHBOARD_ROW_OFFSET + step_row)) 0
     tput el
     printf "${THEME_BORDER}  │${RESET}  %2d  ${THEME_SUCCESS}✓${RESET} %-${name_w}s ${THEME_MUTED}%6s${RESET}  ${THEME_BORDER}│${RESET}" \
@@ -195,7 +195,7 @@ dashboard_fail() {
     local step_row="${DASHBOARD_STEP_ROWS[$num]}"
     local name="${DASHBOARD_STEP_NAMES[$num]}"
 
-    local name_w=$((w - 21))
+    local name_w=$((w - 17))
     tput cup $((DASHBOARD_ROW_OFFSET + step_row)) 0
     tput el
     printf "${THEME_BORDER}  │${RESET}  %2d  ${THEME_ERROR}✗${RESET} %-${name_w}s ${THEME_MUTED}%6s${RESET}  ${THEME_BORDER}│${RESET}" \
@@ -214,8 +214,8 @@ dashboard_skip() {
     local step_row="${DASHBOARD_STEP_ROWS[$num]}"
 
     # "  │  NN  ◇ MSG                     │"
-    # Fixed: 11 ("  │  NN  ◇ ") + 3 ("  │") = 14
-    local name_w=$((w - 14))
+    # Between ││: "  " + %2d + "  " + ◇ + " " + msg + "  " = 10 + name_w
+    local name_w=$((w - 10))
     local disp_msg="$msg"
     (( ${#disp_msg} > name_w )) && disp_msg="${disp_msg:0:$((name_w-1))}…"
 

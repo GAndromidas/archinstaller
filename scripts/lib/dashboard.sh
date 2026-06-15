@@ -50,7 +50,6 @@ dashboard_init() {
 
     # Separator
     echo -e "${THEME_BORDER}  ├$(printf '─%.0s' $(seq 1 $w))┤${RESET}"
-    local progress_row=3
 
     # Progress bar line (cleared, will be updated by dashboard_step)
     echo -e "${THEME_BORDER}  │${RESET}$(printf '%*s' $w '')${THEME_BORDER}│${RESET}"
@@ -60,16 +59,17 @@ dashboard_init() {
     echo -e "${THEME_BORDER}  ├$(printf '─%.0s' $(seq 1 $w))┤${RESET}"
     row=5
 
-    # Step lines
+    # Step lines — fixed prefix: "  │  NN  ○ " (11 chars), suffix: "  │" (3 chars)
+    # Available for name = w - 14
+    local name_w=$((w - 14))
     for ((i = 1; i <= total; i++)); do
         DASHBOARD_STEP_ROWS[$i]=$row
-        printf "${THEME_BORDER}  │${RESET}  %2d  ○ %-*s  ${THEME_BORDER}│${RESET}\n" \
-            "$i" $((w - 10)) "Pending"
+        printf "${THEME_BORDER}  │${RESET}  %2d  ○ %-${name_w}s  ${THEME_BORDER}│${RESET}\n" \
+            "$i" "Pending"
         ((row++))
     done
 
     # Bottom separator
-    local bottom_sep=$row
     echo -e "${THEME_BORDER}  ├$(printf '─%.0s' $(seq 1 $w))┤${RESET}"
     ((row++))
 
@@ -86,7 +86,6 @@ dashboard_init() {
     echo -e "${THEME_BORDER}  └$(printf '─%.0s' $(seq 1 $w))┘${RESET}"
     DASHBOARD_FRAME_END=$row
 
-    # Move cursor below the frame for any auxiliary output
     tput cup $((DASHBOARD_FRAME_END + 1)) 0
 }
 
@@ -101,20 +100,19 @@ dashboard_step() {
     DASHBOARD_STEP_STATUSES[$num]="running"
 
     local pct=$(( (num - 1) * 100 / total ))
-    local bar_width=$w
-    local filled=$(( pct * bar_width / 100 ))
+
+    # Progress bar: proportional width, capped at 40
+    local bar_w=$((w * 2 / 5))
+    (( bar_w < 15 )) && bar_w=15
+    (( bar_w > 40 )) && bar_w=40
+    local filled=$(( pct * bar_w / 100 ))
     (( filled < 0 )) && filled=0
-    (( filled > bar_width )) && filled=$bar_width
+    (( filled > bar_w )) && filled=$bar_w
 
     local bar=""
     local i
     for ((i=0; i<filled; i++)); do bar+="█"; done
-    for ((i=filled; i<bar_width; i++)); do bar+="░"; done
-
-    # Truncate name if too long for progress bar line
-    local disp_name="$name"
-    local max_name_len=$((w - 8))
-    (( ${#disp_name} > max_name_len )) && disp_name="${disp_name:0:$((max_name_len-1))}…"
+    for ((i=filled; i<bar_w; i++)); do bar+="░"; done
 
     # Update title with current step number
     local title="● Arch Installer"
@@ -126,20 +124,26 @@ dashboard_step() {
     printf "${THEME_BORDER}  │${RESET} ${THEME_HEADER}%s${RESET}%*s ${THEME_MUTED}%s${RESET} ${THEME_BORDER}│${RESET}" \
         "$title" $title_pad "" "$step_info"
 
-    # Update progress bar line
+    # Progress bar line: "  │  ███░░░  NAME  36%  │"
+    # Fixed: 5 ("  │  ") + bar_w + 2 ("  ") + 1 (" ") + 5 ("  36%") + 3 ("  │") = 16 + bar_w
+    local name_w=$((w - 16 - bar_w))
+    (( name_w < 1 )) && name_w=1
+    local disp_name="$name"
+    (( ${#disp_name} > name_w )) && disp_name="${disp_name:0:$((name_w-1))}…"
     tput cup 3 0
     tput el
-    printf "${THEME_BORDER}  │${RESET} ${THEME_SUCCESS}%s${RESET} ${THEME_TEXT}%s${RESET}%*s${THEME_BORDER}│${RESET}" \
-        "$bar" "$disp_name" $((w - bar_width - ${#disp_name} - 1)) ""
+    printf "${THEME_BORDER}  │${RESET}  ${THEME_SUCCESS}%s${RESET}  ${THEME_TEXT}%-*s${RESET} %3d%%${RESET}  ${THEME_BORDER}│${RESET}" \
+        "$bar" $name_w "$disp_name" $pct
 
-    # Update current step line
+    # Current step line: "  │  NN  ● Running...                │"
+    # Fixed: 11 ("  │  NN  ● ") + 3 ("  │") = 14
+    local name_w2=$((w - 14))
     local step_row="${DASHBOARD_STEP_ROWS[$num]}"
     tput cup $step_row 0
     tput el
-    printf "${THEME_BORDER}  │${RESET}  %2d  ⏳ %-*s  ${THEME_BORDER}│${RESET}" \
-        "$num" $((w - 10)) "Running..."
+    printf "${THEME_BORDER}  │${RESET}  %2d  ● %-${name_w2}s  ${THEME_BORDER}│${RESET}" \
+        "$num" "Running..."
 
-    # Move cursor below the frame
     tput cup $((DASHBOARD_FRAME_END + 1)) 0
 
     DASHBOARD_STEP_START=$(date +%s)
@@ -165,10 +169,13 @@ dashboard_ok() {
     local step_row="${DASHBOARD_STEP_ROWS[$num]}"
     local name="${DASHBOARD_STEP_NAMES[$num]}"
 
+    # "  │  NN  ✓ NAME            TIMEs  │"
+    # Fixed: 11 ("  │  NN  ✓ ") + 1 (" ") + 6 (time) + 3 ("  │") = 21
+    local name_w=$((w - 21))
     tput cup $step_row 0
     tput el
-    printf "${THEME_BORDER}  │${RESET}  %2d  ${THEME_SUCCESS}✓${RESET} %-*s ${THEME_MUTED}%6s${RESET}  ${THEME_BORDER}│${RESET}" \
-        "$num" $((w - 21)) "$name" "$time_str"
+    printf "${THEME_BORDER}  │${RESET}  %2d  ${THEME_SUCCESS}✓${RESET} %-${name_w}s ${THEME_MUTED}%6s${RESET}  ${THEME_BORDER}│${RESET}" \
+        "$num" "$name" "$time_str"
 
     tput cup $((DASHBOARD_FRAME_END + 1)) 0
 }
@@ -185,10 +192,11 @@ dashboard_fail() {
     local step_row="${DASHBOARD_STEP_ROWS[$num]}"
     local name="${DASHBOARD_STEP_NAMES[$num]}"
 
+    local name_w=$((w - 21))
     tput cup $step_row 0
     tput el
-    printf "${THEME_BORDER}  │${RESET}  %2d  ${THEME_ERROR}✗${RESET} %-*s ${THEME_MUTED}%6s${RESET}  ${THEME_BORDER}│${RESET}" \
-        "$num" $((w - 21)) "$name" "$time_str"
+    printf "${THEME_BORDER}  │${RESET}  %2d  ${THEME_ERROR}✗${RESET} %-${name_w}s ${THEME_MUTED}%6s${RESET}  ${THEME_BORDER}│${RESET}" \
+        "$num" "$name" "$time_str"
 
     tput cup $((DASHBOARD_FRAME_END + 1)) 0
 }
@@ -202,15 +210,16 @@ dashboard_skip() {
 
     local step_row="${DASHBOARD_STEP_ROWS[$num]}"
 
-    # Truncate message to fit
+    # "  │  NN  ◇ MSG                     │"
+    # Fixed: 11 ("  │  NN  ◇ ") + 3 ("  │") = 14
+    local name_w=$((w - 14))
     local disp_msg="$msg"
-    local max_msg=$((w - 10))
-    (( ${#disp_msg} > max_msg )) && disp_msg="${disp_msg:0:$((max_msg-1))}…"
+    (( ${#disp_msg} > name_w )) && disp_msg="${disp_msg:0:$((name_w-1))}…"
 
     tput cup $step_row 0
     tput el
-    printf "${THEME_BORDER}  │${RESET}  %2d  ${THEME_MUTED}◇${RESET} %-*s  ${THEME_BORDER}│${RESET}" \
-        "$num" $((w - 10)) "$disp_msg"
+    printf "${THEME_BORDER}  │${RESET}  %2d  ${THEME_MUTED}◇${RESET} %-${name_w}s  ${THEME_BORDER}│${RESET}" \
+        "$num" "$disp_msg"
 
     tput cup $((DASHBOARD_FRAME_END + 1)) 0
 }
@@ -244,7 +253,6 @@ dashboard_finish() {
         title="Installation Complete"
     fi
 
-    # Title panel
     echo -e "${THEME_BORDER}  ╔$(printf '═%.0s' $(seq 1 $w))╗${RESET}"
     local title_pad=$(( (w - ${#title}) / 2 ))
     (( title_pad < 1 )) && title_pad=1
@@ -253,7 +261,6 @@ dashboard_finish() {
     echo -e "${THEME_BORDER}  ╚$(printf '═%.0s' $(seq 1 $w))╝${RESET}"
     echo ""
 
-    # Step results
     for ((i = 1; i <= total; i++)); do
         [[ -v DASHBOARD_STEP_STATUSES[$i] ]] || continue
         local name="${DASHBOARD_STEP_NAMES[$i]}"

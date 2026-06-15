@@ -155,23 +155,26 @@ show_system_info() {
     local cpu=$(detect_cpu_vendor)
     local ram=$(get_ram_gb)
     local gpu=$(detect_gpu)
-    local laptop
-    is_laptop && laptop="Yes" || laptop="No"
     local bootloader=$(detect_bootloader)
-    local btrfs
-    is_btrfs_system && btrfs="Yes" || btrfs="No"
+    local kernel=$(uname -r)
+    local fs_type=$(findmnt -no FSTYPE / 2>/dev/null || echo "unknown")
     
     if supports_gum; then
         gum style --foreground "$GUM_HEADER" --border double --align center --margin "1 2" --padding "1 2" "System Information"
         echo ""
         gum format << EOF
-    CPU: $cpu
-    RAM: ${ram} GB
-    GPU: $gpu
-    Laptop: $laptop
-    Bootloader: $bootloader
-    Btrfs: $btrfs
+CPU: **$cpu**
+RAM: **${ram} GB**
+GPU: **$gpu**
+Kernel: **$kernel**
+Bootloader: **$bootloader**
+Storage: **$fs_type**
 EOF
+        if is_laptop; then
+            gum format << EOF
+Laptop: **Yes**
+EOF
+        fi
         echo ""
     else
         local w=$(tput cols 2>/dev/null || echo 80)
@@ -180,12 +183,15 @@ EOF
         echo -e "${THEME_BORDER}#${line}#${RESET}"
         echo -e "${THEME_BORDER}#${RESET}  ${THEME_HEADER}System Information${RESET}"
         echo -e "${THEME_BORDER}#${line}#${RESET}"
-        echo -e "${THEME_BORDER}#${RESET}  CPU: $cpu"
-        echo -e "${THEME_BORDER}#${RESET}  RAM: ${ram} GB"
-        echo -e "${THEME_BORDER}#${RESET}  GPU: $gpu"
-        echo -e "${THEME_BORDER}#${RESET}  Laptop: $laptop"
-        echo -e "${THEME_BORDER}#${RESET}  Bootloader: $bootloader"
-        echo -e "${THEME_BORDER}#${RESET}  Btrfs: $btrfs"
+        echo -e "${THEME_BORDER}#${RESET}  ${THEME_HEADER}CPU:${RESET} ${THEME_TEXT}$cpu${RESET}"
+        echo -e "${THEME_BORDER}#${RESET}  ${THEME_HEADER}RAM:${RESET} ${THEME_TEXT}${ram} GB${RESET}"
+        echo -e "${THEME_BORDER}#${RESET}  ${THEME_HEADER}GPU:${RESET} ${THEME_TEXT}$gpu${RESET}"
+        echo -e "${THEME_BORDER}#${RESET}  ${THEME_HEADER}Kernel:${RESET} ${THEME_TEXT}$kernel${RESET}"
+        echo -e "${THEME_BORDER}#${RESET}  ${THEME_HEADER}Bootloader:${RESET} ${THEME_TEXT}$bootloader${RESET}"
+        echo -e "${THEME_BORDER}#${RESET}  ${THEME_HEADER}Storage:${RESET} ${THEME_TEXT}$fs_type${RESET}"
+        if is_laptop; then
+            echo -e "${THEME_BORDER}#${RESET}  ${THEME_HEADER}Laptop:${RESET} ${THEME_SUCCESS}Yes${RESET}"
+        fi
         echo -e "${THEME_BORDER}#${line}#${RESET}"
         echo ""
     fi

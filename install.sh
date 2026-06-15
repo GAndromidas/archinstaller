@@ -153,55 +153,7 @@ export DRY_RUN
 export INSTALL_LOG
 export START_TIME
 
-# Show system information
-show_system_info() {
-    local cpu=$(detect_cpu_vendor)
-    local ram=$(get_ram_gb)
-    local gpu=$(detect_gpu)
-    local bootloader=$(detect_bootloader)
-    local kernel=$(uname -r)
-    local fs_type=$(findmnt -no FSTYPE / 2>/dev/null || echo "unknown")
-    
-    if supports_gum; then
-        gum style --foreground "$GUM_HEADER" --border double --align center --margin "1 2" --padding "1 2" "System Information"
-        echo ""
-        gum format << EOF
-CPU: **$cpu**
-RAM: **${ram} GB**
-GPU: **$gpu**
-Kernel: **$kernel**
-Bootloader: **$bootloader**
-Storage: **$fs_type**
-EOF
-        if is_laptop; then
-            gum format << EOF
-Laptop: **Yes**
-EOF
-        fi
-        echo ""
-    else
-        local w=$(tput cols 2>/dev/null || echo 80)
-        local line=$(printf '%*s' $((w - 2)) '' | tr ' ' '=')
-        echo ""
-        echo -e "${THEME_BORDER}#${line}#${RESET}"
-        echo -e "${THEME_BORDER}#${RESET}  ${THEME_HEADER}System Information${RESET}"
-        echo -e "${THEME_BORDER}#${line}#${RESET}"
-        echo -e "${THEME_BORDER}#${RESET}  ${THEME_HEADER}CPU:${RESET} ${THEME_TEXT}$cpu${RESET}"
-        echo -e "${THEME_BORDER}#${RESET}  ${THEME_HEADER}RAM:${RESET} ${THEME_TEXT}${ram} GB${RESET}"
-        echo -e "${THEME_BORDER}#${RESET}  ${THEME_HEADER}GPU:${RESET} ${THEME_TEXT}$gpu${RESET}"
-        echo -e "${THEME_BORDER}#${RESET}  ${THEME_HEADER}Kernel:${RESET} ${THEME_TEXT}$kernel${RESET}"
-        echo -e "${THEME_BORDER}#${RESET}  ${THEME_HEADER}Bootloader:${RESET} ${THEME_TEXT}$bootloader${RESET}"
-        echo -e "${THEME_BORDER}#${RESET}  ${THEME_HEADER}Storage:${RESET} ${THEME_TEXT}$fs_type${RESET}"
-        if is_laptop; then
-            echo -e "${THEME_BORDER}#${RESET}  ${THEME_HEADER}Laptop:${RESET} ${THEME_SUCCESS}Yes${RESET}"
-        fi
-        echo -e "${THEME_BORDER}#${line}#${RESET}"
-        echo ""
-    fi
-}
-
 arch_ascii
-show_system_info
 
 # Enhanced system requirements checking with hardware compatibility
 check_system_requirements() {
@@ -638,7 +590,7 @@ dashboard_step "System Preparation" 1
 if is_step_complete "system_preparation"; then
   dashboard_skip
 else
-  if dashboard_run "System Preparation" "$SCRIPTS_DIR/system_preparation.sh"; then
+  if dashboard_run "$SCRIPTS_DIR/system_preparation.sh"; then
     mark_step_complete_with_progress "system_preparation" "completed"
     dashboard_ok
   else
@@ -659,7 +611,7 @@ dashboard_step "Shell Setup" 2
 if is_step_complete "shell_setup"; then
   dashboard_skip
 else
-  if dashboard_run "Shell Setup" "$SCRIPTS_DIR/shell_setup.sh"; then
+  if dashboard_run "$SCRIPTS_DIR/shell_setup.sh"; then
     mark_step_complete_with_progress "shell_setup" "completed"
     dashboard_ok
   else
@@ -677,7 +629,7 @@ if [[ "$INSTALL_MODE" == "server" ]]; then
 elif is_step_complete "plymouth_setup"; then
   dashboard_skip
 else
-  if dashboard_run "Plymouth Setup" "$SCRIPTS_DIR/plymouth.sh"; then
+  if dashboard_run "$SCRIPTS_DIR/plymouth.sh"; then
     mark_step_complete_with_progress "plymouth_setup" "completed"
     dashboard_ok
   else
@@ -693,7 +645,7 @@ dashboard_step "Yay Installation" 4
 if is_step_complete "yay_installation"; then
   dashboard_skip
 else
-  if dashboard_run "Yay Installation" "$SCRIPTS_DIR/yay.sh"; then
+  if dashboard_run "$SCRIPTS_DIR/yay.sh"; then
     mark_step_complete_with_progress "yay_installation" "completed"
     dashboard_ok
   else
@@ -709,7 +661,7 @@ dashboard_step "Programs Installation" 5
 if is_step_complete "programs_installation"; then
   dashboard_skip
 else
-  if dashboard_run "Programs Installation" "$SCRIPTS_DIR/programs.sh"; then
+  if dashboard_run "$SCRIPTS_DIR/programs.sh"; then
     mark_step_complete_with_progress "programs_installation" "completed"
     dashboard_ok
   else
@@ -727,7 +679,7 @@ if [[ "$INSTALL_MODE" == "server" ]]; then
 elif is_step_complete "gaming_mode"; then
   dashboard_skip
 else
-  if dashboard_run "Gaming Mode" "$SCRIPTS_DIR/gaming_mode.sh"; then
+  if dashboard_run "$SCRIPTS_DIR/gaming_mode.sh"; then
     mark_step_complete_with_progress "gaming_mode" "completed"
     dashboard_ok
   else
@@ -743,7 +695,7 @@ dashboard_step "Bootloader and Kernel Configuration" 7
 if is_step_complete "bootloader_config"; then
   dashboard_skip
 else
-  if dashboard_run "Bootloader and Kernel Configuration" "$SCRIPTS_DIR/bootloader_config.sh"; then
+  if dashboard_run "$SCRIPTS_DIR/bootloader_config.sh"; then
     mark_step_complete_with_progress "bootloader_config" "completed"
     dashboard_ok
   else
@@ -764,7 +716,7 @@ dashboard_step "Fail2ban Setup" 8
 if is_step_complete "fail2ban_setup"; then
   dashboard_skip
 else
-  if dashboard_run "Fail2ban Setup" "$SCRIPTS_DIR/fail2ban.sh"; then
+  if dashboard_run "$SCRIPTS_DIR/fail2ban.sh"; then
     mark_step_complete_with_progress "fail2ban_setup" "completed"
     dashboard_ok
   else
@@ -780,7 +732,7 @@ dashboard_step "System Services" 9
 if is_step_complete "system_services"; then
   dashboard_skip
 else
-  if dashboard_run "System Services" "$SCRIPTS_DIR/system_services.sh"; then
+  if dashboard_run "$SCRIPTS_DIR/system_services.sh"; then
     mark_step_complete_with_progress "system_services" "completed"
     dashboard_ok
   else
@@ -796,23 +748,9 @@ dashboard_step "Wake-on-LAN Configuration" 10
 if is_step_complete "wakeonlan_config"; then
   dashboard_skip
 else
-  if supports_gum; then
-    gum spin --spinner dot --title "Wake-on-LAN Configuration" -- bash -c "
-      source '$SCRIPTS_DIR/wakeonlan_config.sh' >> '$INSTALL_LOG' 2>&1
-      configure_wakeonlan >> '$INSTALL_LOG' 2>&1
-    "
-    local step10_ret=$?
-  else
-    echo -n "  Wake-on-LAN Configuration... "
-    source "$SCRIPTS_DIR/wakeonlan_config.sh" >> "$INSTALL_LOG" 2>&1 && configure_wakeonlan >> "$INSTALL_LOG" 2>&1
-    local step10_ret=$?
-    if [ $step10_ret -eq 0 ]; then
-      echo -e "${THEME_SUCCESS}done${RESET}"
-    else
-      echo -e "${THEME_ERROR}failed${RESET}"
-    fi
-  fi
-  if [ $step10_ret -eq 0 ]; then
+  # Source first to define configure_wakeonlan, then call it
+  source "$SCRIPTS_DIR/wakeonlan_config.sh" >> "$INSTALL_LOG" 2>&1
+  if configure_wakeonlan >> "$INSTALL_LOG" 2>&1; then
     mark_step_complete_with_progress "wakeonlan_config" "completed"
     dashboard_ok
   else
@@ -828,7 +766,7 @@ dashboard_step "Maintenance" 11
 if is_step_complete "maintenance"; then
   dashboard_skip
 else
-  if dashboard_run "Maintenance" "$SCRIPTS_DIR/maintenance.sh"; then
+  if dashboard_run "$SCRIPTS_DIR/maintenance.sh"; then
     mark_step_complete_with_progress "maintenance" "completed"
     dashboard_ok
   else

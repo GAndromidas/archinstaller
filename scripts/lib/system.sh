@@ -9,6 +9,19 @@ set -uo pipefail
 # Cache for detection results
 declare -gA SYSTEM_CACHE=()
 
+# Find systemd-boot entries directory by checking common ESP mount points
+if ! declare -f find_systemd_boot_entries_dir >/dev/null 2>&1; then
+find_systemd_boot_entries_dir() {
+  for dir in "/boot/loader/entries" "/efi/loader/entries" "/boot/efi/loader/entries"; do
+    if [ -d "$dir" ]; then
+      echo "$dir"
+      return 0
+    fi
+  done
+  return 1
+}
+fi
+
 # Detect CPU vendor
 detect_cpu_vendor() {
     local cache_key="cpu_vendor"
@@ -164,6 +177,7 @@ detect_bootloader() {
 }
 
 # Check if system is UKI (Unified Kernel Image)
+# Uses multiple methods to avoid false positives
 is_uki_system() {
     local cache_key="is_uki"
     
@@ -174,12 +188,33 @@ is_uki_system() {
     
     local result="false"
     
-    # Check for UKI indicators - be more specific to avoid false positives
-    # Only consider it UKI if systemd-ukify or ukify is installed
-    # /etc/kernel/cmdline alone is not enough (can exist on traditional systems)
-    if pacman -Q systemd-ukify &>/dev/null 2>&1 || \
-       pacman -Q ukify &>/dev/null 2>&1; then
+    # Method 1: UKI .efi files exist in the ESP
+    if [[ -d /boot/efi/EFI/Linux/ ]] && ls /boot/efi/EFI/Linux/*.efi >/dev/null 2>&1; then
         result="true"
+    elif [[ -d /boot/EFI/Linux/ ]] && ls /boot/EFI/Linux/*.efi >/dev/null 2>&1; then
+        result="true"
+    fi
+    
+    # Method 2: systemd-boot entries reference .efi files (not vmlinuz)
+    local entries_dir
+    if [[ "$result" == "false" ]]; then
+        entries_dir=$(find_systemd_boot_entries_dir)
+        if [[ -n "$entries_dir" ]]; then
+            while IFS= read -r -d '' entry; do
+                if grep -qE "^\s*efi\s+/" "$entry" 2>/dev/null; then
+                    result="true"
+                    break
+                fi
+            done < <(find "$entries_dir" -name "*.conf" -print0 2>/dev/null)
+        fi
+    fi
+    
+    # Method 3: UKI-related packages installed (last resort — packages can exist without UKI usage)
+    if [[ "$result" == "false" ]]; then
+        if pacman -Q systemd-ukify &>/dev/null 2>&1 || \
+           pacman -Q ukify &>/dev/null 2>&1; then
+            result="true"
+        fi
     fi
     
     SYSTEM_CACHE[$cache_key]="$result"

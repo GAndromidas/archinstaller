@@ -38,6 +38,9 @@ check_prerequisites() {
 configure_pacman() {
   step "Configuring pacman optimizations"
 
+  # Ensure mirrorlist exists before any pacman operation
+  generate_default_mirrorlist
+
   local parallel_downloads="${PACMAN_PARALLEL:-10}"
 
   if grep -q "^#ParallelDownloads" /etc/pacman.conf; then

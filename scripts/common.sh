@@ -41,7 +41,7 @@ STEP_START_TIME=0           # Start time of current step
 INSTALLATION_START_TIME=0   # Overall installation start time
 
 # UI/Flow configuration
-TOTAL_STEPS=11
+TOTAL_STEPS=10
 : "${VERBOSE:=false}"   # Can be overridden/exported by caller
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"  # Script directory
@@ -454,6 +454,7 @@ EOF
 
 # Check if system uses UKI (Unified Kernel Image)
 # Uses a strict, reliable detection to avoid false positives on non-UKI systems
+if ! declare -f is_uki_system >/dev/null 2>&1; then
 is_uki_system() {
   # Method 1: Check for UKI files in /boot/efi/EFI/Linux/
   if [[ -d /boot/efi/EFI/Linux/ ]] && ls /boot/efi/EFI/Linux/*.efi >/dev/null 2>&1; then
@@ -471,15 +472,40 @@ is_uki_system() {
   fi
   
   # Method 4: Check for UKI entries in systemd-boot config pointing to .efi files
-  if [[ -d /boot/loader/entries ]]; then
+  local entries_dir
+  entries_dir=$(find_systemd_boot_entries_dir)
+  if [[ -n "$entries_dir" ]]; then
     while IFS= read -r -d '' entry; do
       if grep -qE "^\s*efi\s+/" "$entry" 2>/dev/null; then
         return 0
       fi
-    done < <(find /boot/loader/entries -name "*.conf" -print0 2>/dev/null)
+    done < <(find "$entries_dir" -name "*.conf" -print0 2>/dev/null)
   fi
   
   return 1
+}
+fi
+
+# Function to ensure a default mirrorlist exists before any pacman operation
+generate_default_mirrorlist() {
+  if [ -s "/etc/pacman.d/mirrorlist" ]; then
+    return 0
+  fi
+
+  log_info "Mirrorlist empty or missing. Generating default..."
+
+  if command -v reflector >/dev/null 2>&1; then
+    sudo reflector --latest 10 --protocol https --sort rate --save /etc/pacman.d/mirrorlist >/dev/null 2>&1 && {
+      log_success "Default mirrorlist generated with reflector."
+      return 0
+    }
+  fi
+
+  sudo tee /etc/pacman.d/mirrorlist >/dev/null <<'EOF'
+## Default Arch Linux mirrorlist
+Server = http://mirror.archlinux.de/sites/archlinux.org/$repo/os/$arch
+EOF
+  log_success "Basic mirrorlist created."
 }
 
 # Function to update mirrors using rate-mirrors (silent with confirmation)
@@ -803,37 +829,44 @@ get_installed_kernel_types() {
   echo "${kernel_types[@]}"
 }
 
-# Function to configure plymouth hook and rebuild initramfs
+# Function to configure plymouth hook and optionally rebuild initramfs
 configure_plymouth_hook_and_initramfs() {
-  step "Configuring Plymouth hook and rebuilding initramfs"
+  local skip_rebuild=false
+  if [ "$1" = "no-rebuild" ]; then
+    skip_rebuild=true
+  fi
+  step "Configuring Plymouth hook$([ "$skip_rebuild" = false ] && echo ' and rebuilding initramfs')"
   local mkinitcpio_conf="/etc/mkinitcpio.conf"
   local HOOK_ADDED=false
 
-  if ! grep -q "plymouth" "$mkinitcpio_conf" && ! grep -q "sd-plymouth" "$mkinitcpio_conf"; then
+  if grep -q "^HOOKS=.*sd-plymouth" "$mkinitcpio_conf"; then
+    log_info "Replacing deprecated sd-plymouth hook with plymouth..."
+    if sudo sed -i 's/sd-plymouth/plymouth/g' "$mkinitcpio_conf"; then
+      log_success "Replaced sd-plymouth with plymouth in mkinitcpio.conf."
+      HOOK_ADDED=true
+    else
+      log_error "Failed to replace sd-plymouth with plymouth in mkinitcpio.conf."
+      return 1
+    fi
+  elif ! grep -q "plymouth" "$mkinitcpio_conf"; then
     log_info "Adding plymouth hook to mkinitcpio.conf..."
 
-    # Check if using systemd hook (implies systemd initramfs)
-    # We check for 'systemd' in HOOKS line to avoid false positives in comments if possible,
-    # but for simplicity and robustness with existing code structure:
-    if grep -q "^HOOKS=.*systemd" "$mkinitcpio_conf" && ! grep -q "^HOOKS=.*udev" "$mkinitcpio_conf"; then
-        # Use sd-plymouth for systemd based initramfs, place after systemd
-        sudo sed -i "s/\\(HOOKS=.*\\)systemd/\\1systemd sd-plymouth/" "$mkinitcpio_conf"
-        log_info "Added sd-plymouth hook (systemd detected)."
-    elif grep -q "udev" "$mkinitcpio_conf"; then
-        # Standard udev based initramfs, place after udev
-        sudo sed -i "s/\\(HOOKS=.*\\)udev/\\1udev plymouth/" "$mkinitcpio_conf"
-        log_info "Added plymouth hook (udev detected)."
-    else
-        # Fallback: add before filesystems
-        if grep -q "filesystems" "$mkinitcpio_conf"; then
-            sudo sed -i "s/\\(HOOKS=.*\\)filesystems/\\1plymouth filesystems/" "$mkinitcpio_conf"
-        else
-            sudo sed -i "s/^\\(HOOKS=.*\\)\\\"$/\\1 plymouth\\\"/" "$mkinitcpio_conf"
-        fi
-        log_info "Added plymouth hook (fallback placement)."
-    fi
+    # Note: plymouth package no longer ships sd-plymouth hook — use 'plymouth' for all setups
+    local plymouth_hook="plymouth"
 
-    if [ $? -eq 0 ]; then
+    # Place plymouth before filesystems (after kms hook) so the GPU driver
+    # is loaded before Plymouth tries to initialize at boot
+    local sed_result=0
+    if grep -q "filesystems" "$mkinitcpio_conf"; then
+      sudo sed -i "s/\\(HOOKS=.*\\)filesystems/\\1${plymouth_hook} filesystems/" "$mkinitcpio_conf"
+      sed_result=$?
+    else
+      sudo sed -i "s/^\\(HOOKS=.*\\)\\\"$/\\1 ${plymouth_hook}\\\"/" "$mkinitcpio_conf"
+      sed_result=$?
+    fi
+    log_info "Added ${plymouth_hook} hook before filesystems (after kms)."
+
+    if [ $sed_result -eq 0 ]; then
       log_success "Added plymouth hook to mkinitcpio.conf."
       HOOK_ADDED=true
     else
@@ -842,10 +875,10 @@ configure_plymouth_hook_and_initramfs() {
     fi
   else
     log_info "Plymouth hook already present in mkinitcpio.conf."
-    HOOK_ADDED=true # Assume it's correctly there if it exists
+    HOOK_ADDED=true
   fi
 
-  if [ "$HOOK_ADDED" = true ]; then
+  if [ "$HOOK_ADDED" = true ] && [ "$skip_rebuild" = false ]; then
     local kernel_types
     kernel_types=($(get_installed_kernel_types))
 
@@ -1435,11 +1468,27 @@ flatpak_install_single() {
 # ============================================================================
 # SECTION 14: SINGLE PACKAGE INSTALLATION WRAPPERS
 # ============================================================================
+if ! declare -f is_btrfs_system >/dev/null 2>&1; then
 is_btrfs_system() {
   findmnt -no FSTYPE / | grep -q btrfs
 }
+fi
+
+# Find systemd-boot entries directory by checking common ESP mount points
+if ! declare -f find_systemd_boot_entries_dir >/dev/null 2>&1; then
+find_systemd_boot_entries_dir() {
+  for dir in "/boot/loader/entries" "/efi/loader/entries" "/boot/efi/loader/entries"; do
+    if [ -d "$dir" ]; then
+      echo "$dir"
+      return 0
+    fi
+  done
+  return 1
+}
+fi
 
 # Detect bootloader type
+if ! declare -f detect_bootloader >/dev/null 2>&1; then
 detect_bootloader() {
   # Check for GRUB first (most specific)
   if [ -d "/boot/grub" ] || [ -d "/boot/grub2" ] || [ -d "/boot/efi/EFI/grub" ] || command -v grub-mkconfig &>/dev/null || pacman -Q grub &>/dev/null 2>&1; then
@@ -1454,8 +1503,10 @@ detect_bootloader() {
     echo "unknown"
   fi
 }
+fi
 
 # Find limine.conf file location (centralized to avoid duplication)
+if ! declare -f find_limine_config >/dev/null 2>&1; then
 find_limine_config() {
   local limine_config=""
   for limine_loc in "/boot/limine/limine.conf" "/boot/limine.conf" "/boot/EFI/limine/limine.conf" "/boot/EFI/arch-limine/limine.conf" "/efi/limine/limine.conf"; do
@@ -1466,3 +1517,4 @@ find_limine_config() {
   done
   return 1
 }
+fi

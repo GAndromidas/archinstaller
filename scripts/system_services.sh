@@ -149,7 +149,19 @@ enable_services() {
   )
 
   # Check and configure virt-manager guest integration
-  configure_virt_manager_guest_integration
+  if command -v virsh &>/dev/null || pacman -Q libvirt-daemon &>/dev/null 2>&1 || pacman -Q virt-manager &>/dev/null 2>&1; then
+    # Add user to libvirt group and enable service
+    if groups "$USER" | grep -qE '\blibvirt\b'; then
+      log_info "User already in libvirt group"
+    else
+      sudo usermod -aG libvirt "$USER" 2>/dev/null && log_success "Added user to libvirt group" || log_warning "Failed to add user to libvirt group"
+    fi
+    if systemctl is-enabled libvirtd &>/dev/null 2>&1; then
+      log_info "libvirtd service already enabled"
+    else
+      sudo systemctl enable --now libvirtd 2>/dev/null && log_success "libvirtd service enabled" || log_warning "Failed to enable libvirtd service"
+    fi
+  fi
 
   # Setup power profile management (power-profiles-daemon or tuned-ppd)
   setup_power_profile_daemon
@@ -1647,7 +1659,15 @@ EOF
   
   # Update initramfs if needed
   if command -v mkinitcpio >/dev/null 2>&1; then
-    sudo mkinitcpio -P linux-zen linux-lts 2>/dev/null && log_success "Initramfs updated for gaming P-State"
+    local kernels_ok=true
+    for k in linux-zen linux-lts; do
+      [ -f "/boot/vmlinuz-$k" ] || kernels_ok=false
+    done
+    if $kernels_ok; then
+      sudo mkinitcpio -P linux-zen linux-lts 2>/dev/null && log_success "Initramfs updated for gaming P-State"
+    else
+      log_warning "Initramfs not updated — missing kernel images"
+    fi
   fi
   
   log_success "AMD P-State gaming configuration applied"
@@ -1673,7 +1693,15 @@ EOF
   
   # Update initramfs if needed
   if command -v mkinitcpio >/dev/null 2>&1; then
-    sudo mkinitcpio -P linux linux-lts 2>/dev/null && log_success "Initramfs updated for system P-State"
+    local kernels_ok=true
+    for k in linux linux-lts; do
+      [ -f "/boot/vmlinuz-$k" ] || kernels_ok=false
+    done
+    if $kernels_ok; then
+      sudo mkinitcpio -P linux linux-lts 2>/dev/null && log_success "Initramfs updated for system P-State"
+    else
+      log_warning "Initramfs not updated — missing kernel images"
+    fi
   fi
   
   log_success "AMD P-State system configuration applied"

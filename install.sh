@@ -168,17 +168,8 @@ check_system_requirements() {
   # Additional hardware-specific checks
   local hardware_issues=()
   
-  # Check bootloader type and compatibility
-  local bootloader=$(detect_bootloader 2>/dev/null || echo "unknown")
-  case "$bootloader" in
-    "grub"|"systemd-boot"|"limine")
-      log_to_file "Detected bootloader: $bootloader"
-      ;;
-    "unknown")
-      # Don't add as hardware issue - may be false positive
-      log_to_file "Bootloader detection returned: unknown (may be systemd-boot)"
-      ;;
-  esac
+  # Bootloader detection will happen during the bootloader config step
+  log_to_file "Bootloader type will be detected during Step 6 (Bootloader & Plymouth)"
   
   # Check for UEFI vs BIOS mode
   if [ -d /sys/firmware/efi ]; then
@@ -621,26 +612,8 @@ else
   fi
 fi
 
-# Step 3: Plymouth Setup
-dashboard_step "Plymouth Setup" 3
-if [[ "$INSTALL_MODE" == "server" ]]; then
-  dashboard_skip "Skipped — server mode"
-elif is_step_complete "plymouth_setup"; then
-  dashboard_skip
-else
-  if dashboard_run "$SCRIPTS_DIR/plymouth.sh"; then
-    mark_step_complete_with_progress "plymouth_setup" "completed"
-    dashboard_ok
-  else
-    mark_step_complete_with_progress "plymouth_setup" "failed"
-    dashboard_fail
-    log_error "Plymouth setup failed"
-    ui_warn "Plymouth setup failed but continuing installation"
-  fi
-fi
-
-# Step 4: Yay Installation
-dashboard_step "Yay Installation" 4
+# Step 3: Yay Installation
+dashboard_step "Yay Installation" 3
 if is_step_complete "yay_installation"; then
   dashboard_skip
 else
@@ -655,8 +628,8 @@ else
   fi
 fi
 
-# Step 5: Programs Installation
-dashboard_step "Programs Installation" 5
+# Step 4: Programs Installation
+dashboard_step "Programs Installation" 4
 if is_step_complete "programs_installation"; then
   dashboard_skip
 else
@@ -671,8 +644,8 @@ else
   fi
 fi
 
-# Step 6: Gaming Mode
-dashboard_step "Gaming Mode" 6
+# Step 5: Gaming Mode
+dashboard_step "Gaming Mode" 5
 if [[ "$INSTALL_MODE" == "server" ]]; then
   dashboard_skip "Skipped — server mode"
 elif is_step_complete "gaming_mode"; then
@@ -689,8 +662,8 @@ else
   fi
 fi
 
-# Step 7: Bootloader and Kernel Configuration
-dashboard_step "Bootloader and Kernel Configuration" 7
+# Step 6: Bootloader and Kernel Configuration
+dashboard_step "Bootloader and Kernel Configuration" 6
 if is_step_complete "bootloader_config"; then
   dashboard_skip
 else
@@ -710,8 +683,8 @@ else
   fi
 fi
 
-# Step 8: Fail2ban Setup
-dashboard_step "Fail2ban Setup" 8
+# Step 7: Fail2ban Setup
+dashboard_step "Fail2ban Setup" 7
 if is_step_complete "fail2ban_setup"; then
   dashboard_skip
 else
@@ -726,8 +699,8 @@ else
   fi
 fi
 
-# Step 9: System Services
-dashboard_step "System Services" 9
+# Step 8: System Services
+dashboard_step "System Services" 8
 if is_step_complete "system_services"; then
   dashboard_skip
 else
@@ -742,8 +715,8 @@ else
   fi
 fi
 
-# Step 10: Wake-on-LAN Configuration
-dashboard_step "Wake-on-LAN Configuration" 10
+# Step 9: Wake-on-LAN Configuration
+dashboard_step "Wake-on-LAN Configuration" 9
 if is_step_complete "wakeonlan_config"; then
   dashboard_skip
 else
@@ -760,8 +733,8 @@ else
   fi
 fi
 
-# Step 11: Maintenance
-dashboard_step "Maintenance" 11
+# Step 10: Maintenance
+dashboard_step "Maintenance" 10
 if is_step_complete "maintenance"; then
   dashboard_skip
 else

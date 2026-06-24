@@ -266,21 +266,20 @@ flatpak:         # Flatpak applications
 
 ### Installation Steps
 
-The installer includes 11 comprehensive steps for complete system setup:
+The installer includes 10 comprehensive steps for complete system setup:
 
 | Step | Description | Mode Coverage |
 |------|-------------|---------------|
 | **1. System Preparation** | Pacman configuration, helper utilities, system update, CPU microcode, kernel headers, locales | All modes |
 | **2. Shell Setup** | Zsh + Oh-My-Zsh + Starship + Fastfetch | All modes |
-| **3. Plymouth Setup** | Boot screen configuration (bgrt/spinner themes) | Standard/Minimal/Gaming |
-| **4. Yay Installation** | AUR helper setup | All modes |
-| **5. Programs Installation** | Mode-specific applications from YAML configs | All modes |
-| **6. Gaming Mode** | Steam, Wine, GameMode, MangoHud, Discord, gaming launchers | Gaming mode only |
-| **7. Bootloader Configuration** | GRUB/systemd-boot/Limine with kernel optimization | All modes |
-| **8. Fail2ban Setup** | SSH security hardening (1hr ban, 3 retries) | All modes |
-| **9. System Services** | Firewall (UFW/Firewalld), user groups, GPU drivers, power management | All modes |
-| **10. Wake-on-LAN Configuration** | Multi-adapter WoL setup with laptop detection | Desktop systems |
-| **11. Maintenance** | Cache cleanup, orphan removal, SSD optimization | All modes |
+| **3. Yay Installation** | AUR helper setup | All modes |
+| **4. Programs Installation** | Mode-specific applications from YAML configs | All modes |
+| **5. Gaming Mode** | Steam, Wine, GameMode, MangoHud, Discord, gaming launchers | Gaming mode only |
+| **6. Bootloader & Plymouth** | Plymouth boot screen (bgrt/spinner themes), kernel params, GRUB/systemd-boot/Limine config | Standard/Minimal/Gaming |
+| **7. Fail2ban Setup** | SSH security hardening (1hr ban, 3 retries) | All modes |
+| **8. System Services** | Firewall (UFW/Firewalld), user groups, GPU drivers, power management | All modes |
+| **9. Wake-on-LAN Configuration** | Multi-adapter WoL setup with laptop detection | Desktop systems |
+| **10. Maintenance** | Cache cleanup, orphan removal, SSD optimization | All modes |
 
 ---
 

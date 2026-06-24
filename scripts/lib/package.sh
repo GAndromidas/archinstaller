@@ -225,9 +225,9 @@ update_system() {
 # Preload package lists for faster installation
 preload_package_lists() {
     ui_info "Preloading package lists..."
-    sudo pacman -Sy --noconfirm >/dev/null 2>&1
+    sudo pacman -Sy --noconfirm >>"$INSTALL_LOG" 2>&1
     if command -v yay >/dev/null; then
-        yay -Sy --noconfirm >/dev/null 2>&1
+        yay -Sy --noconfirm >>"$INSTALL_LOG" 2>&1
     fi
 }
 

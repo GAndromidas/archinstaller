@@ -139,7 +139,7 @@ setup_shell() {
   if [ ! -d "$HOME/.oh-my-zsh" ]; then
     log_info "Installing Oh-My-Zsh framework..."
     RUNZSH=no CHSH=no KEEP_ZSHRC=yes yes | \
-      sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" >/dev/null 2>&1 || true
+      sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" >>"$INSTALL_LOG" 2>&1 || true
 
     if [ -d "$HOME/.oh-my-zsh" ]; then
       log_success "Oh-My-Zsh installed successfully"

@@ -495,7 +495,7 @@ generate_default_mirrorlist() {
   log_info "Mirrorlist empty or missing. Generating default..."
 
   if command -v reflector >/dev/null 2>&1; then
-    sudo reflector --latest 10 --protocol https --sort rate --save /etc/pacman.d/mirrorlist >/dev/null 2>&1 && {
+    sudo reflector --latest 10 --protocol https --sort rate --save /etc/pacman.d/mirrorlist >>"$INSTALL_LOG" 2>&1 && {
       log_success "Default mirrorlist generated with reflector."
       return 0
     }
@@ -524,7 +524,7 @@ update_system_mirrors() {
   
   # Run mirror update silently in background
   # Redirect all output to /dev/null for silent operation
-  nohup bash -c "sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist '$mirror_repo' >/dev/null 2>&1 && sudo pacman -Syy >/dev/null 2>&1" >/dev/null 2>&1 &
+  nohup bash -c "sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist '$mirror_repo' >/dev/null 2>&1 && sudo pacman -Syy >/dev/null 2>&1" >>"$INSTALL_LOG" 2>&1 &
   
   # Give immediate feedback that mirrors are syncing
   ui_info "Syncing package mirrors..."
@@ -894,7 +894,7 @@ configure_plymouth_hook_and_initramfs() {
     local success_count=0
 
     for kernel in "${kernel_types[@]}"; do
-      if sudo mkinitcpio -p "$kernel" >/dev/null 2>&1; then
+      if sudo mkinitcpio -p "$kernel" >>"$INSTALL_LOG" 2>&1; then
         log_success "Rebuilt initramfs for $kernel"
         ((success_count++))
       else
@@ -1131,16 +1131,25 @@ gum_confirm() {
     local description="${2:-}" # Default to empty string if not provided
 
     if supports_gum; then
-        # Use gum for a nice UI
-        if [ -n "$description" ]; then
-            gum style --foreground "$GUM_WARN" "$description"
-        fi
+        # Use subshell to temporarily restore stdout/stderr to terminal for gum display
+        # Cursor should be positioned below dashboard frame by dashboard_run
+        (
+            exec >/dev/tty 2>/dev/tty
+            echo ""
 
-        if gum confirm --default=true --prompt.foreground "$GUM_PRIMARY" --selected.background "$GUM_PRIMARY" "$question"; then
-            return 0 # User said yes
-        else
-            return 1 # User said no
-        fi
+            if [ -n "$description" ]; then
+                gum style --foreground "$GUM_WARN" "$description"
+            fi
+
+            if gum confirm --default=true --prompt.foreground "$GUM_PRIMARY" --selected.background "$GUM_PRIMARY" "$question"; then
+                exit 0
+            else
+                exit 1
+            fi
+        )
+        local result=$?
+
+        return $result
     else
         # Fallback to traditional read prompt
         echo ""
@@ -1244,9 +1253,9 @@ prompt_reboot() {
 # ============================================================================
 preload_package_lists() {
   step "Preloading package lists for faster installation"
-  sudo pacman -Sy --noconfirm >/dev/null 2>&1
+  sudo pacman -Sy --noconfirm >>"$INSTALL_LOG" 2>&1
   if command -v yay >/dev/null; then
-    yay -Sy --noconfirm >/dev/null 2>&1
+    yay -Sy --noconfirm >>"$INSTALL_LOG" 2>&1
   else
     log_warning "yay not available for AUR package list update"
   fi

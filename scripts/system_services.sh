@@ -123,7 +123,7 @@ enable_services() {
     # Enable each service individually with proper error handling
     local enable_success=true
     for svc in "${services[@]}"; do
-      if ! sudo systemctl enable --now "$svc" >/dev/null 2>&1; then
+      if ! sudo systemctl enable --now "$svc" >>"$INSTALL_LOG" 2>&1; then
         log_error "Failed to enable $svc service"
         enable_success=false
       else
@@ -178,7 +178,7 @@ enable_services() {
   if pacman -Q timeshift &>/dev/null; then
     log_success "Timeshift detected - installing timeshift-autosnap for automatic snapshots..."
     if command -v yay >/dev/null 2>&1; then
-      if yay -S --noconfirm --needed timeshift-autosnap >/dev/null 2>&1; then
+      if yay -S --noconfirm --needed timeshift-autosnap >>"$INSTALL_LOG" 2>&1; then
         log_success "timeshift-autosnap installed successfully"
         services+=(timeshift-autosnap.timer)
         log_success "timeshift-autosnap.timer will be enabled for automatic snapshots."
@@ -199,7 +199,7 @@ enable_services() {
   # Enable each service individually with proper error handling
   local enable_success=true
   for svc in "${services[@]}"; do
-    if ! sudo systemctl enable --now "$svc" >/dev/null 2>&1; then
+    if ! sudo systemctl enable --now "$svc" >>"$INSTALL_LOG" 2>&1; then
       log_error "Failed to enable $svc service"
       enable_success=false
     else
@@ -933,7 +933,7 @@ detect_memory_size() {
   fi
 
   # Apply sysctl settings immediately
-  sudo sysctl -p /etc/sysctl.d/99-swappiness.conf >/dev/null 2>&1
+  sudo sysctl -p /etc/sysctl.d/99-swappiness.conf >>"$INSTALL_LOG" 2>&1
 
   log_success "Memory-based optimizations applied"
 }
@@ -1212,7 +1212,7 @@ detect_bluetooth_hardware() {
   
   # Method 2: USB devices (external dongles, built-in USB controllers)
   if command -v lsusb >/dev/null 2>&1; then
-    if lsusb 2>/dev/null | grep -iE "(bluetooth|broadcom|intel|realtek).*bluetooth" >/dev/null 2>&1; then
+    if lsusb 2>/dev/null | grep -iE "(bluetooth|broadcom|intel|realtek).*bluetooth" >>"$INSTALL_LOG" 2>&1; then
       bluetooth_detected=true
       detection_methods+=("USB device")
     fi
@@ -1220,14 +1220,14 @@ detect_bluetooth_hardware() {
   
   # Method 3: PCI devices (internal cards, PCIe adapters)
   if command -v lspci >/dev/null 2>&1; then
-    if lspci 2>/dev/null | grep -iE "(bluetooth|broadcom|intel|realtek).*bluetooth" >/dev/null 2>&1; then
+    if lspci 2>/dev/null | grep -iE "(bluetooth|broadcom|intel|realtek).*bluetooth" >>"$INSTALL_LOG" 2>&1; then
       bluetooth_detected=true
       detection_methods+=("PCI device")
     fi
   fi
   
   # Method 4: Check for bluetooth kernel modules
-  if lsmod 2>/dev/null | grep -iE "(btusb|bluetooth)" >/dev/null 2>&1; then
+  if lsmod 2>/dev/null | grep -iE "(btusb|bluetooth)" >>"$INSTALL_LOG" 2>&1; then
     bluetooth_detected=true
     detection_methods+=("kernel module")
   fi

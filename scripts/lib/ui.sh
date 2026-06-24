@@ -128,14 +128,25 @@ ui_confirm() {
     local description="${2:-}"
 
     if supports_gum; then
-        if [ -n "$description" ]; then
-            gum style --foreground "$GUM_WARN" "$description"
-        fi
-        if gum confirm --default=true --prompt.foreground "$GUM_PRIMARY" --selected.background "$GUM_PRIMARY" "$question"; then
-            return 0
-        else
-            return 1
-        fi
+        # Use subshell to temporarily restore stdout/stderr to terminal for gum display
+        # Output at current cursor position (should be below dashboard frame)
+        (
+            exec >/dev/tty 2>/dev/tty
+            echo ""
+
+            if [ -n "$description" ]; then
+                gum style --foreground "$GUM_WARN" "$description"
+            fi
+
+            if gum confirm --default=true --prompt.foreground "$GUM_PRIMARY" --selected.background "$GUM_PRIMARY" "$question"; then
+                exit 0
+            else
+                exit 1
+            fi
+        )
+        local result=$?
+
+        return $result
     else
         echo ""
         if [ -n "$description" ]; then

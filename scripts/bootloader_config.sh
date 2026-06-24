@@ -280,7 +280,7 @@ configure_plymouth() {
 
   # Single rebuild — includes hook + theme + font + for UKI: kernel params
   step "Rebuilding initramfs with Plymouth hook, theme, and console font"
-  if ! sudo mkinitcpio -P >/dev/null 2>&1; then
+  if ! sudo mkinitcpio -P >>"$INSTALL_LOG" 2>&1; then
     log_error "Failed to rebuild initramfs" "Run 'sudo mkinitcpio -P' manually to see errors"
     return 1
   fi
@@ -526,10 +526,18 @@ rename_dated_kernel_entries() {
   local dated_entries=()
   while IFS= read -r -d '' entry; do
     dated_entries+=("$entry")
-  done < <(find "$entries_dir" -name "*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]_*.conf" ! -name "*fallback*" -print0 2>/dev/null)
+  done < <(find "$entries_dir" -name "*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]_[0-9][0-9]-[0-9][0-9]-[0-9][0-9]_*.conf" ! -name "*fallback*" -print0 2>/dev/null)
+
+  log_info "Boot entries directory: $entries_dir"
+  log_info "Found ${#dated_entries[@]} dated kernel entries"
 
   if [[ ${#dated_entries[@]} -eq 0 ]]; then
     log_info "No dated kernel entries found — entries already in simple format"
+    # List all .conf files for debugging
+    log_info "All entries in directory:"
+    find "$entries_dir" -name "*.conf" -exec basename {} \; 2>/dev/null | while read -r f; do
+      log_info "  - $f"
+    done
     return 0
   fi
 
@@ -537,11 +545,13 @@ rename_dated_kernel_entries() {
 
   for dated_entry in "${dated_entries[@]}"; do
     local entry_name=$(basename "$dated_entry")
+    log_info "Processing entry: $entry_name"
 
-    if [[ "$entry_name" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}_(.*)\.conf$ ]]; then
+    if [[ "$entry_name" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}_(.*)\.conf$ ]]; then
       local kernel_type="${BASH_REMATCH[1]}"
       local simple_name="${kernel_type}.conf"
       local simple_path="$entries_dir/$simple_name"
+      log_info "Regex matched - kernel type: $kernel_type, simple name: $simple_name"
 
       if [[ -f "$simple_path" ]]; then
         log_warning "Simple entry $simple_name already exists, skipping rename of $entry_name"
@@ -553,6 +563,7 @@ rename_dated_kernel_entries() {
         continue
       fi
 
+      log_info "Attempting to rename: $dated_entry -> $simple_path"
       if sudo mv "$dated_entry" "$simple_path"; then
         log_success "Renamed $entry_name to $simple_name"
         ((renamed_count++))
@@ -582,7 +593,7 @@ check_renaming_conflicts() {
   for dated_entry in "$@"; do
     local entry_name=$(basename "$dated_entry")
 
-    if [[ "$entry_name" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}_(.*)\.conf$ ]]; then
+    if [[ "$entry_name" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}_(.*)\.conf$ ]]; then
       local kernel_type="${BASH_REMATCH[1]}"
       local simple_name="${kernel_type}.conf"
       local simple_path="$entries_dir/$simple_name"
@@ -705,7 +716,7 @@ configure_grub() {
 
     if [ -f "$grub_config" ]; then
         ui_info "Regenerating GRUB configuration..."
-        if sudo grub-mkconfig -o "$grub_cfg" >/dev/null 2>&1; then
+        if sudo grub-mkconfig -o "$grub_cfg" >>"$INSTALL_LOG" 2>&1; then
             log_success "GRUB configuration regenerated successfully"
         else
             log_error "grub-mkconfig failed"

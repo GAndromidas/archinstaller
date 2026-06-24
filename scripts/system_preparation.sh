@@ -103,7 +103,7 @@ install_all_packages() {
   echo -e "${THEME_TEXT}Installing ${#packages_to_install[@]} helper utilities + ${#all_packages[@]} total packages via Pacman...${RESET}"
 
   printf "${THEME_TEXT}Attempting batch installation...${RESET}\n"
-  if sudo pacman -S --noconfirm --needed "${all_packages[@]}" >/dev/null 2>&1; then
+  if sudo pacman -S --noconfirm --needed "${all_packages[@]}" >>"$INSTALL_LOG" 2>&1; then
     printf "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
     INSTALLED_PACKAGES+=("${all_packages[@]}")
     return 0
@@ -127,7 +127,7 @@ install_all_packages() {
       continue
     fi
 
-    if sudo pacman -S --noconfirm --needed "$pkg" >/dev/null 2>&1; then
+    if sudo pacman -S --noconfirm --needed "$pkg" >>"$INSTALL_LOG" 2>&1; then
       log_success "$pkg installed successfully"
       INSTALLED_PACKAGES+=("$pkg")
     else
@@ -178,7 +178,7 @@ install_cpu_microcode() {
     if pacman -Q "$pkg" &>/dev/null; then
       log_to_file "$pkg already installed"
     else
-      if sudo pacman -S --noconfirm --needed "$pkg" >/dev/null 2>&1; then
+      if sudo pacman -S --noconfirm --needed "$pkg" >>"$INSTALL_LOG" 2>&1; then
         log_success "$pkg installed successfully"
         INSTALLED_PACKAGES+=("$pkg")
       else
@@ -219,7 +219,7 @@ install_kernel_headers_for_all() {
 
   # Try batch install first
   printf "${THEME_TEXT}Attempting batch installation for headers...${RESET}\n"
-  if sudo pacman -S --noconfirm --needed "${header_packages[@]}" >/dev/null 2>&1; then
+  if sudo pacman -S --noconfirm --needed "${header_packages[@]}" >>"$INSTALL_LOG" 2>&1; then
     printf "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
     INSTALLED_PACKAGES+=("${header_packages[@]}")
     return 0
@@ -233,7 +233,7 @@ install_kernel_headers_for_all() {
     if pacman -Q "$headers_package" &>/dev/null; then
       log_to_file "$headers_package already installed"
     else
-      if sudo pacman -S --noconfirm --needed "$headers_package" >/dev/null 2>&1; then
+      if sudo pacman -S --noconfirm --needed "$headers_package" >>"$INSTALL_LOG" 2>&1; then
         log_success "$headers_package installed successfully"
         INSTALLED_PACKAGES+=("$headers_package")
       else

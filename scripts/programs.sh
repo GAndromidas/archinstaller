@@ -30,7 +30,7 @@ specific_remove_programs=() # DE-specific removals
 pacman_remove() {
 	local pkg="$1"
 	printf "${THEME_WARN}Removing Pacman package:${RESET} %-30s" "$pkg"
-	if sudo pacman -Rns --noconfirm "$pkg" >/dev/null 2>&1; then
+	if sudo pacman -Rns --noconfirm "$pkg" >>"$INSTALL_LOG" 2>&1; then
 		printf "${THEME_SUCCESS} ✓ Success${RESET}\n"
 		return 0
 	else
@@ -156,7 +156,7 @@ configure_server_applications() {
 	# Configure Docker
 	if command -v docker >/dev/null; then
 		step "Configuring Docker"
-		if sudo systemctl enable --now docker >/dev/null 2>&1; then
+		if sudo systemctl enable --now docker >>"$INSTALL_LOG" 2>&1; then
 			log_success "Docker service enabled and started."
 		else
 			log_error "Failed to enable or start Docker service."
@@ -176,7 +176,7 @@ configure_server_applications() {
 	if command -v docker >/dev/null; then
 		if gum_confirm "Install Portainer for Docker management?"; then
 			step "Installing Portainer"
-			if sudo docker volume create portainer_data >/dev/null 2>&1; then
+			if sudo docker volume create portainer_data >>"$INSTALL_LOG" 2>&1; then
 				log_success "Created Docker volume for Portainer data."
 			else
 				log_warning "Could not create Portainer Docker volume (it might already exist)."
@@ -184,10 +184,10 @@ configure_server_applications() {
 
 			step "Pulling Portainer image and starting container"
 			# Stop and remove existing container to ensure a clean start
-			sudo docker stop portainer >/dev/null 2>&1 || true
-			sudo docker rm portainer >/dev/null 2>&1 || true
+			sudo docker stop portainer >>"$INSTALL_LOG" 2>&1 || true
+			sudo docker rm portainer >>"$INSTALL_LOG" 2>&1 || true
 
-			if sudo docker run -d -p 8000:8000 -p 9443:9443 --name=portainer --restart=always -v /var/run/docker.sock:/var/run/docker.sock -v portainer_data:/data portainer/portainer-ce:latest >/dev/null 2>&1; then
+			if sudo docker run -d -p 8000:8000 -p 9443:9443 --name=portainer --restart=always -v /var/run/docker.sock:/var/run/docker.sock -v portainer_data:/data portainer/portainer-ce:latest >>"$INSTALL_LOG" 2>&1; then
 				log_success "Portainer container is running."
 				ui_info "You can access Portainer at https://<your-server-ip>:9443"
 			else
@@ -204,10 +204,10 @@ configure_server_applications() {
 		if gum_confirm "Install Watchtower for automatic container updates?"; then
 			step "Installing Watchtower"
 			# Stop and remove existing container to ensure a clean start
-			sudo docker stop watchtower >/dev/null 2>&1 || true
-			sudo docker rm watchtower >/dev/null 2>&1 || true
+			sudo docker stop watchtower >>"$INSTALL_LOG" 2>&1 || true
+			sudo docker rm watchtower >>"$INSTALL_LOG" 2>&1 || true
 
-			if sudo docker run -d --name=watchtower --restart=always -v /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower >/dev/null 2>&1; then
+			if sudo docker run -d --name=watchtower --restart=always -v /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower >>"$INSTALL_LOG" 2>&1; then
 				log_success "Watchtower container is running."
 				ui_info "Watchtower will now monitor your running containers and update them automatically."
 			else
@@ -231,7 +231,7 @@ install_pacman_packages() {
 
 	# Try batch install first for speed
 	printf "${THEME_TEXT}Attempting batch installation...${RESET}\n"
-	if sudo pacman -S --noconfirm --needed "${essential_programs[@]}" >/dev/null 2>&1; then
+	if sudo pacman -S --noconfirm --needed "${essential_programs[@]}" >>"$INSTALL_LOG" 2>&1; then
 		printf "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
 		PROGRAMS_INSTALLED+=("${essential_programs[@]}")
 		return
@@ -250,7 +250,7 @@ install_aur_packages() {
 
 	# Try batch install first
 	printf "${THEME_TEXT}Attempting batch installation...${RESET}\n"
-	if yay -S --noconfirm --needed "${yay_programs[@]}" >/dev/null 2>&1; then
+	if yay -S --noconfirm --needed "${yay_programs[@]}" >>"$INSTALL_LOG" 2>&1; then
 		printf "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
 		for pkg in "${yay_programs[@]}"; do
 			PROGRAMS_INSTALLED+=("$pkg (AUR)")

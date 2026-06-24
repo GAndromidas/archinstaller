@@ -28,7 +28,7 @@ install_fail2ban() {
 
 enable_and_start_fail2ban() {
   ui_info "Enabling and starting fail2ban service..."
-  if sudo systemctl enable --now fail2ban >/dev/null 2>&1; then
+  if sudo systemctl enable --now fail2ban >>"$INSTALL_LOG" 2>&1; then
     log_success "fail2ban service enabled and started"
     ENABLED+=("fail2ban")
     return 0
@@ -55,7 +55,7 @@ configure_fail2ban() {
 }
 
 status_fail2ban() {
-  if sudo systemctl status fail2ban --no-pager >/dev/null 2>&1; then
+  if sudo systemctl status fail2ban --no-pager >>"$INSTALL_LOG" 2>&1; then
     log_success "fail2ban service is running"
     return 0
   else

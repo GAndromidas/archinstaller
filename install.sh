@@ -110,7 +110,7 @@ source "$SCRIPTS_DIR/lib/dashboard.sh"
 # Install gum silently for enhanced UI experience
 if ! command -v gum >/dev/null 2>&1; then
   log_to_file "Installing gum for enhanced UI experience..."
-  if sudo pacman -S --noconfirm gum >/dev/null 2>&1; then
+  if sudo pacman -S --noconfirm gum >>"$INSTALL_LOG" 2>&1; then
     log_to_file "Gum installed successfully"
   else
     log_to_file "Failed to install gum, falling back to basic UI"

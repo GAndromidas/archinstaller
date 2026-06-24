@@ -29,15 +29,15 @@ readonly THEME_BORDER='\033[1;34m'
 readonly THEME_HEADER='\033[1;37m'
 
 # Gum color mappings for blue/white theme
-readonly GUM_PRIMARY="33"
+readonly GUM_PRIMARY="26"
 readonly GUM_SECONDARY="39"
 readonly GUM_TEXT="15"
 readonly GUM_SUCCESS="46"
 readonly GUM_WARN="226"
 readonly GUM_ERROR="196"
 readonly GUM_MUTED="8"
-readonly GUM_HEADER="33"
-readonly GUM_BORDER="33"
+readonly GUM_HEADER="26"
+readonly GUM_BORDER="26"
 
 # Global variables
 export INSTALL_LOG="${INSTALL_LOG:-$HOME/.archinstaller.log}"
@@ -47,10 +47,21 @@ INSTALLED_PACKAGES=()
 FAILED_PACKAGES=()
 START_TIME=$(date +%s)
 
+# Rotate old log files (keep last 3 backups)
+rotate_logs() {
+    local log="$INSTALL_LOG"
+    for i in 3 2 1; do
+        [ -f "${log}.$((i-1))" ] && mv -f "${log}.$((i-1))" "${log}.${i}" 2>/dev/null || true
+    done
+    [ -f "$log" ] && mv -f "$log" "${log}.1" 2>/dev/null || true
+}
+
 # Initialize logging
 init_logging() {
     mkdir -p "$(dirname "$INSTALL_LOG")" 2>/dev/null || true
-    echo "=== Arch Installer Log - $(date) ===" > "$INSTALL_LOG"
+    rotate_logs
+    touch "$INSTALL_LOG" 2>/dev/null || true
+    echo "=== Arch Installer Log - $(date) ===" >> "$INSTALL_LOG"
 }
 
 # Log to file

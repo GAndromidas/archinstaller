@@ -613,11 +613,8 @@ check_renaming_conflicts() {
 validate_kernel_entry() {
   local entry="$1"
 
-  if ! grep -q "^title " "$entry"; then
-    log_warning "Entry $(basename "$entry") missing title field"
-    return 1
-  fi
-
+  # Title field is optional (archinstall entries don't have it)
+  # Only check for essential fields: linux and initrd
   if ! grep -q "^linux " "$entry"; then
     log_warning "Entry $(basename "$entry") missing linux field"
     return 1

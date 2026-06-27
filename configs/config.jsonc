@@ -56,7 +56,7 @@
         {
             "type": "packages",
             "key": " ",
-            "format": "{1} (pacman), {flatpak-all} (flatpak)"
+            "format": "{pacman} (pacman), {flatpak-all} (flatpak)"
         },
         "break",
         {

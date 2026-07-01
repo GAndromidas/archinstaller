@@ -13,7 +13,7 @@ declare -gA SYSTEM_CACHE=()
 if ! declare -f find_systemd_boot_entries_dir >/dev/null 2>&1; then
 find_systemd_boot_entries_dir() {
   for dir in "/boot/loader/entries" "/efi/loader/entries" "/boot/efi/loader/entries"; do
-    if [ -d "$dir" ]; then
+    if sudo test -d "$dir" 2>/dev/null; then
       echo "$dir"
       return 0
     fi
@@ -88,9 +88,7 @@ detect_gpu() {
     local gpu="unknown"
     
     if command -v lspci &>/dev/null; then
-        if lspci | grep -qi "nvidia"; then
-            gpu="nvidia"
-        elif lspci | grep -qi "amd.*radeon\|amd.*gpu"; then
+        if lspci | grep -qi "amd.*radeon\|amd.*gpu"; then
             gpu="amd"
         elif lspci | grep -qi "intel.*vga\|intel.*gpu"; then
             gpu="intel"
@@ -119,6 +117,7 @@ get_ram_gb() {
 }
 
 # Detect if system uses Btrfs filesystem
+if ! declare -f is_btrfs_system >/dev/null 2>&1; then
 is_btrfs_system() {
     local cache_key="is_btrfs"
     
@@ -132,52 +131,62 @@ is_btrfs_system() {
     SYSTEM_CACHE[$cache_key]="$result"
     [[ "$result" == "true" ]]
 }
+fi
 
 # Detect bootloader type
+if ! declare -f detect_bootloader >/dev/null 2>&1; then
 detect_bootloader() {
     local cache_key="bootloader"
-    
-    # Re-enable cache for performance
+
     if [[ -n "${SYSTEM_CACHE[$cache_key]:-}" ]]; then
         echo "${SYSTEM_CACHE[$cache_key]}"
         return 0
     fi
-    
+
     local bootloader="unknown"
-    
-    # Check for GRUB first (most specific)
-    if [ -d "/boot/grub" ] || [ -d "/boot/grub2" ] || [ -d "/boot/efi/EFI/grub" ] || [ -d "/efi/EFI/grub" ] || \
-       command -v grub-mkconfig &>/dev/null || pacman -Q grub &>/dev/null 2>&1; then
+
+    # Tier 1: Active bootloader detection (based on actual directories/configs)
+    # Use sudo for /boot checks because /boot can have restricted permissions (e.g. 700 with UKI)
+    if sudo test -d /boot/grub 2>/dev/null || sudo test -d /boot/grub2 2>/dev/null || \
+       [ -d "/boot/efi/EFI/grub" ] || [ -d "/efi/EFI/grub" ]; then
         bootloader="grub"
-    # Check for Limine next
-    elif [ -d "/boot/limine" ] || [ -d "/boot/EFI/limine" ] || [ -d "/boot/EFI/arch-limine" ] || \
-         [ -f "/boot/limine.conf" ] || [ -f "/boot/limine/limine.conf" ] || \
-         [ -f "/boot/EFI/limine/limine.conf" ] || [ -f "/boot/EFI/arch-limine/limine.conf" ] || \
-         command -v limine &>/dev/null || pacman -Q limine &>/dev/null 2>&1; then
+    # Check for active Limine (config file takes priority)
+    elif sudo test -f /boot/limine.conf 2>/dev/null || \
+         sudo test -f /boot/limine/limine.conf 2>/dev/null || \
+         sudo test -f /boot/EFI/limine/limine.conf 2>/dev/null || \
+         sudo test -f /boot/EFI/arch-limine/limine.conf 2>/dev/null || \
+         sudo test -d /boot/limine 2>/dev/null || \
+         [ -d "/boot/EFI/limine" ] || [ -d "/boot/EFI/arch-limine" ]; then
         bootloader="limine"
-    # Check for systemd-boot (most comprehensive check)
-    elif [ -d "/boot/loader/entries" ] || [ -d "/efi/loader/entries" ] || [ -d "/boot/loader" ] || \
-         [ -f "/boot/loader/loader.conf" ] || [ -f "/efi/loader/loader.conf" ] || \
-         command -v bootctl &>/dev/null || pacman -Q systemd-boot &>/dev/null 2>&1 || \
+    # Check for active systemd-boot (loader entries + loader.conf)
+    elif sudo test -d /boot/loader/entries 2>/dev/null || [ -d "/efi/loader/entries" ] || \
+         sudo test -f /boot/loader/loader.conf 2>/dev/null || [ -f "/efi/loader/loader.conf" ] || \
          [ -d "/boot/EFI/systemd" ] || [ -d "/efi/EFI/systemd" ] || \
+         sudo test -d /boot/loader 2>/dev/null; then
+        bootloader="systemd-boot"
+    # Tier 2: Installed-package detection (may have false positives for inactive bootloaders)
+    elif command -v grub-mkconfig &>/dev/null || pacman -Q grub &>/dev/null 2>&1; then
+        bootloader="grub"
+    elif command -v limine &>/dev/null || pacman -Q limine &>/dev/null 2>&1; then
+        bootloader="limine"
+    elif command -v bootctl &>/dev/null || pacman -Q systemd-boot &>/dev/null 2>&1 || \
          [ -d "/boot/EFI/BOOT" ] || [ -d "/efi/EFI/BOOT" ]; then
         bootloader="systemd-boot"
-    # Fallback: Default to systemd-boot for UEFI systems (most common on Arch)
+    # Tier 3: Fallback based on firmware / distro
     elif [ -d /sys/firmware/efi ]; then
         bootloader="systemd-boot"
-    # Final fallback: Assume systemd-boot for Arch Linux (most common)
     elif [ -f /etc/arch-release ]; then
         bootloader="systemd-boot"
-    else
-        bootloader="unknown"
     fi
-    
+
     SYSTEM_CACHE[$cache_key]="$bootloader"
     echo "$bootloader"
 }
+fi
 
 # Check if system is UKI (Unified Kernel Image)
 # Uses multiple methods to avoid false positives
+if ! declare -f is_uki_system >/dev/null 2>&1; then
 is_uki_system() {
     local cache_key="is_uki"
     
@@ -187,14 +196,14 @@ is_uki_system() {
     fi
     
     local result="false"
-    
-    # Method 1: UKI .efi files exist in the ESP
-    if [[ -d /boot/efi/EFI/Linux/ ]] && ls /boot/efi/EFI/Linux/*.efi >/dev/null 2>&1; then
+
+    # Method 1: UKI .efi files exist in the ESP (use sudo for /boot due to 700 perms with UKI)
+    if sudo test -d /boot/efi/EFI/Linux 2>/dev/null && sudo ls /boot/efi/EFI/Linux/*.efi >/dev/null 2>&1; then
         result="true"
-    elif [[ -d /boot/EFI/Linux/ ]] && ls /boot/EFI/Linux/*.efi >/dev/null 2>&1; then
+    elif sudo test -d /boot/EFI/Linux 2>/dev/null && sudo ls /boot/EFI/Linux/*.efi >/dev/null 2>&1; then
         result="true"
     fi
-    
+
     # Method 2: systemd-boot entries reference .efi files (not vmlinuz)
     local entries_dir
     if [[ "$result" == "false" ]]; then
@@ -208,11 +217,10 @@ is_uki_system() {
             done < <(find "$entries_dir" -name "*.conf" -print0 2>/dev/null)
         fi
     fi
-    
-    # Method 3: UKI-related packages installed (last resort — packages can exist without UKI usage)
+
+    # Method 3: check for UKI output in mkinitcpio presets (more reliable than package presence)
     if [[ "$result" == "false" ]]; then
-        if pacman -Q systemd-ukify &>/dev/null 2>&1 || \
-           pacman -Q ukify &>/dev/null 2>&1; then
+        if grep -qr "^\s*default_uki=" /etc/mkinitcpio.d/ 2>/dev/null; then
             result="true"
         fi
     fi
@@ -220,12 +228,13 @@ is_uki_system() {
     SYSTEM_CACHE[$cache_key]="$result"
     [[ "$result" == "true" ]]
 }
+fi
 
 # Find limine.conf file location
 find_limine_config() {
     local limine_config=""
     for limine_loc in "/boot/limine/limine.conf" "/boot/limine.conf" "/boot/EFI/limine/limine.conf" "/boot/EFI/arch-limine/limine.conf" "/efi/limine/limine.conf"; do
-        if [ -f "$limine_loc" ]; then
+        if sudo test -f "$limine_loc" 2>/dev/null || [ -f "$limine_loc" ]; then
             echo "$limine_loc"
             return 0
         fi

@@ -44,14 +44,13 @@ CPU Detection:
   AMD: amd-ucode + microcode updates
   
 GPU Detection:
-  NVIDIA: Proprietary drivers + CUDA support
   AMD: Open-source drivers + Vulkan
   Intel: Integrated graphics + VA-API
   
 Storage Optimization:
-  NVMe: BFQ scheduler + trim optimizations
-  SSD: Deadline scheduler + wear leveling
-  HDD: CFQ scheduler + readahead settings
+  NVMe: none scheduler + trim optimizations
+  SSD: mq-deadline scheduler + wear leveling
+  HDD: bfq scheduler + readahead settings
   
 Laptop Features:
   Manufacturer-specific optimizations (15+ brands)
@@ -70,19 +69,18 @@ Laptop Features:
 
 #### Advanced Performance Optimization (CachyOS-Inspired)
 
-- **Smart Memory Management**: Dynamic swappiness based on system RAM (2GB: 10, 4GB: 10, 8GB: 5, 16GB+: 1)
-- **Intelligent Storage Optimization**: Automatic I/O scheduler detection (NVMe: none, SSD: deadline, HDD: mq-deadline)
+- **Smart Memory Management**: Dynamic swappiness based on system RAM (<4GB: 60, 4-8GB: 30, 8-16GB: 10, 16GB+: 1)
+- **Intelligent Storage Optimization**: Automatic I/O scheduler detection (NVMe: none, SSD: mq-deadline, HDD: bfq)
 - **Advanced Kernel Tuning**: Process scheduling, network stack optimization, filesystem-specific tuning
 - **Hardware-Aware Configuration**: NVMe detection, zRAM monitoring, virtualization awareness
 - **Transparent Hugepages**: Disabled for desktop systems to improve performance
 - **Persistent Settings**: All optimizations survive reboots via udev rules and systemd services
-- **GPU Driver Detection**: Automatic installation of AMD/Intel/NVIDIA drivers with Vulkan support
+- **GPU Driver Detection**: Automatic installation of AMD/Intel drivers with Vulkan support
 
 #### Performance Optimization
-- **I/O Scheduling**: Automatic selection based on storage type
-- **Kernel Tuning**: `vm.swappiness=10`, `fs.inotify.max_user_watches=524288`
+- **I/O Scheduling**: Automatic selection based on storage type (NVMe: none, SSD: mq-deadline, HDD: bfq)
+- **Memory Management**: Dynamic swappiness based on total RAM
 - **Parallel Downloads**: Pacman parallel package fetching (10 concurrent)
-- **Memory Management**: ZRAM compression + swap optimization
 
 ### Desktop Environment Integration
 | Environment | Optimizations | Features |
@@ -126,8 +124,7 @@ The system services step includes comprehensive service management:
 | **Desktop** | bluetooth.service | Standard/Minimal/Gaming (not Server) |
 | **Optional** | rustdesk.service, timeshift-autosnap.timer | If installed |
 | **Firewall** | UFW or Firewalld | UFW for Arch, Firewalld for EndeavourOS |
-| **Power Management** | power-profiles-daemon or tuned-ppd | Automatic power mode switching |
-| **GPU Drivers** | AMD/Intel/NVIDIA with Vulkan | Auto-detected and installed |
+| **GPU Drivers** | AMD/Intel with Vulkan | Auto-detected and installed |
 
 ### Gaming Mode (Optional)
 
@@ -275,7 +272,7 @@ The installer includes 10 comprehensive steps for complete system setup:
 | **3. Yay Installation** | AUR helper setup | All modes |
 | **4. Programs Installation** | Mode-specific applications from YAML configs | All modes |
 | **5. Gaming Mode** | Steam, Wine, GameMode, MangoHud, Discord, gaming launchers | Gaming mode only |
-| **6. Bootloader & Plymouth** | Plymouth boot screen (bgrt/spinner themes), kernel params, GRUB/systemd-boot/Limine config | Standard/Minimal/Gaming |
+| **6. Bootloader Configuration** | Kernel params, GRUB/systemd-boot/Limine config | Standard/Minimal/Gaming |
 | **7. Fail2ban Setup** | SSH security hardening (1hr ban, 3 retries) | All modes |
 | **8. System Services** | Firewall (UFW/Firewalld), user groups, GPU drivers, power management | All modes |
 | **9. Wake-on-LAN Configuration** | Multi-adapter WoL setup with laptop detection | Desktop systems |
@@ -306,7 +303,7 @@ The installer includes 10 comprehensive steps for complete system setup:
 | Component | Support | Notes |
 |-----------|---------|-------|
 | **CPU** | Intel, AMD | Microcode + optimizations |
-| **GPU** | NVIDIA, AMD, Intel | Driver auto-detection |
+| **GPU** | AMD, Intel | Driver auto-detection |
 | **Storage** | NVMe, SSD, HDD | I/O scheduler optimization |
 | **Form Factor** | Desktop, Laptop, VM | Power management + thermal |
 | **Laptop Brands** | 15+ Manufacturers | Brand-specific optimizations |
@@ -335,7 +332,6 @@ The installer includes automatic laptop detection and optimizations:
 - Product name analysis for common laptop indicators
 
 #### Optimizations Applied
-- Power profile management (power-profiles-daemon or tuned-ppd)
 - Battery vs AC power optimization
 - CPU frequency scaling
 - Thermal management

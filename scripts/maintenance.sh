@@ -42,7 +42,7 @@ setup_maintenance() {
 
   # Only attempt to remove yay-debug if it's actually installed
   if pacman -Q yay-debug &>/dev/null; then
-    run_step "Removing yay-debug package" yay -Rns yay-debug --noconfirm
+    run_step "Removing yay-debug package" sudo pacman -Rns --noconfirm yay-debug
   fi
 }
 

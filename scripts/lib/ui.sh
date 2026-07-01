@@ -313,6 +313,7 @@ simple_banner() {
 
 # Step indicator
 # Usage: step "Step description"
+if ! declare -f step >/dev/null 2>&1; then
 step() {
     local message="$1"
     if supports_gum; then
@@ -321,3 +322,4 @@ step() {
         echo -e "${THEME_SECONDARY}▶ $message${RESET}"
     fi
 }
+fi

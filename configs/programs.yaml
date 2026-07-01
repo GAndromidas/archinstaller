@@ -9,8 +9,6 @@ pacman:
       description: "Cat clone with syntax highlighting"
     - name: btop
       description: "Resource monitor"
-    - name: chromium
-      description: "Web browser"
     - name: cmatrix
       description: "Matrix-style terminal animation"
     - name: cpupower

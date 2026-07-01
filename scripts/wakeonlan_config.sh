@@ -75,100 +75,133 @@ test_interface_connectivity() {
 # Function to get interface with internet connectivity
 get_active_ethernet_interface() {
     local interfaces=($(get_ethernet_interfaces))
-    
+
     for iface in "${interfaces[@]}"; do
         if test_interface_connectivity "$iface"; then
             echo "$iface"
             return 0
         fi
     done
-    
+
+    # Fallback: return any interface with carrier (link detected)
+    for iface in "${interfaces[@]}"; do
+        local carrier
+        carrier=$(cat "/sys/class/net/$iface/carrier" 2>/dev/null)
+        if [[ "$carrier" == "1" ]]; then
+            log_info "No internet connectivity, falling back to interface with carrier: $iface"
+            echo "$iface"
+            return 0
+        fi
+    done
+
     return 1
 }
 
 # Function to detect ethernet interfaces
 get_ethernet_interfaces() {
     local interfaces=()
-    
-    # Get all network interfaces
-    while IFS= read -r iface; do
-        # Skip loopback and non-ethernet interfaces
-        [[ "$iface" == "lo" ]] && continue
-        
-        # Check if interface is ethernet (not wireless)
-        if [[ "$iface" =~ ^(enp|eth|ens|eno) ]]; then
-            # Verify it's a physical interface
-            if [ -d "/sys/class/net/$iface" ] && [ ! -L "/sys/class/net/$iface" ]; then
-                # Check if interface supports carrier (physical connection)
-                if [ -f "/sys/class/net/$iface/carrier" ] || [ -f "/sys/class/net/$iface/speed" ]; then
-                    interfaces+=("$iface")
-                fi
-            fi
-        fi
-    done < <(ls /sys/class/net/ 2>/dev/null)
-    
+
+    # Iterate over all network interfaces in sysfs
+    for iface in /sys/class/net/*; do
+        local name=$(basename "$iface")
+
+        # Skip loopback
+        [[ "$name" == "lo" ]] && continue
+
+        # Must be ARPHRD_ETHER (type 1)
+        local iftype=$(cat "$iface/type" 2>/dev/null)
+        [[ "$iftype" == "1" ]] || continue
+
+        # Must be a physical device (has a PCI device symlink)
+        # Virtual interfaces (bridges, bonds, VLANs, etc.) don't have this
+        [ -L "$iface/device" ] || continue
+
+        interfaces+=("$name")
+    done
+
     printf '%s\n' "${interfaces[@]}"
 }
 
 # Function to check if interface supports Wake-on-LAN
 supports_wol() {
     local iface="$1"
-    
-    # Check if ethtool is available
-    if ! command -v ethtool &>/dev/null; then
-        return 1
-    fi
-    
-    # Check if interface supports WoL
-    if sudo ethtool "$iface" &>/dev/null; then
-        local wol_support=$(sudo ethtool "$iface" | awk '/Supports Wake-on:/ {print $4}')
-        if [[ -n "$wol_support" && "$wol_support" != *"g"* ]]; then
-            return 1
-        fi
-        return 0
-    fi
-    
-    return 1
+
+    command -v ethtool &>/dev/null || return 1
+
+    # Run ethtool once, capture output
+    local ethtool_out
+    ethtool_out=$(sudo ethtool "$iface" 2>/dev/null) || return 1
+
+    # Check if 'g' (magic packet) is in the supported Wake-on modes
+    local wol_support
+    wol_support=$(echo "$ethtool_out" | sed -n 's/^Supports Wake-on: //p')
+    [[ -n "$wol_support" ]] || return 1
+    [[ "$wol_support" == *g* ]] || return 1
+
+    return 0
 }
 
 # Function to enable Wake-on-LAN on interface
 enable_wol_interface() {
     local iface="$1"
-    
-    log_to_file "Enabling Wake-on-LAN on interface: $iface"
-    
-    # Enable WoL
-    if sudo ethtool -s "$iface" wol g; then
-        log_to_file "Wake-on-LAN enabled on $iface"
-        ui_success "Wake-on-LAN enabled on $iface"
-        
-        # Create systemd service for persistence
-        create_wol_service "$iface"
-        return 0
-    else
-        log_to_file "Failed to enable Wake-on-LAN on $iface"
+
+    log_info "Enabling Wake-on-LAN on interface: $iface"
+
+    # Enable WoL via ethtool
+    if ! sudo ethtool -s "$iface" wol g; then
+        log_error "Failed to enable Wake-on-LAN on $iface via ethtool"
         ui_error "Failed to enable Wake-on-LAN on $iface"
         return 1
     fi
+
+    log_success "Wake-on-LAN enabled on $iface via ethtool"
+
+    # Also enable through sysfs if available (PCI PME)
+    local pci_dev
+    pci_dev=$(readlink -f "/sys/class/net/$iface/device" 2>/dev/null | xargs basename 2>/dev/null)
+    if [ -n "$pci_dev" ] && [ -f "/sys/bus/pci/devices/$pci_dev/power/wakeup" ]; then
+        echo "enabled" | sudo tee "/sys/bus/pci/devices/$pci_dev/power/wakeup" >/dev/null 2>&1
+        log_info "PCI PME wakeup enabled for $pci_dev"
+    fi
+
+    # Verify WoL is working
+    local current_wol
+    current_wol=$(sudo ethtool "$iface" 2>/dev/null | sed -n 's/^Wake-on: //p')
+    if [[ "$current_wol" == *g* ]]; then
+        log_success "Verified WoL is active on $iface (Wake-on: $current_wol)"
+        ui_success "Wake-on-LAN enabled on $iface"
+    else
+        log_warning "WoL set but verification shows Wake-on: $current_wol"
+    fi
+
+    # Create systemd service for persistence
+    create_wol_service "$iface"
+    return 0
 }
 
 # Function to create systemd service for WoL persistence
 create_wol_service() {
     local iface="$1"
     local service_file="/etc/systemd/system/wol-$iface.service"
-    
-    log_to_file "Creating systemd service for WoL on $iface"
-    
+
+    log_info "Creating systemd service for WoL on $iface"
+
+    # Find ethtool path
+    local ethtool_path
+    ethtool_path=$(command -v ethtool) || ethtool_path="/usr/bin/ethtool"
+
     # Create systemd service file
     sudo tee "$service_file" > /dev/null <<EOF
 [Unit]
 Description=Enable Wake-on-LAN for $iface
-After=network.target
-Wants=network.target
+After=network-pre.target
+Before=shutdown.target reboot.target halt.target
+Wants=network-pre.target
 
 [Service]
 Type=oneshot
-ExecStart=/sbin/ethtool -s $iface wol g
+ExecStart=$ethtool_path -s $iface wol g
+ExecStop=$ethtool_path -s $iface wol g
 RemainAfterExit=yes
 
 [Install]
@@ -178,10 +211,10 @@ EOF
     # Reload systemd and enable service
     sudo systemctl daemon-reload
     if sudo systemctl enable "wol-$iface.service"; then
-        log_to_file "Systemd service enabled for WoL on $iface"
+        log_success "Systemd service enabled for WoL on $iface"
         ui_success "Persistent Wake-on-LAN service created for $iface"
     else
-        log_to_file "Failed to enable systemd service for WoL on $iface"
+        log_error "Failed to enable systemd service for WoL on $iface"
         ui_error "Failed to create persistent WoL service for $iface"
     fi
 }
@@ -210,8 +243,9 @@ show_wol_status() {
         local wol_status="Unknown"
         
         if supports_wol "$iface"; then
-            wol_status=$(sudo ethtool "$iface" 2>/dev/null | awk '/Wake-on:/ {print $2}')
-            if [[ "$wol_status" == *"g"* ]]; then
+            local wol_current
+            wol_current=$(sudo ethtool "$iface" 2>/dev/null | sed -n 's/^Wake-on: //p')
+            if [[ "$wol_current" == *g* ]]; then
                 wol_status="${THEME_SUCCESS}Enabled${RESET}"
             else
                 wol_status="${THEME_WARN}Disabled${RESET}"
@@ -267,8 +301,8 @@ prompt_interface_selection() {
         read -r choice
         
         case "$choice" in
-            [0-9]*|[0-9]*)
-                if [[ "$choice" -ge 1 && "$choice" -le ${#interfaces[@]} ]]; then
+            [0-9]*)
+                if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le ${#interfaces[@]} ]; then
                     local selected_iface="${choices[$((choice-1))]}"
                     echo ""
                     ui_info "Selected interface: $selected_iface"
@@ -305,7 +339,7 @@ configure_wakeonlan() {
     if is_laptop; then
         ui_info "Laptop system detected - Wake-on-LAN configuration skipped"
         ui_info "Wake-on-LAN is typically not needed on laptops"
-        log_to_file "Laptop detected - WoL configuration skipped"
+        log_info "Laptop detected - WoL configuration skipped"
         return 0
     fi
     
@@ -314,7 +348,7 @@ configure_wakeonlan() {
         ui_info "Installing ethtool for Wake-on-LAN support..."
         if sudo pacman -S --noconfirm ethtool; then
             ui_success "ethtool installed successfully"
-            log_to_file "ethtool installed for WoL support"
+            log_info "ethtool installed for WoL support"
         else
             ui_error "Failed to install ethtool"
             return 1
@@ -326,7 +360,7 @@ configure_wakeonlan() {
     
     if [ ${#interfaces[@]} -eq 0 ]; then
         ui_info "No ethernet interfaces found - Wake-on-LAN configuration skipped"
-        log_to_file "No ethernet interfaces found - WoL configuration skipped"
+        log_info "No ethernet interfaces found - WoL configuration skipped"
         return 0
     fi
     
@@ -350,7 +384,7 @@ configure_wakeonlan() {
         selection=$(prompt_interface_selection "${interfaces[@]}")
         
         if [[ "$selection" == "SKIP" ]]; then
-            log_to_file "User chose to skip WoL configuration"
+            log_info "User chose to skip WoL configuration"
             return 0
         fi
     fi
@@ -397,7 +431,7 @@ configure_wakeonlan() {
         fi
     fi
     
-    if [ $success_count -gt 0 ]; then
+    if [ "$success_count" -gt 0 ]; then
         ui_success "Wake-on-LAN configured successfully on $success_count interface(s)"
         ui_info "Wake-on-LAN will persist after reboots"
         

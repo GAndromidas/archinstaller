@@ -188,15 +188,6 @@ install_cpu_microcode() {
   fi
 }
 
-get_installed_kernel_types() {
-  local kernel_types=()
-  pacman -Q linux &>/dev/null && kernel_types+=("linux")
-  pacman -Q linux-lts &>/dev/null && kernel_types+=("linux-lts")
-  pacman -Q linux-zen &>/dev/null && kernel_types+=("linux-zen")
-  pacman -Q linux-hardened &>/dev/null && kernel_types+=("linux-hardened")
-  echo "${kernel_types[@]}"
-}
-
 install_kernel_headers_for_all() {
   step "Installing kernel headers for all installed kernels"
   local kernel_types

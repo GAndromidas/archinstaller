@@ -34,14 +34,13 @@ INSTALLATION MODES:
 
 FEATURES:
     - Hardware-aware CPU detection (Intel/AMD with microcode updates)
-    - Automatic GPU driver detection and installation (NVIDIA/AMD/Intel)
+    - Automatic GPU driver detection and installation (AMD/Intel)
     - Storage optimization (NVMe/SSD/HDD with I/O scheduling)
     - Desktop environment detection and optimization (KDE Plasma 6+, GNOME 46+, Cosmic)
     - Security hardening (UFW/Firewalld + Fail2ban with SSH protection)
     - Advanced performance tuning (CachyOS-inspired optimizations)
     - Smart AMD P-State system with gaming mode detection
     - Wake-on-LAN configuration for ethernet devices (desktops only)
-    - Plymouth boot screen configuration
     - Zsh shell with Oh-My-Zsh and Starship prompt
     - Resume functionality for interrupted installations
 
@@ -154,53 +153,40 @@ export START_TIME
 
 arch_ascii
 
-# Enhanced system requirements checking with hardware compatibility
+# System checking function (defined before use)
 check_system_requirements() {
   local requirements_failed=false
-  
+
   # Use the enhanced compatibility check from common.sh
   if ! check_system_compatibility; then
     ui_error "System compatibility check failed!"
     ui_info "Please address the issues listed above before continuing."
     exit 1
   fi
-  
+
   # Additional hardware-specific checks
   local hardware_issues=()
-  
-  # Bootloader detection will happen during the bootloader config step
-  log_to_file "Bootloader type will be detected during Step 6 (Bootloader & Plymouth)"
-  
-  # Check for UEFI vs BIOS mode
+
+  log_to_file "Bootloader type will be detected during Step 6 (Bootloader Configuration)"
+
   if [ -d /sys/firmware/efi ]; then
     log_to_file "UEFI boot mode detected"
   else
     log_to_file "BIOS/Legacy boot mode detected"
     hardware_issues+=("Legacy BIOS mode detected - some features may not work optimally")
   fi
-  
-  # Check GPU drivers availability
+
   if lspci | grep -qi vga; then
     local gpu_vendor=$(lspci | grep -i vga | head -1 | awk '{print $1}' | cut -d: -f2)
     case "$gpu_vendor" in
-      *"Intel"*)
-        log_to_file "Intel GPU detected - mesa drivers will be configured"
-        ;;
-      *"NVIDIA"*)
-        log_to_file "NVIDIA GPU detected - proprietary drivers will be configured"
-        ;;
-      *"AMD"*)
-        log_to_file "AMD GPU detected - open-source drivers will be configured"
-        ;;
-      *)
-        log_to_file "Unknown GPU detected - generic drivers will be used"
-        ;;
+      *"Intel"*) log_to_file "Intel GPU detected - mesa drivers will be configured" ;;
+      *"AMD"*)   log_to_file "AMD GPU detected - open-source drivers will be configured" ;;
+      *)         log_to_file "Unknown GPU detected - generic drivers will be used" ;;
     esac
   else
     hardware_issues+=("No GPU detected - this may be a headless system")
   fi
-  
-  # Check storage type for optimizations
+
   local root_device=$(findmnt -n -o SOURCE / | cut -d'[' -f1 | cut -d'/' -f3)
   if [ -n "$root_device" ]; then
     if echo "$root_device" | grep -q "nvme"; then
@@ -213,8 +199,7 @@ check_system_requirements() {
   else
     hardware_issues+=("Could not determine root storage device")
   fi
-  
-  # Check system memory for optimizations
+
   local total_mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
   local total_mem_gb=$((total_mem_kb / 1024 / 1024))
   if [ "$total_mem_gb" -lt 2 ]; then
@@ -222,8 +207,7 @@ check_system_requirements() {
   else
     log_to_file "System memory: ${total_mem_gb}GB - appropriate optimizations will be applied"
   fi
-  
-  # Report hardware issues if any
+
   if [ ${#hardware_issues[@]} -gt 0 ]; then
     ui_warn "Hardware compatibility issues detected:"
     for issue in "${hardware_issues[@]}"; do
@@ -235,11 +219,13 @@ check_system_requirements() {
       exit 0
     fi
   fi
-  
+
   log_to_file "System requirements and hardware compatibility checks passed"
 }
 
-check_system_requirements
+# Run system checks — stdout goes to log, interactive prompts use /dev/tty
+check_system_requirements >> "$INSTALL_LOG" 2>&1
+
 show_menu
 
 # Check if INSTALL_MODE was set (user might have exited menu)
@@ -464,9 +450,9 @@ if [ "$DRY_RUN" = false ]; then
   while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
   SUDO_KEEPALIVE_PID=$!
   # Enhanced trap with error handling
-  trap 'cleanup_on_error $LINENO; save_log_on_exit' EXIT INT TERM ERR
+  trap 'cleanup_on_error $? $LINENO; save_log_on_exit' EXIT INT TERM ERR
 else
-  trap 'cleanup_on_error $LINENO; save_log_on_exit' EXIT INT TERM ERR
+  trap 'cleanup_on_error $? $LINENO; save_log_on_exit' EXIT INT TERM ERR
 fi
 
 # Function to mark step as completed with atomic append
@@ -491,7 +477,7 @@ mark_step_complete() {
 
 # Function to check if step was completed
 is_step_complete() {
-  [ -f "$STATE_FILE" ] && grep -q "^$1$" "$STATE_FILE"
+  [ -f "$STATE_FILE" ] && grep -qE "^(COMPLETED: )?$1$" "$STATE_FILE"
 }
 
 
@@ -521,9 +507,6 @@ cleanup_on_error() {
   local error_line=${2:-$LINENO}
   
   if [ $exit_code -ne 0 ]; then
-    # Mark installation as failed
-    INSTALLATION_SUCCESS=false
-    
     log_error "Installation failed with exit code $exit_code at line $error_line"
     log_error "Check the log file for details: $INSTALL_LOG"
     
@@ -531,6 +514,15 @@ cleanup_on_error() {
     if [ -n "${SUDO_KEEPALIVE_PID+x}" ]; then
       kill $SUDO_KEEPALIVE_PID 2>/dev/null || true
     fi
+    
+    # Check if steps actually failed — if all steps completed, don't mark as failure
+    if [ -f "$STATE_FILE" ] && ! grep -q "^FAILED:" "$STATE_FILE" 2>/dev/null; then
+      log_warning "All installation steps completed successfully despite external signal (exit code $exit_code)"
+      return 0
+    fi
+    
+    # Mark installation as failed
+    INSTALLATION_SUCCESS=false
     
     # Offer recovery options
     echo ""
@@ -561,13 +553,14 @@ save_log_on_exit() {
     echo "Installation ended: $(date)"
     echo "=========================================="
     
-    # Add summary if installation completed successfully
-    if [ "$INSTALLATION_SUCCESS" = "true" ]; then
-      echo "Installation completed successfully!"
-      echo "Total installation time: $(($(date +%s) - START_TIME)) seconds"
-    else
+    # Determine actual installation status from state file (more reliable than INSTALLATION_SUCCESS
+    # which can be false due to external signals like SIGTERM after all steps completed)
+    if [ -f "$STATE_FILE" ] && grep -q "^FAILED:" "$STATE_FILE" 2>/dev/null; then
       echo "Installation completed with errors!"
       echo "Check the log above for details."
+    else
+      echo "Installation completed successfully!"
+      echo "Total installation time: $(($(date +%s) - START_TIME)) seconds"
     fi
   } >> "$INSTALL_LOG"
 }

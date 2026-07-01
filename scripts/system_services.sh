@@ -27,12 +27,9 @@ configure_firewalld() {
   sudo systemctl start firewalld
   sudo systemctl enable firewalld
 
-  # Set default policies
+  # Set default zone to drop — deny incoming, allow outgoing, explicit allow for services
   sudo firewall-cmd --set-default-zone=drop
-  log_success "Default policy set to deny all incoming connections."
-
-  sudo firewall-cmd --set-default-zone=public
-  log_success "Default policy set to allow all outgoing connections."
+  log_success "Default zone set to drop (incoming denied, outgoing allowed)"
 
   # Allow SSH
   if ! sudo firewall-cmd --list-all | grep -q "22/tcp"; then
@@ -163,9 +160,6 @@ enable_services() {
     fi
   fi
 
-  # Setup power profile management (power-profiles-daemon or tuned-ppd)
-  setup_power_profile_daemon
-
   # Conditionally add rustdesk.service if installed
   if pacman -Q rustdesk-bin &>/dev/null || pacman -Q rustdesk &>/dev/null; then
     services+=(rustdesk.service)
@@ -180,6 +174,7 @@ enable_services() {
     if command -v yay >/dev/null 2>&1; then
       if yay -S --noconfirm --needed timeshift-autosnap >>"$INSTALL_LOG" 2>&1; then
         log_success "timeshift-autosnap installed successfully"
+        sudo systemctl daemon-reload
         services+=(timeshift-autosnap.timer)
         log_success "timeshift-autosnap.timer will be enabled for automatic snapshots."
       else
@@ -281,97 +276,8 @@ detect_and_install_gpu_drivers() {
     install_packages_quietly vulkan-intel lib32-vulkan-intel
     log_success "Intel drivers and Vulkan support installed"
     log_info "Intel GPU will use i915 or xe driver after reboot"
-  elif lspci | grep -qi nvidia; then
-    echo -e "${THEME_WARN}NVIDIA GPU detected.${RESET}"
-
-    # Get PCI ID and map to family
-    nvidia_pciid=$(lspci -n -d ::0300 | grep -i nvidia | awk '{print $3}' | head -n1)
-    nvidia_family=""
-    nvidia_pkg=""
-    nvidia_note=""
-
-    # Map PCI ID to family (simplified, for full mapping see ArchWiki and Nouveau code names)
-    if lspci | grep -Eiq 'TU|GA|AD|Turing|Ampere|Lovelace'; then
-      nvidia_family="Turing or newer"
-      nvidia_pkg="nvidia-open-dkms nvidia-utils lib32-nvidia-utils"
-      nvidia_note="(open kernel modules, recommended for Turing/Ampere/Lovelace)"
-    elif lspci | grep -Eiq 'GM|GP|Maxwell|Pascal'; then
-      nvidia_family="Maxwell or newer"
-      nvidia_pkg="nvidia nvidia-utils lib32-nvidia-utils"
-      nvidia_note="(proprietary, recommended for Maxwell/Pascal)"
-    elif lspci | grep -Eiq 'GK|Kepler'; then
-      nvidia_family="Kepler"
-      nvidia_pkg="nvidia-470xx-dkms"
-      nvidia_note="(legacy, AUR, unsupported)"
-    elif lspci | grep -Eiq 'GF|Fermi'; then
-      nvidia_family="Fermi"
-      nvidia_pkg="nvidia-390xx-dkms"
-      nvidia_note="(legacy, AUR, unsupported)"
-    elif lspci | grep -Eiq 'G8|Tesla'; then
-      nvidia_family="Tesla"
-      nvidia_pkg="nvidia-340xx-dkms"
-      nvidia_note="(legacy, AUR, unsupported)"
-    else
-      nvidia_family="Unknown"
-      nvidia_pkg="nvidia nvidia-utils lib32-nvidia-utils"
-      nvidia_note="(defaulting to latest proprietary driver)"
-    fi
-
-    echo -e "${THEME_TEXT}Detected NVIDIA family: $nvidia_family $nvidia_note${RESET}"
-    echo -e "${THEME_TEXT}Installing: $nvidia_pkg${RESET}"
-
-    if [[ "$nvidia_family" == "Kepler" || "$nvidia_family" == "Fermi" || "$nvidia_family" == "Tesla" ]]; then
-      echo -e "${THEME_WARN}Your NVIDIA GPU is legacy and may not be well supported by the proprietary driver, especially on Wayland.${RESET}"
-      echo "For best Wayland support, it is recommended to use the open-source Nouveau driver."
-      echo "Choose driver to install:"
-      echo "  1) Nouveau (open source, best for Wayland, basic 3D support)"
-      echo "  2) Proprietary legacy NVIDIA driver (AUR, may not work with Wayland, unsupported)"
-      local legacy_choice
-      while true; do
-        read -r -p "Enter your choice [1-2]: " legacy_choice
-        case "$legacy_choice" in
-          1)
-            echo -e "${THEME_TEXT}Installing Nouveau drivers...${RESET}"
-            install_packages_quietly xf86-video-nouveau vulkan-nouveau lib32-vulkan-nouveau
-            log_success "Nouveau drivers installed."
-            break
-            ;;
-          2)
-            echo -e "${THEME_TEXT}Installing legacy proprietary NVIDIA drivers...${RESET}"
-            if [[ "$nvidia_family" == "Kepler" ]]; then
-              yay -S --noconfirm --needed nvidia-470xx-dkms
-            elif [[ "$nvidia_family" == "Fermi" ]]; then
-              yay -S --noconfirm --needed nvidia-390xx-dkms
-            elif [[ "$nvidia_family" == "Tesla" ]]; then
-              yay -S --noconfirm --needed nvidia-340xx-dkms
-            fi
-            log_success "Legacy proprietary NVIDIA drivers installed."
-            break
-            ;;
-          *)
-            echo -e "${THEME_ERROR}Invalid choice! Please enter 1 or 2.${RESET}"
-            ;;
-        esac
-      done
-      return
-    fi
-
-    # If AUR package, warn user
-    if [[ "$nvidia_pkg" == *"dkms"* && "$nvidia_pkg" != *"nvidia-open-dkms"* ]]; then
-      log_warning "This is a legacy/unsupported NVIDIA card. The driver will be installed from the AUR if yay is available."
-      if ! command -v yay &>/dev/null; then
-        log_error "yay (AUR helper) is not installed. Cannot install legacy NVIDIA driver."
-        return 1
-      fi
-      yay -S --noconfirm --needed $nvidia_pkg
-    else
-      install_packages_quietly $nvidia_pkg
-    fi
-
-    log_success "NVIDIA drivers installed."
-    return
   else
-    echo -e "${THEME_WARN}No AMD, Intel, or NVIDIA GPU detected. Using basic Mesa drivers already installed.${RESET}"
+    echo -e "${THEME_WARN}No AMD or Intel GPU detected. Using basic Mesa drivers already installed.${RESET}"
   fi
 
   # Verify GPU driver is loaded
@@ -423,127 +329,6 @@ is_laptop() {
     fi
   fi
   return 1
-}
-
-# Function to detect CPU generation and recommend power profile daemon
-detect_power_profile_daemon() {
-  local cpu_vendor=$(detect_cpu_vendor)
-  local recommended_daemon="tuned-ppd"  # Default to safer choice
-  local cpu_model=$(grep -m1 "model name" /proc/cpuinfo | cut -d: -f2 | xargs)
-
-  # Check kernel version for power-profiles-daemon compatibility
-  local kernel_major=$(uname -r | cut -d. -f1)
-  local kernel_minor=$(uname -r | cut -d. -f2)
-
-  # Safety check: power-profiles-daemon requires kernel 5.17+
-  if [ "$kernel_major" -lt 5 ] || ([ "$kernel_major" -eq 5 ] && [ "$kernel_minor" -lt 17 ]); then
-    log_info "Kernel version too old for power-profiles-daemon (requires 5.17+) - using tuned-ppd"
-    echo "tuned-ppd"
-    return 0
-  fi
-
-  if [ "$cpu_vendor" = "intel" ]; then
-    # Budget Intel CPUs - always use tuned-ppd for stability
-    if echo "$cpu_model" | grep -qiE "Atom|Celeron|Pentium"; then
-      recommended_daemon="tuned-ppd"
-      log_info "Intel budget CPU detected - tuned-ppd recommended for stability"
-    # Modern Intel CPUs (6th gen+) with recent kernel - power-profiles-daemon OK
-    elif [ "$kernel_major" -ge 6 ] && echo "$cpu_model" | grep -qiE "Core.*i[3579]"; then
-      # Additional check for Intel P-State support
-      if [ -d /sys/devices/system/cpu/intel_pstate ]; then
-        recommended_daemon="power-profiles-daemon"
-        log_info "Modern Intel CPU with P-State support - power-profiles-daemon recommended"
-      else
-        recommended_daemon="tuned-ppd"
-        log_info "Intel CPU without P-State - tuned-ppd recommended"
-      fi
-    else
-      recommended_daemon="tuned-ppd"
-      log_info "Older Intel CPU - tuned-ppd recommended for compatibility"
-    fi
-  elif [ "$cpu_vendor" = "amd" ]; then
-    # Check for AMD P-State support first
-    if [ -d /sys/devices/system/cpu/amd_pstate ]; then
-      # Modern AMD CPUs with P-State support - power-profiles-daemon OK
-      if echo "$cpu_model" | grep -qiE "Ryzen.*[3-9][0-9]{3}|Ryzen.*Pro.*[3-9][0-9]{3}"; then
-        recommended_daemon="power-profiles-daemon"
-        log_info "Modern AMD Ryzen with P-State support - power-profiles-daemon recommended"
-      else
-        recommended_daemon="tuned-ppd"
-        log_info "AMD CPU with P-State but older generation - tuned-ppd recommended"
-      fi
-    else
-      # AMD CPUs without P-State - use tuned-ppd
-      recommended_daemon="tuned-ppd"
-      log_info "AMD CPU without P-State support - tuned-ppd recommended"
-    fi
-  else
-    # Unknown CPU - default to tuned-ppd (safer choice)
-    recommended_daemon="tuned-ppd"
-    log_info "Unknown CPU vendor - tuned-ppd recommended for safety"
-  fi
-
-  echo "$recommended_daemon"
-}
-
-# Function to install and configure power profile daemon
-setup_power_profile_daemon() {
-  step "Setting up power profile management"
-
-  local daemon=$(detect_power_profile_daemon)
-
-  # Safety check: Stop any existing power management services to prevent conflicts
-  if systemctl is-enabled --quiet tuned.service 2>/dev/null; then
-    log_info "Stopping existing tuned service to prevent conflicts..."
-    sudo systemctl stop tuned.service 2>/dev/null || true
-    sudo systemctl disable tuned.service 2>/dev/null || true
-  fi
-
-  if systemctl is-enabled --quiet power-profiles-daemon.service 2>/dev/null; then
-    log_info "Stopping existing power-profiles-daemon service to prevent conflicts..."
-    sudo systemctl stop power-profiles-daemon.service 2>/dev/null || true
-    sudo systemctl disable power-profiles-daemon.service 2>/dev/null || true
-  fi
-
-  if [ "$daemon" = "power-profiles-daemon" ]; then
-    log_info "Installing power-profiles-daemon..."
-    install_packages_quietly power-profiles-daemon
-
-    # Enable and start with error handling
-    if sudo systemctl enable power-profiles-daemon.service 2>/dev/null; then
-      if sudo systemctl start power-profiles-daemon.service 2>/dev/null; then
-        log_success "power-profiles-daemon is active"
-        log_info "Use 'powerprofilesctl' to manage power profiles"
-      else
-        log_warning "power-profiles-daemon failed to start - may require reboot"
-      fi
-    else
-      log_warning "Failed to enable power-profiles-daemon service"
-    fi
-  else
-    log_info "Installing tuned-ppd (power-profiles-daemon alternative)..."
-
-    # Check if tuned-ppd is available in AUR
-    if command -v yay >/dev/null 2>&1; then
-      install_aur_quietly tuned-ppd
-
-      # Enable and start with error handling
-      if sudo systemctl enable tuned.service 2>/dev/null; then
-        if sudo systemctl start tuned.service 2>/dev/null; then
-          log_success "tuned-ppd is active"
-          log_info "Use 'tuned-adm' to manage power profiles"
-          log_info "Available profiles: balanced, powersave, performance"
-        else
-          log_warning "tuned-ppd failed to start - may require reboot"
-        fi
-      else
-        log_warning "Failed to enable tuned service"
-      fi
-    else
-      log_warning "yay not available - cannot install tuned-ppd from AUR"
-      log_info "Using kernel's built-in power management"
-    fi
-  fi
 }
 
 # Function to detect CPU vendor
@@ -870,7 +655,7 @@ detect_memory_size() {
   log_info "Total system memory: ${ram_gb}GB"
 
   # Apply memory-based optimizations
-  if [ $ram_gb -lt 4 ]; then
+  if [ "$ram_gb" -lt 4 ]; then
     log_warning "Low memory system detected (< 4GB)"
     log_info "Applying low-memory optimizations..."
 
@@ -887,7 +672,7 @@ detect_memory_size() {
     } | sudo tee /etc/sysctl.d/99-swappiness.conf >/dev/null
     log_success "Set swappiness to 60 (aggressive swap usage) and reduced cache pressure"
 
-  elif [ $ram_gb -ge 4 ] && [ $ram_gb -lt 8 ]; then
+  elif [ "$ram_gb" -ge 4 ] && [ "$ram_gb" -lt 8 ]; then
     log_info "Standard memory system detected (4-8GB)"
 
     # Moderate swappiness
@@ -900,7 +685,7 @@ detect_memory_size() {
     } | sudo tee /etc/sysctl.d/99-swappiness.conf >/dev/null
     log_success "Set swappiness to 30 (moderate swap usage)"
 
-  elif [ $ram_gb -ge 8 ] && [ $ram_gb -lt 16 ]; then
+  elif [ "$ram_gb" -ge 8 ] && [ "$ram_gb" -lt 16 ]; then
     log_info "High memory system detected (8-16GB)"
 
     # Low swappiness
@@ -927,7 +712,7 @@ detect_memory_size() {
     log_success "Set swappiness to 1 (minimal swap usage)"
 
     # Disable swap on very high memory systems
-    if [ $ram_gb -ge 32 ]; then
+    if [ "$ram_gb" -ge 32 ]; then
       log_info "32GB+ RAM detected - swap can be fully disabled if desired"
     fi
   fi
@@ -986,9 +771,12 @@ detect_storage_type() {
   step "Detecting storage type and optimizing I/O scheduler"
 
   # Get all block devices (exclude loop, ram, etc.)
-  local devices=$(lsblk -d -n -o NAME,TYPE | grep disk | awk '{print $1}')
+  local devices=()
+  while IFS= read -r device; do
+    devices+=("$device")
+  done < <(lsblk -d -n -o NAME,TYPE | grep disk | awk '{print $1}')
 
-  for device in $devices; do
+  for device in "${devices[@]}"; do
     local rota=$(cat /sys/block/$device/queue/rotational 2>/dev/null || echo "1")
     local device_type=""
     local scheduler=""
@@ -1052,28 +840,6 @@ detect_audio_system() {
   else
     log_info "No audio system detected or not running yet"
     log_info "PipeWire is recommended for modern systems"
-  fi
-}
-
-# Function to detect hybrid graphics
-detect_hybrid_graphics() {
-  step "Detecting hybrid graphics configuration"
-
-  local gpu_count=$(lspci | grep -i vga | wc -l)
-
-  if [ "$gpu_count" -gt 1 ]; then
-    log_warning "Multiple GPUs detected - hybrid graphics system"
-    lspci | grep -i vga
-
-    # Check for NVIDIA + Intel/AMD combo
-    if lspci | grep -qi nvidia && lspci | grep -qiE "intel|amd"; then
-      log_warning "NVIDIA Optimus / Hybrid graphics detected"
-      log_info "Consider installing optimus-manager or nvidia-prime for GPU switching"
-      log_info "   AUR: yay -S optimus-manager optimus-manager-qt"
-      log_info "Manual setup required after installation"
-    fi
-  else
-    log_info "Single GPU system detected"
   fi
 }
 
@@ -1612,7 +1378,7 @@ detect_gaming_mode_presence() {
   
   # Determine if gaming mode is present (50% threshold)
   local threshold=$((total_checks / 2))
-  if [ $gaming_indicators -ge $threshold ]; then
+  if [ "$gaming_indicators" -ge "$threshold" ]; then
     log_info "Gaming mode detected ($gaming_indicators/$total_checks indicators)"
     return 0  # Gaming mode detected
   else
@@ -1746,7 +1512,6 @@ setup_laptop_optimizations() {
     # Interactive mode with gum
     echo ""
     gum style --foreground "$GUM_WARN" "Laptop-specific optimizations available for $(echo $manufacturer | tr '[:lower:]' '[:upper]') $laptop_model:"
-    gum style --margin "0 2" --foreground "$GUM_TEXT" "Power profile management (tuned-ppd or power-profiles-daemon)"
     gum style --margin "0 2" --foreground "$GUM_TEXT" "CPU-specific optimizations ($(echo $cpu_vendor | tr '[:lower:]' '[:upper]'))"
     
     # Show manufacturer-specific optimizations
@@ -1763,7 +1528,6 @@ setup_laptop_optimizations() {
     # Non-interactive mode
     echo ""
     echo -e "${THEME_WARN}Laptop-specific optimizations available for $(echo $manufacturer | tr '[:lower:]' '[:upper]') $laptop_model:${RESET}"
-    echo -e "  \u2022 Power profile management (tuned-ppd or power-profiles-daemon)"
     echo -e "  \u2022 CPU-specific optimizations ($(echo $cpu_vendor | tr '[:lower:]' '[:upper]'))"
     
     # Show manufacturer-specific optimizations
@@ -1790,13 +1554,6 @@ setup_laptop_optimizations() {
     log_info "Laptop optimizations skipped by user"
     return 0
   fi
-
-  # Setup power profile management (kernel + power-profiles-daemon/tuned-ppd)
-  step "Setting up power profile management"
-  log_info "Modern kernels handle power management well"
-  log_info "Adding user-friendly profile switching via power-profiles-daemon or tuned-ppd"
-
-  setup_power_profile_daemon
 
   # Apply CPU-specific optimizations
   case "$cpu_vendor" in
@@ -1850,15 +1607,13 @@ setup_advanced_optimizations() {
   log_info "Applying kernel parameter optimizations..."
   
   # Network optimizations
-  echo "net.core.default_qdisc=fq_codel" | sudo tee -a /etc/sysctl.d/99-archinstaller.conf 2>/dev/null || true
-  echo "net.ipv4.tcp_congestion_control=bbr" | sudo tee -a /etc/sysctl.d/99-archinstaller.conf 2>/dev/null || true
-  
-  # Memory management optimizations
-  echo "vm.swappiness=10" | sudo tee -a /etc/sysctl.d/99-archinstaller.conf 2>/dev/null || true
-  echo "vm.vfs_cache_pressure=50" | sudo tee -a /etc/sysctl.d/99-archinstaller.conf 2>/dev/null || true
-  
-  # Apply sysctl changes
-  sudo sysctl --system 2>/dev/null || true
+  echo "net.core.default_qdisc=fq_codel" | sudo tee -a /etc/sysctl.d/99-archinstaller.conf >/dev/null
+  echo "net.ipv4.tcp_congestion_control=bbr" | sudo tee -a /etc/sysctl.d/99-archinstaller.conf >/dev/null
+
+  echo "vm.swappiness=10" | sudo tee -a /etc/sysctl.d/99-archinstaller.conf >/dev/null
+  echo "vm.vfs_cache_pressure=50" | sudo tee -a /etc/sysctl.d/99-archinstaller.conf >/dev/null
+
+  sudo sysctl --system >>"$INSTALL_LOG" 2>&1
   
   log_success "Advanced system optimizations applied"
 }
@@ -1874,23 +1629,11 @@ show_laptop_summary() {
     log_info "Battery Capacity: ${battery_capacity}%"
   fi
 
-  # Show power management info
-  if command -v tuned-adm >/dev/null 2>&1; then
-    log_info "Power profiles managed by tuned-ppd. Use: tuned-adm list"
-  elif command -v powerprofilesctl >/dev/null 2>&1; then
-    log_info "Power profiles managed by power-profiles-daemon. Use: powerprofilesctl"
-  fi
-
   echo ""
   log_success "Laptop optimizations completed successfully"
   echo ""
   echo -e "${THEME_TEXT}Laptop features configured:${RESET}"
   echo -e "  • Kernel-based power management (automatic)"
-  if command -v tuned-adm >/dev/null 2>&1; then
-    echo -e "  • tuned-ppd for power profile switching"
-  elif command -v powerprofilesctl >/dev/null 2>&1; then
-    echo -e "  • power-profiles-daemon for power profile switching"
-  fi
   case "$cpu_vendor" in
     intel)
       echo -e "  • Intel thermald (thermal management)"
@@ -1908,15 +1651,6 @@ show_laptop_summary() {
   esac
   echo ""
   echo -e "${THEME_WARN}Tips:${RESET}"
-  if command -v tuned-adm >/dev/null 2>&1; then
-    echo -e "  • List power profiles: ${THEME_SECONDARY}tuned-adm list${RESET}"
-    echo -e "  • Switch to powersave: ${THEME_SECONDARY}tuned-adm profile powersave${RESET}"
-    echo -e "  • Switch to performance: ${THEME_SECONDARY}tuned-adm profile performance${RESET}"
-    echo -e "  • Check active profile: ${THEME_SECONDARY}tuned-adm active${RESET}"
-  elif command -v powerprofilesctl >/dev/null 2>&1; then
-    echo -e "  • List power profiles: ${THEME_SECONDARY}powerprofilesctl list${RESET}"
-    echo -e "  • Switch profile: ${THEME_SECONDARY}powerprofilesctl set performance${RESET}"
-  fi
   if [ "$cpu_vendor" = "intel" ]; then
     echo -e "  • Thermal status: ${THEME_SECONDARY}sudo systemctl status thermald${RESET}"
   fi
@@ -1931,5 +1665,4 @@ detect_filesystem_type
 detect_storage_type
 detect_audio_system
 detect_kernel_type
-detect_hybrid_graphics
 setup_laptop_optimizations

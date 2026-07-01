@@ -81,13 +81,11 @@ fi
 : "${XDG_CURRENT_DESKTOP:=}"
 : "${INSTALL_LOG:=$HOME/.archinstaller.log}"
 
-# ===== Logging Functions =====
-
-# Log to both console and log file
-
-log_to_file() {
-  echo "$1" >> "$INSTALL_LOG" 2>/dev/null || true
-}
+# Source library modules (provides log_*, ui_*, step, run_step, package, system functions)
+for __lib_module in core ui system package config; do
+    source "$SCRIPT_DIR/lib/$__lib_module.sh"
+done
+unset __lib_module
 
 # Improved terminal output functions
 # ============================================================================
@@ -240,9 +238,9 @@ check_system_compatibility() {
 # Format time display helper function
 format_time() {
   local seconds=$1
-  if [ $seconds -lt 60 ]; then
+  if [ "$seconds" -lt 60 ]; then
     echo "${seconds}s"
-  elif [ $seconds -lt 3600 ]; then
+  elif [ "$seconds" -lt 3600 ]; then
     local minutes=$((seconds / 60))
     local remaining_seconds=$((seconds % 60))
     echo "${minutes}m ${remaining_seconds}s"
@@ -256,7 +254,7 @@ format_time() {
 # Timing functions for progress estimation
 start_step_timer() {
   STEP_START_TIME=$(date +%s)
-  if [ $INSTALLATION_START_TIME -eq 0 ]; then
+  if [ "$INSTALLATION_START_TIME" -eq 0 ]; then
     INSTALLATION_START_TIME=$STEP_START_TIME
   fi
 }
@@ -277,7 +275,7 @@ end_step_timer() {
   local remaining_steps=$((TOTAL_STEPS - CURRENT_STEP))
   local estimated_remaining=$((remaining_steps * avg_time))
 
-  if [ $remaining_steps -gt 0 ]; then
+  if [ "$remaining_steps" -gt 0 ]; then
     ui_info "Step completed in $(format_time $duration). Estimated remaining time: $(format_time $estimated_remaining)"
   fi
 }
@@ -342,55 +340,7 @@ print_unified_error() {
 # ============================================================================
 # SECTION 4: PROGRESS & TIMING FUNCTIONS
 # ============================================================================
-if ! declare -f supports_gum >/dev/null 2>&1; then
-supports_gum() {
-  command -v gum >/dev/null 2>&1
-}
-fi
-
-if ! declare -f ui_info >/dev/null 2>&1; then
-ui_info() {
-  local message="$1"
-  if supports_gum; then
-    gum style --foreground "$GUM_TEXT" "$message"
-  else
-    echo -e "${THEME_TEXT}$message${RESET}"
-  fi
-}
-fi
-
-if ! declare -f ui_success >/dev/null 2>&1; then
-ui_success() {
-  local message="$1"
-  if supports_gum; then
-    gum style --foreground "$GUM_SUCCESS" "$message"
-  else
-    echo -e "${THEME_SUCCESS}$message${RESET}"
-  fi
-}
-fi
-
-if ! declare -f ui_warn >/dev/null 2>&1; then
-ui_warn() {
-  local message="$1"
-  if supports_gum; then
-    gum style --foreground "$GUM_WARN" "⚠ $message"
-  else
-    echo -e "${THEME_WARN}⚠ $message${RESET}"
-  fi
-}
-fi
-
-if ! declare -f ui_error >/dev/null 2>&1; then
-ui_error() {
-  local message="$1"
-  if supports_gum; then
-    gum style --foreground "$GUM_ERROR" "$message"
-  else
-    echo -e "${THEME_ERROR}$message${RESET}"
-  fi
-}
-fi
+# Utility/Helper Functions
 
 
 # ============================================================================
@@ -423,14 +373,6 @@ print_step_header() {
     echo -e "${THEME_BORDER}Step ${step_num}/${total}: ${title}${RESET}"
   fi
 }
-simple_banner() {
-  local title="$1"
-  local w=$(tput cols 2>/dev/null || echo 80)
-  echo -e "\n${THEME_BORDER}#$(printf '%*s' $((w - 2)) '' | tr ' ' '=')#${RESET}"
-  echo -e "${THEME_BORDER}#${RESET}  ${THEME_HEADER}$title${RESET}"
-  echo -e "${THEME_BORDER}#$(printf '%*s' $((w - 2)) '' | tr ' ' '=')#${RESET}"
-}
-
 arch_ascii() {
   echo -e "${THEME_PRIMARY}"
   cat << "EOF"
@@ -451,40 +393,6 @@ EOF
 # SECTION 7: MENU & INSTALLATION MODE SELECTION
 # ============================================================================
 
-
-# Check if system uses UKI (Unified Kernel Image)
-# Uses a strict, reliable detection to avoid false positives on non-UKI systems
-if ! declare -f is_uki_system >/dev/null 2>&1; then
-is_uki_system() {
-  # Method 1: Check for UKI files in /boot/efi/EFI/Linux/
-  if [[ -d /boot/efi/EFI/Linux/ ]] && ls /boot/efi/EFI/Linux/*.efi >/dev/null 2>&1; then
-    return 0
-  fi
-  
-  # Method 2: Check for UKI files in /boot/EFI/Linux/ (alternative path)
-  if [[ -d /boot/EFI/Linux/ ]] && ls /boot/EFI/Linux/*.efi >/dev/null 2>&1; then
-    return 0
-  fi
-  
-  # Method 3: Check for UKI-related packages installed (most reliable)
-  if pacman -Q systemd-ukify >/dev/null 2>&1 || pacman -Q ukify >/dev/null 2>&1; then
-    return 0
-  fi
-  
-  # Method 4: Check for UKI entries in systemd-boot config pointing to .efi files
-  local entries_dir
-  entries_dir=$(find_systemd_boot_entries_dir)
-  if [[ -n "$entries_dir" ]]; then
-    while IFS= read -r -d '' entry; do
-      if grep -qE "^\s*efi\s+/" "$entry" 2>/dev/null; then
-        return 0
-      fi
-    done < <(find "$entries_dir" -name "*.conf" -print0 2>/dev/null)
-  fi
-  
-  return 1
-}
-fi
 
 # Function to ensure a default mirrorlist exists before any pacman operation
 generate_default_mirrorlist() {
@@ -738,86 +646,6 @@ show_traditional_menu() {
   done
 }
 
-# Function: step
-# Description: Prints a step header and increments step counter
-# Parameters: $1 - Step description
-
-# ============================================================================
-# SECTION 9: UTILITY & HELPER FUNCTIONS
-# ============================================================================
-step() {
-  local message="$1"
-  if supports_gum; then
-    gum style --foreground "$GUM_PRIMARY" "▶ $message"
-  else
-    echo -e "${THEME_SECONDARY}▶ $message${RESET}"
-  fi
-  log_to_file "STEP: $message"
-  ((CURRENT_STEP++))
-}
-
-# Function: log_success
-# Description: Prints success message in green with optional context
-# Parameters: $1 - Success message, $2 - Optional context/details
-log_success() {
-  local message="$1"
-  local context="${2:-}"
-  echo -e "${THEME_SUCCESS}$message${RESET}"
-  if [ -n "$context" ]; then
-    echo -e "${THEME_MUTED}  Details: $context${RESET}"
-  fi
-  log_to_file "SUCCESS: $message"
-}
-
-# Function: log_warning
-# Description: Prints warning message with optional context
-# Parameters: $1 - Warning message, $2 - Optional context/details
-log_warning() {
-  local message="$1"
-  local context="${2:-}"
-  echo -e "${THEME_WARN}⚠ $message${RESET}"
-  if [ -n "$context" ]; then
-    echo -e "${THEME_MUTED}  Note: $context${RESET}"
-  fi
-  log_to_file "WARNING: $message"
-}
-
-# Function: log_error
-log_error() {
-  local message="$1"
-  local hint="${2:-}"
-  echo -e "${THEME_ERROR}✗ $message${RESET}"
-  if [ -n "$hint" ]; then
-    echo -e "${THEME_MUTED}  Tip: $hint${RESET}"
-  fi
-  ERRORS+=("$message")
-  log_to_file "ERROR: $message"
-}
-
-# Function: log_debug
-# Description: Prints debug message in dim gray (when DEBUG mode is enabled)
-# Parameters: $1 - Debug message, $2 - Optional context/details
-log_debug() {
-  if [ "${DEBUG:-0}" = "1" ]; then
-    local message="$1"
-    local context="${2:-}"
-    echo -e "${THEME_MUTED}[DEBUG] $message${RESET}"
-    if [ -n "$context" ]; then
-      echo -e "${THEME_MUTED}  Details: $context${RESET}"
-    fi
-    log_to_file "DEBUG: $message"
-  fi
-}
-
-# Check if a command exists
-
-# ============================================================================
-# SECTION 8: SYSTEM DETECTION & ENVIRONMENT FUNCTIONS
-# ============================================================================
-command_exists() {
-  command -v "$1" >/dev/null 2>&1
-}
-
 # Function to get all installed kernel types
 get_installed_kernel_types() {
   local kernel_types=()
@@ -827,239 +655,6 @@ get_installed_kernel_types() {
   pacman -Q linux-zen &>/dev/null && kernel_types+=("linux-zen")
   pacman -Q linux-hardened &>/dev/null && kernel_types+=("linux-hardened")
   echo "${kernel_types[@]}"
-}
-
-# Function to configure plymouth hook and optionally rebuild initramfs
-configure_plymouth_hook_and_initramfs() {
-  local skip_rebuild=false
-  if [ "$1" = "no-rebuild" ]; then
-    skip_rebuild=true
-  fi
-  step "Configuring Plymouth hook$([ "$skip_rebuild" = false ] && echo ' and rebuilding initramfs')"
-  local mkinitcpio_conf="/etc/mkinitcpio.conf"
-  local HOOK_ADDED=false
-
-  if grep -q "^HOOKS=.*sd-plymouth" "$mkinitcpio_conf"; then
-    log_info "Replacing deprecated sd-plymouth hook with plymouth..."
-    if sudo sed -i 's/sd-plymouth/plymouth/g' "$mkinitcpio_conf"; then
-      log_success "Replaced sd-plymouth with plymouth in mkinitcpio.conf."
-      HOOK_ADDED=true
-    else
-      log_error "Failed to replace sd-plymouth with plymouth in mkinitcpio.conf."
-      return 1
-    fi
-  elif ! grep -q "plymouth" "$mkinitcpio_conf"; then
-    log_info "Adding plymouth hook to mkinitcpio.conf..."
-
-    # Note: plymouth package no longer ships sd-plymouth hook — use 'plymouth' for all setups
-    local plymouth_hook="plymouth"
-
-    # Place plymouth before filesystems (after kms hook) so the GPU driver
-    # is loaded before Plymouth tries to initialize at boot
-    local sed_result=0
-    if grep -q "filesystems" "$mkinitcpio_conf"; then
-      sudo sed -i "s/\\(HOOKS=.*\\)filesystems/\\1${plymouth_hook} filesystems/" "$mkinitcpio_conf"
-      sed_result=$?
-    else
-      sudo sed -i "s/^\\(HOOKS=.*\\)\\\"$/\\1 ${plymouth_hook}\\\"/" "$mkinitcpio_conf"
-      sed_result=$?
-    fi
-    log_info "Added ${plymouth_hook} hook before filesystems (after kms)."
-
-    if [ $sed_result -eq 0 ]; then
-      log_success "Added plymouth hook to mkinitcpio.conf."
-      HOOK_ADDED=true
-    else
-      log_error "Failed to add plymouth hook to mkinitcpio.conf." "Check /etc/mkinitcpio.conf syntax and permissions"
-      return 1
-    fi
-  else
-    log_info "Plymouth hook already present in mkinitcpio.conf."
-    HOOK_ADDED=true
-  fi
-
-  if [ "$HOOK_ADDED" = true ] && [ "$skip_rebuild" = false ]; then
-    local kernel_types
-    kernel_types=($(get_installed_kernel_types))
-
-    if [ "${#kernel_types[@]}" -eq 0 ]; then
-      log_warning "No supported kernel types detected. Cannot rebuild initramfs for Plymouth." "Ensure you have a supported kernel installed (linux, linux-lts, linux-zen, or linux-hardened)"
-      return 0
-    fi
-
-    echo -e "${THEME_TEXT}Detected kernels: ${kernel_types[*]}${RESET}"
-
-    local total=${#kernel_types[@]}
-    local current=0
-    local success_count=0
-
-    for kernel in "${kernel_types[@]}"; do
-      if sudo mkinitcpio -p "$kernel" >>"$INSTALL_LOG" 2>&1; then
-        log_success "Rebuilt initramfs for $kernel"
-        ((success_count++))
-      else
-        log_error "Failed to rebuild initramfs for $kernel (for Plymouth)" "Run 'sudo mkinitcpio -p $kernel' manually to see detailed error"
-      fi
-    done
-
-    if [ "$success_count" -eq "$total" ]; then
-      log_success "Initramfs rebuilt for all detected kernels for Plymouth."
-    elif [ "$success_count" -gt 0 ]; then
-      log_warning "Initramfs rebuilt for some kernels for Plymouth, but not all." "Consider running 'sudo mkinitcpio -p [kernel-name]' manually for failed kernels"
-    else
-      log_error "Failed to rebuild initramfs for any kernel for Plymouth." "Check kernel installation and plymouth configuration"
-      return 1
-    fi
-  fi
-  return 0
-}
-
-# Function: log_info
-# Description: Prints info message
-# Parameters: $1 - Info message
-log_info() {
-  echo -e "${THEME_TEXT}$1${RESET}"
-  log_to_file "INFO: $1"
-}
-
-
-# Function: run_step
-# Description: Runs a command with step logging and error handling
-# Parameters: $1 - Step description, $@ - Command to execute
-# Returns: 0 on success, non-zero on failure
-run_step() {
-  local description="$1"
-  shift
-  step "$description"
-
-  local ret
-  "$@" 2>&1 | tee -a "$INSTALL_LOG" >/dev/null
-  ret=${PIPESTATUS[0]}
-  if [ "$ret" -eq 0 ]; then
-    log_success "$description"
-
-    # Track installed packages
-    if [[ "$description" == "Installing helper utilities" ]]; then
-      INSTALLED_PACKAGES+=("${HELPER_UTILS[@]}")
-    elif [[ "$description" == "Installing UFW firewall" ]]; then
-      INSTALLED_PACKAGES+=("ufw")
-    elif [[ "$description" =~ ^Installing\  ]]; then
-      local pkg
-      pkg=$(echo "$description" | awk '{print $2}')
-      INSTALLED_PACKAGES+=("$pkg")
-    elif [[ "$description" == "Removing yq and gum" ]]; then
-      REMOVED_PACKAGES+=("yq" "gum")
-    fi
-    return 0
-  else
-    log_error "$description failed"
-    return 1
-  fi
-}
-
-# Function: install_package_generic
-# Description: Generic package installer for pacman, AUR, or flatpak with better error context
-# Parameters: $1 - Package manager type (pacman|aur|flatpak), $@ - Packages to install
-# Returns: 0 on success, 1 if some packages failed
-
-# ============================================================================
-# SECTION 10: STEP EXECUTION & LOGGING
-# ============================================================================
-install_package_generic() {
-  local pkg_manager="$1"
-  shift
-  local pkgs=("$@")
-  local total=${#pkgs[@]}
-  local current=0
-  local failed=0
-
-  if [ $total -eq 0 ]; then
-    ui_info "No packages to install"
-    return 0
-  fi
-
-  local manager_name
-  case "$pkg_manager" in
-    pacman) manager_name="Pacman" ;;
-    aur) manager_name="AUR" ;;
-    flatpak) manager_name="Flatpak" ;;
-    *) manager_name="Unknown" ;;
-  esac
-
-  if supports_gum; then
-    gum style --foreground "$GUM_TEXT" "Installing ${total} packages via ${manager_name}..."
-  else
-    echo -e "${THEME_TEXT}Installing ${total} packages via ${manager_name}...${RESET}"
-  fi
-
-  for pkg in "${pkgs[@]}"; do
-    ((current++))
-
-    # Check if already installed
-    local already_installed=false
-    case "$pkg_manager" in
-      pacman)
-        pacman -Q "$pkg" &>/dev/null && already_installed=true
-        ;;
-      aur)
-        pacman -Q "$pkg" &>/dev/null && already_installed=true
-        ;;
-      flatpak)
-        flatpak list | grep -q "$pkg" &>/dev/null && already_installed=true
-        ;;
-    esac
-
-    if [ "$already_installed" = true ]; then
-      continue
-    fi
-
-    # Build command array for safe execution (no eval)
-    local install_cmd_array=()
-    case "$pkg_manager" in
-      pacman)
-        install_cmd_array=(sudo pacman -S --noconfirm --needed "$pkg")
-        ;;
-      aur)
-        install_cmd_array=(yay -S --noconfirm --needed "$pkg")
-        ;;
-      flatpak)
-        install_cmd_array=(sudo flatpak install --noninteractive -y "$pkg")
-        ;;
-    esac
-
-    # Dry-run mode: simulate installation
-    if [ "${DRY_RUN:-false}" = true ]; then
-      ui_info "Dry-run: Would install $pkg"
-      ui_info "  Would execute: ${install_cmd_array[*]}"
-      INSTALLED_PACKAGES+=("$pkg")
-    else
-      # Capture both stdout and stderr for better error diagnostics
-      local error_output
-      if error_output=$("${install_cmd_array[@]}" 2>&1); then
-        INSTALLED_PACKAGES+=("$pkg")
-      else
-        ui_error "Failed to install $pkg"
-        FAILED_PACKAGES+=("$pkg")
-        log_error "Failed to install $pkg via $manager_name" "Check network connection and package availability"
-        # Log the actual error for debugging
-        echo "$error_output" >> "$INSTALL_LOG"
-        # Show last line of error if verbose or if it's a critical error
-        if $VERBOSE || [[ "$error_output" == *"error:"* ]]; then
-          local last_error=$(echo "$error_output" | grep -i "error" | tail -1)
-          [ -n "$last_error" ] && log_warning "  Error: $last_error" "Try running the failed command manually for more details"
-        fi
-        ((failed++))
-      fi
-    fi
-  done
-
-  if [ $failed -eq 0 ]; then
-    ui_success "Package installation completed"
-    return 0
-  else
-    ui_warn "Package installation completed with $failed failures" "Failed packages: ${FAILED_PACKAGES[*]}"
-    return 1
-  fi
 }
 
 # Function: install_packages_quietly
@@ -1103,22 +698,6 @@ install_package_groups() {
     install_packages_quietly "${unique_pkgs[@]}"
   fi
 }
-
-# Function to display a styled header for summaries
-# Usage: ui_header "My Header"
-if ! declare -f ui_header >/dev/null 2>&1; then
-ui_header() {
-    local title="$1"
-    if supports_gum; then
-        gum style --border normal --margin "1 2" --padding "1 2" --align center --foreground "$GUM_HEADER" "$title"
-    else
-        echo ""
-        echo -e "${THEME_BORDER}### ${title} ###${RESET}"
-        echo ""
-    fi
-}
-fi
-
 
 # Function for user confirmation with gum (or fallback)
 # Usage: gum_confirm "Your question?" "Optional description."
@@ -1272,16 +851,6 @@ fast_system_update() {
   fi
 }
 
-# Performance tracking
-log_performance() {
-  local step_name="$1"
-  local current_time=$(date +%s)
-  local elapsed=$((current_time - START_TIME))
-  local minutes=$((elapsed / 60))
-  local seconds=$((elapsed % 60))
-  echo -e "${THEME_TEXT}$step_name completed in ${minutes}m ${seconds}s (${elapsed}s)${RESET}"
-}
-
 # Function to collect errors from custom scripts
 collect_custom_script_errors() {
   local script_name="$1"
@@ -1290,38 +859,6 @@ collect_custom_script_errors() {
   for error in "${script_errors[@]}"; do
     ERRORS+=("$script_name: $error")
   done
-}
-
-# Check if command exists
-
-# Function: validate_file_operation
-# Description: Validates file system operations before performing them
-# Parameters: $1 - Operation type (read|write), $2 - File path, $3 - Description
-# Returns: 0 if valid, 1 if invalid
-validate_file_operation() {
-  local operation="${1:?Operation type required}"
-  local file="${2:?File path required}"
-  local description="${3:-File operation}"
-
-  # Check if file exists (for read operations)
-  if [[ "$operation" == "read" ]] && [ ! -f "$file" ]; then
-    log_error "File $file does not exist. Cannot perform: $description"
-    return 1
-  fi
-
-  # Check if directory exists (for write operations)
-  if [[ "$operation" == "write" ]] && [ ! -d "$(dirname "$file")" ]; then
-    log_error "Directory $(dirname "$file") does not exist. Cannot perform: $description"
-    return 1
-  fi
-
-  # Check permissions
-  if [[ "$operation" == "write" ]] && [ ! -w "$(dirname "$file")" ]; then
-    log_error "No write permission for $(dirname "$file"). Cannot perform: $description"
-    return 1
-  fi
-
-  return 0
 }
 
 # Function: install_aur_quietly
@@ -1347,183 +884,3 @@ install_flatpak_quietly() {
   fi
   install_package_generic "flatpak" "$@"
 }
-
-# Batch package installation for better performance
-# Reduces individual package operations and consolidates output
-install_packages_batch() {
-  local manager="$1"
-  shift
-  local packages=("$@")
-  local total=${#packages[@]}
-  
-  if [ $total -eq 0 ]; then
-    return 0
-  fi
-  
-  # Filter out already installed packages
-  local packages_to_install=()
-  for pkg in "${packages[@]}"; do
-    local already_installed=false
-    case "$manager" in
-      "pacman")
-        pacman -Q "$pkg" &>/dev/null && already_installed=true
-        ;;
-      "aur")
-        pacman -Q "$pkg" &>/dev/null && already_installed=true
-        ;;
-      "flatpak")
-        flatpak list | grep -q "$pkg" &>/dev/null && already_installed=true
-        ;;
-    esac
-    
-    if [ "$already_installed" = false ]; then
-      packages_to_install+=("$pkg")
-    fi
-  done
-  
-  local install_count=${#packages_to_install[@]}
-  if [ $install_count -eq 0 ]; then
-    ui_info "All $total packages already installed"
-    return 0
-  elif [ $install_count -lt $total ]; then
-    ui_info "Installing $install_count/$total packages ($(($total - $install_count)) already installed)"
-  else
-    ui_info "Installing $install_count packages..."
-  fi
-  
-  # Use existing generic installer for the batch
-  install_package_generic "$manager" "${packages_to_install[@]}"
-}
-
-# Enhanced package installation functions with better error handling
-# These replace duplicate functions in individual scripts
-
-
-# ============================================================================
-# SECTION 13: SYSTEM UPDATE & OPTIMIZATION
-# ============================================================================
-pacman_install_single() {
-  local pkg="$1"
-  local verbose="${2:-false}"
-  
-  if [ "$verbose" = true ]; then
-    printf "${THEME_TEXT}Installing Pacman package:${RESET} %-30s" "$pkg"
-  fi
-  
-  local output
-  if output=$(sudo pacman -S --noconfirm --needed "$pkg" 2>&1); then
-    [ "$verbose" = true ] && printf "${THEME_SUCCESS} ✓ Success${RESET}\n"
-    INSTALLED_PACKAGES+=("$pkg")
-    return 0
-  else
-    [ "$verbose" = true ] && printf "${THEME_ERROR} ✗ Failed${RESET}\n"
-    # Show output if verbose or if it's a critical error
-    if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
-      echo "$output" | sed 's/^/    /'
-    fi
-    FAILED_PACKAGES+=("$pkg")
-    return 1
-  fi
-}
-
-yay_install_single() {
-  local pkg="$1"
-  local verbose="${2:-false}"
-  
-  if [ "$verbose" = true ]; then
-    printf "${THEME_TEXT}Installing AUR package:${RESET} %-30s" "$pkg"
-  fi
-  
-  local output
-  if output=$(yay -S --noconfirm --needed "$pkg" 2>&1); then
-    [ "$verbose" = true ] && printf "${THEME_SUCCESS} ✓ Success${RESET}\n"
-    INSTALLED_PACKAGES+=("$pkg")
-    return 0
-  else
-    [ "$verbose" = true ] && printf "${THEME_ERROR} ✗ Failed${RESET}\n"
-    if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
-      echo "$output" | sed 's/^/    /'
-    fi
-    FAILED_PACKAGES+=("$pkg")
-    return 1
-  fi
-}
-
-flatpak_install_single() {
-  local pkg="$1"
-  local verbose="${2:-false}"
-  
-  if [ "$verbose" = true ]; then
-    printf "${THEME_TEXT}Installing Flatpak app:${RESET} %-30s" "$pkg"
-  fi
-  
-  local output
-  if output=$(sudo flatpak install -y --noninteractive flathub "$pkg" 2>&1); then
-    [ "$verbose" = true ] && printf "${THEME_SUCCESS} ✓ Success${RESET}\n"
-    INSTALLED_PACKAGES+=("$pkg")
-    return 0
-  else
-    [ "$verbose" = true ] && printf "${THEME_ERROR} ✗ Failed${RESET}\n"
-    if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
-      echo "$output" | sed 's/^/    /'
-    fi
-    FAILED_PACKAGES+=("$pkg")
-    return 1
-  fi
-}
-
-# Check if system uses Btrfs filesystem
-
-# ============================================================================
-# SECTION 14: SINGLE PACKAGE INSTALLATION WRAPPERS
-# ============================================================================
-if ! declare -f is_btrfs_system >/dev/null 2>&1; then
-is_btrfs_system() {
-  findmnt -no FSTYPE / | grep -q btrfs
-}
-fi
-
-# Find systemd-boot entries directory by checking common ESP mount points
-if ! declare -f find_systemd_boot_entries_dir >/dev/null 2>&1; then
-find_systemd_boot_entries_dir() {
-  for dir in "/boot/loader/entries" "/efi/loader/entries" "/boot/efi/loader/entries"; do
-    if [ -d "$dir" ]; then
-      echo "$dir"
-      return 0
-    fi
-  done
-  return 1
-}
-fi
-
-# Detect bootloader type
-if ! declare -f detect_bootloader >/dev/null 2>&1; then
-detect_bootloader() {
-  # Check for GRUB first (most specific)
-  if [ -d "/boot/grub" ] || [ -d "/boot/grub2" ] || [ -d "/boot/efi/EFI/grub" ] || command -v grub-mkconfig &>/dev/null || pacman -Q grub &>/dev/null 2>&1; then
-    echo "grub"
-  # Check for Limine next (more specific than systemd-boot)
-  elif [ -d "/boot/limine" ] || [ -d "/boot/EFI/limine" ] || [ -d "/boot/EFI/arch-limine" ] || [ -f "/boot/limine.conf" ] || [ -f "/boot/limine/limine.conf" ] || [ -f "/boot/EFI/limine/limine.conf" ] || [ -f "/boot/EFI/arch-limine/limine.conf" ] || command -v limine &>/dev/null || pacman -Q limine &>/dev/null 2>&1; then
-    echo "limine"
-  # Check for systemd-boot last (bootctl exists on most systemd systems)
-  elif [ -d "/boot/loader/entries" ] || [ -d "/efi/loader/entries" ] || [ -f "/boot/loader/loader.conf" ]; then
-    echo "systemd-boot"
-  else
-    echo "unknown"
-  fi
-}
-fi
-
-# Find limine.conf file location (centralized to avoid duplication)
-if ! declare -f find_limine_config >/dev/null 2>&1; then
-find_limine_config() {
-  local limine_config=""
-  for limine_loc in "/boot/limine/limine.conf" "/boot/limine.conf" "/boot/EFI/limine/limine.conf" "/boot/EFI/arch-limine/limine.conf" "/efi/limine/limine.conf"; do
-    if [ -f "$limine_loc" ]; then
-      echo "$limine_loc"
-      return 0
-    fi
-  done
-  return 1
-}
-fi

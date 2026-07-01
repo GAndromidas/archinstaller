@@ -40,8 +40,14 @@ install_yay() {
 
   # Create temporary directory for building
   local temp_dir
-  temp_dir=$(mktemp -d)
-  cd "$temp_dir" || { log_error "Failed to create temporary directory"; return 1; }
+  temp_dir=$(mktemp -d) || { log_error "Failed to create temporary directory for yay build"; return 1; }
+
+  local orig_dir; orig_dir=$(pwd)
+  local cleanup_tempdir
+  cleanup_tempdir() { cd "$orig_dir" 2>/dev/null; rm -rf "$temp_dir"; }
+  trap cleanup_tempdir RETURN
+
+  cd "$temp_dir" || { log_error "Failed to change to temporary directory"; return 1; }
 
   # Clone yay repository
   ui_info "Cloning yay repository..."
@@ -49,7 +55,6 @@ install_yay() {
     log_success "yay repository cloned successfully"
   else
     log_error "Failed to clone yay repository"
-    cd - >/dev/null && rm -rf "$temp_dir"
     return 1
   fi
 
@@ -61,7 +66,6 @@ install_yay() {
     log_success "yay built and installed successfully"
   else
     log_error "Failed to build yay"
-    cd - >/dev/null && rm -rf "$temp_dir"
     return 1
   fi
 
@@ -71,13 +75,17 @@ install_yay() {
     log_success "yay installation verified"
   else
     log_error "yay installation verification failed"
-    cd - >/dev/null && rm -rf "$temp_dir"
     return 1
   fi
 
+  # Import GPG keys for makepkg (prevents常见 AUR build failures)
+  ui_info "Importing GPG keys..."
+  gpg --keyserver keyserver.ubuntu.com --recv-keys 0xEA33F3A8DE0F8D6E 2>/dev/null || true
+
   # Clean up
   ui_info "Cleaning up temporary files..."
-  cd - >/dev/null && rm -rf "$temp_dir"
+  cleanup_tempdir
+  trap - RETURN
 }
 
 # Execute yay installation

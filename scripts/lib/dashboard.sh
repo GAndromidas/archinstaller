@@ -156,9 +156,11 @@ dashboard_run() {
     # Position cursor below dashboard frame for interactive prompts
     tput cup $((DASHBOARD_ROW_OFFSET + DASHBOARD_FRAME_END + 1)) 0
 
-    # Redirect stdout/stderr to log file
-    # Interactive prompts (gum confirm, etc) write to /dev/tty to bypass this
-    source "$script_path" >> "$INSTALL_LOG" 2>&1
+    # Run in a subshell so exit/return in the step script doesn't kill the installer
+    # stdout/stderr go to the log; interactive prompts (gum, read) use /dev/tty directly
+    (
+      source "$script_path"
+    ) >> "$INSTALL_LOG" 2>&1
     local ret=$?
     return $ret
 }

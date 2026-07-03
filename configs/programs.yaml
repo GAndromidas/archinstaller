@@ -49,6 +49,8 @@ pacman:
       description: "Liberation fonts"
     - name: unrar
       description: "RAR archive extractor"
+    - name: unzip
+      description: "Zip archive extractor"
     - name: wakeonlan
       description: "Wake-on-LAN utility"
     - name: xdg-desktop-portal-gtk
@@ -113,6 +115,8 @@ essential:
       description: "Liberation fonts"
     - name: unrar
       description: "RAR archive extractor"
+    - name: unzip
+      description: "Zip archive extractor"
     - name: wakeonlan
       description: "Wake-on-LAN utility"
 
@@ -133,6 +137,7 @@ aur:
 desktop_environments:
   kde:
     install:
+      - ark
       - bluedevil
       - breeze-gtk
       - discover

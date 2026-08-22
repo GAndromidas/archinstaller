@@ -2,143 +2,176 @@
   "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
   "logo": {
     "type": "builtin",
-    "height": 8,
+    "source": "auto",
     "padding": {
-      "top": 1,
-      "right": 2
+      "top": 5,
+      "left": 3,
+      "right": 5
     }
   },
   "display": {
-    "separator": " •  ",
-    "color": {
-      "keys": "cyan",
-      "title": "blue"
-    },
+    "separator": "  ",
     "key": {
-      "width": 18
+      "width": 20
     },
     "percent": {
-      "type": 1
+      "type": 9
+    },
+    "size": {
+      "binaryPrefix": "iec",
+      "ndigits": 1
     }
   },
   "modules": [
-    // --- USER & HOST ---
-    {
-      "type": "title",
-      "format": "  {user-name-colored}@{host-name-colored}"
-    },
     {
       "type": "custom",
-      "format": "  ───────────────────────────────────"
+      "format": "\u001b[38;2;59;130;246m┌───────────────────────────  System  ───────────────────────────┐\u001b[0m"
     },
-
-    // --- SYSTEM INFO ---
     {
       "type": "os",
-      "key": "  {icon} OS",
-      "keyColor": "cyan"
+      "key": "  \u001b[38;2;59;130;246m{icon}  OS\u001b[0m",
+      "keyColor": "38;2;59;130;246",
+      "format": "{pretty-name} {arch}"
     },
     {
       "type": "kernel",
-      "key": "  󰌽 Kernel",
-      "keyColor": "cyan",
-      "format": "{1} {2}"
+      "key": "  \u001b[38;2;59;130;246m󰌽  Kernel\u001b[0m",
+      "keyColor": "38;2;59;130;246",
+      "format": "{sysname} {release}"
     },
-    {
-      "type": "packages",
-      "key": "  󰏖 Packages",
-      "keyColor": "cyan",
-      "format": "{all}"
-    },
-
-    "break",
-
-    // --- DESKTOP ENVIRONMENT ---
     {
       "type": "de",
-      "key": "  󰧨 DE",
-      "keyColor": "magenta"
+      "key": "  \u001b[38;2;59;130;246m󰍹  Desktop\u001b[0m",
+      "keyColor": "38;2;59;130;246",
+      "format": "{pretty-name} {version}"
     },
     {
       "type": "wm",
-      "key": "  󱂬 WM",
-      "keyColor": "magenta"
+      "key": "  \u001b[38;2;59;130;246m󰨡  WM\u001b[0m",
+      "keyColor": "38;2;59;130;246",
+      "format": "{pretty-name} ({protocol-name})"
     },
     {
       "type": "terminal",
-      "key": "  󰆍 Terminal",
-      "keyColor": "magenta"
+      "key": "  \u001b[38;2;59;130;246m󰆍  Terminal\u001b[0m",
+      "keyColor": "38;2;59;130;246",
+      "format": "{pretty-name} {version}"
+    },
+    {
+      "type": "terminalfont",
+      "key": "  \u001b[38;2;59;130;246m󰛖  Font\u001b[0m",
+      "keyColor": "38;2;59;130;246",
+      "format": "{name}"
     },
     {
       "type": "shell",
-      "key": "  󰞷 Shell",
-      "keyColor": "magenta"
+      "key": "  \u001b[38;2;59;130;246m󰞷  Shell\u001b[0m",
+      "keyColor": "38;2;59;130;246",
+      "format": "{pretty-name} {version}"
     },
-
-    "break",
-
-    // --- HARDWARE SPECS ---
+    {
+      "type": "packages",
+      "key": "  \u001b[38;2;59;130;246m  Packages\u001b[0m",
+      "keyColor": "38;2;59;130;246",
+      "format": "{all}"
+    },
+    {
+      "type": "locale",
+      "key": "  \u001b[38;2;59;130;246m󰗊  Locale\u001b[0m",
+      "keyColor": "38;2;59;130;246",
+      "format": "{result}"
+    },
+    {
+      "type": "custom",
+      "format": "\u001b[38;2;59;130;246m└────────────────────────────────────────────────────────────────┘\u001b[0m"
+    },
+    {
+      "type": "custom",
+      "format": "\u001b[38;2;96;165;250m┌──────────────────────────  Hardware  ──────────────────────────┐\u001b[0m"
+    },
+    {
+      "type": "board",
+      "key": "  \u001b[38;2;96;165;250m󰍛  Motherboard\u001b[0m",
+      "keyColor": "38;2;96;165;250"
+    },
+    {
+      "type": "bios",
+      "key": "  \u001b[38;2;96;165;250m  BIOS\u001b[0m",
+      "keyColor": "38;2;96;165;250"
+    },
     {
       "type": "cpu",
-      "key": "  󰍛 CPU",
-      "keyColor": "green",
+      "key": "  \u001b[38;2;96;165;250m  CPU\u001b[0m",
+      "keyColor": "38;2;96;165;250",
       "temp": true
     },
     {
       "type": "gpu",
-      "key": "  󰢮 GPU",
-      "keyColor": "green",
+      "key": "  \u001b[38;2;96;165;250m󰢮  GPU\u001b[0m",
+      "keyColor": "38;2;96;165;250",
       "temp": true
     },
     {
+      "type": "display",
+      "key": "  \u001b[38;2;96;165;250m  Resolution\u001b[0m",
+      "keyColor": "38;2;96;165;250"
+    },
+    {
       "type": "memory",
-      "key": "  󰘚 Memory",
-      "keyColor": "green"
+      "key": "  \u001b[38;2;96;165;250m  Memory\u001b[0m",
+      "keyColor": "38;2;96;165;250"
     },
     {
       "type": "swap",
-      "key": "  󰓡 Swap",
-      "keyColor": "green"
+      "key": "  \u001b[38;2;96;165;250m󰍛  Swap\u001b[0m",
+      "keyColor": "38;2;96;165;250"
     },
     {
       "type": "disk",
-      "key": "  󰋊 Disk",
-      "keyColor": "green"
+      "key": "  \u001b[38;2;96;165;250m  Disk\u001b[0m",
+      "keyColor": "38;2;96;165;250"
     },
     {
-      "type": "display",
-      "key": "  󰍹 Display",
-      "keyColor": "green",
-      "format": "{width}x{height} @ {refresh-rate}Hz"
+      "type": "custom",
+      "format": "\u001b[38;2;96;165;250m└────────────────────────────────────────────────────────────────┘\u001b[0m"
     },
     {
-      "type": "battery",
-      "key": "  󰁹 Battery",
-      "keyColor": "green"
+      "type": "custom",
+      "format": "\u001b[38;2;147;197;253m┌───────────────────────────  Status  ───────────────────────────┐\u001b[0m"
     },
-
-    "break",
-
-    // --- TIME & OS AGE ---
     {
-      "type": "uptime",
-      "key": "  󱎫 Uptime",
-      "keyColor": "yellow"
+      "type": "localip",
+      "key": "  \u001b[38;2;147;197;253m󰩟  Local IP\u001b[0m",
+      "keyColor": "38;2;147;197;253",
+      "format": "{ipv4} ({ifname})",
+      "showIpv6": false,
+      "showPrefixLen": false
+    },
+    {
+      "type": "datetime",
+      "key": "  \u001b[38;2;147;197;253m󰸗  Date\u001b[0m",
+      "keyColor": "38;2;147;197;253",
+      "format": "{day-in-month}.{month-pretty}.{year}  {hour-pretty}:{minute-pretty}:{second-pretty}"
     },
     {
       "type": "command",
-      "key": "  󰃭 OS Age",
-      "keyColor": "yellow",
-      "text": "birth_install=$(stat -c %W / 2>/dev/null || stat -c %Y /); current=$(date +%s); echo $(( (current - birth_install) / 86400 )) days"
+      "key": "  \u001b[38;2;147;197;253m  OS Age\u001b[0m",
+      "keyColor": "38;2;147;197;253",
+      "text": "birth_install=$(stat -c %W / 2>/dev/null || stat -c %Y /); current=$(date +%s); time_progression=$((current - birth_install)); days_difference=$((time_progression / 86400)); echo $days_difference days"
     },
-
-    "break",
-
-    // --- COLOR PALETTE ---
     {
-      "type": "colors",
-      "paddingLeft": 2,
-      "symbol": "circle"
+      "type": "uptime",
+      "key": "  \u001b[38;2;147;197;253m  Uptime\u001b[0m",
+      "keyColor": "38;2;147;197;253"
+    },
+    {
+      "type": "battery",
+      "key": "  \u001b[38;2;147;197;253m  Battery\u001b[0m",
+      "keyColor": "38;2;147;197;253"
+    },
+    {
+      "type": "custom",
+      "format": "\u001b[38;2;147;197;253m└────────────────────────────────────────────────────────────────┘\u001b[0m"
     }
   ]
 }

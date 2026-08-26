@@ -196,8 +196,10 @@ enable_services() {
       if yay -S --noconfirm --needed timeshift-autosnap >>"$INSTALL_LOG" 2>&1; then
         log_success "timeshift-autosnap installed successfully"
         sudo systemctl daemon-reload
-        services+=(timeshift-autosnap.timer)
-        log_success "timeshift-autosnap.timer will be enabled for automatic snapshots."
+        # timeshift-autosnap works via a pacman hook (00-timeshift-autosnap.hook),
+        # NOT a systemd timer — snapshots are taken automatically on pacman
+        # transactions. Nothing to enable here.
+        log_success "timeshift-autosnap active — snapshots will be taken on every pacman transaction"
       else
         log_error "Failed to install timeshift-autosnap from AUR"
       fi

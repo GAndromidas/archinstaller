@@ -98,12 +98,49 @@ EOF
   CONFIGURED+=("jail.d/archinstaller.local")
 }
 
+enable_and_start_fail2ban() {
+  ui_info "Enabling and starting fail2ban service..."
+  if sudo systemctl enable --now fail2ban >>"$INSTALL_LOG" 2>&1; then
+    log_success "fail2ban service enabled and started"
+    ENABLED+=("fail2ban")
+    return 0
+  else
+    log_error "Failed to enable and start fail2ban service"
+    return 1
+  fi
+}
+
 status_fail2ban() {
   if sudo systemctl status fail2ban --no-pager >>"$INSTALL_LOG" 2>&1; then
     log_success "fail2ban service is running"
     return 0
   else
     log_error "fail2ban service is not running"
+    return 1
+  fi
+}
+
+# Verify the sshd jail is actually loaded and banning-capable
+verify_jails() {
+  if ! command -v fail2ban-client >/dev/null 2>&1; then
+    log_warning "fail2ban-client not available for verification"
+    return 0
+  fi
+
+  sleep 2  # give the daemon a moment after start/reload
+  local jail_status
+  jail_status=$(sudo fail2ban-client status 2>>"$INSTALL_LOG") || {
+    log_error "Could not query fail2ban status"
+    return 1
+  }
+
+  if echo "$jail_status" | grep -qw sshd; then
+    local banned_total
+    banned_total=$(sudo fail2ban-client status sshd 2>>"$INSTALL_LOG" | grep -i 'currently banned' | grep -o '[0-9]*')
+    log_success "sshd jail is active and monitoring (currently banned IPs: ${banned_total:-0})"
+    return 0
+  else
+    log_error "sshd jail is NOT active! Check: sudo fail2ban-client status"
     return 1
   fi
 }
@@ -115,9 +152,10 @@ main() {
   run_step "Installing fail2ban" install_fail2ban
   # Configure BEFORE starting so the service comes up with jails active,
   # then reload to pick up the config in case the service was already running
-  run_step "Configuring fail2ban (jail.local)" configure_fail2ban
+  run_step "Configuring fail2ban (sshd jail)" configure_fail2ban
   run_step "Enabling and starting fail2ban" enable_and_start_fail2ban
   sudo systemctl reload fail2ban >>"$INSTALL_LOG" 2>&1 || true
+  run_step "Verifying sshd jail is active" verify_jails
   run_step "Checking fail2ban status" status_fail2ban
 }
 

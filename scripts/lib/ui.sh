@@ -81,7 +81,8 @@ ui_menu() {
         echo ""
         local selection
         while true; do
-            read -r -p "$(echo -e "${THEME_SECONDARY}Select option [1-$((i-1))]: ${RESET}")" selection
+            # EOF (non-tty / Ctrl+D) must not loop forever
+            read -r -p "$(echo -e "${THEME_SECONDARY}Select option [1-$((i-1))]: ${RESET}")" selection || return 1
             if [[ "$selection" =~ ^[0-9]+$ ]] && [ "$selection" -ge 1 ] && [ "$selection" -le "$((i-1))" ]; then
                 echo "${options[$((selection-1))]}"
                 return 0
@@ -154,7 +155,8 @@ ui_confirm() {
         fi
         local response
         while true; do
-            read -r -p "$(echo -e "${THEME_SECONDARY}${question} [Y/n]: ${RESET}")" response
+            # EOF (non-tty / Ctrl+D) must not auto-confirm — default to NO
+            read -r -p "$(echo -e "${THEME_SECONDARY}${question} [Y/n]: ${RESET}")" response || return 1
             response=${response,,}
             case "$response" in
                 ""|y|yes) return 0 ;;

@@ -31,8 +31,9 @@ configure_firewalld() {
   sudo firewall-cmd --set-default-zone=drop
   log_success "Default zone set to drop (incoming denied, outgoing allowed)"
 
-  # Allow SSH
-  if ! sudo firewall-cmd --list-all | grep -q "22/tcp"; then
+  # Allow SSH — check the PERMANENT config, since that's what we modify
+  # (runtime and permanent can diverge after zone changes/reloads)
+  if ! sudo firewall-cmd --permanent --list-services 2>/dev/null | grep -qw ssh; then
     sudo firewall-cmd --add-service=ssh --permanent
     sudo firewall-cmd --reload
     log_success "SSH allowed through Firewalld."
@@ -133,8 +134,10 @@ enable_services() {
     else
       log_error "Some services failed to enable"
     fi
-    
-    exit 0
+
+    # Return instead of exit — this file may be sourced by the installer;
+    # exiting here would kill the whole installation
+    return 0
   fi
 
   local services=(
@@ -145,8 +148,18 @@ enable_services() {
     sshd.service
   )
 
+  # power-profiles-daemon: required for powerdevil's power profile switching
+  # (Performance/Balanced/Power Saver) to work in Plasma
+  if pacman -Q powerdevil &>/dev/null || pacman -Q plasma-workspace &>/dev/null; then
+    if ! pacman -Q power-profiles-daemon &>/dev/null; then
+      install_packages_quietly power-profiles-daemon && services+=(power-profiles-daemon.service)
+    elif ! systemctl is-enabled --quiet power-profiles-daemon 2>/dev/null; then
+      services+=(power-profiles-daemon.service)
+    fi
+  fi
+
   # Check and configure virt-manager guest integration
-  if command -v virsh &>/dev/null || pacman -Q libvirt-daemon &>/dev/null 2>&1 || pacman -Q virt-manager &>/dev/null 2>&1; then
+  if command -v virsh &>/dev/null || pacman -Q libvirt &>/dev/null 2>&1 || pacman -Q virt-manager &>/dev/null 2>&1; then
     # Add user to libvirt group and enable service
     if groups "$USER" | grep -qE '\blibvirt\b'; then
       log_info "User already in libvirt group"
@@ -168,8 +181,16 @@ enable_services() {
     log_warning "rustdesk is not installed. Skipping rustdesk.service."
   fi
 
-  # Check if Timeshift is already installed and install timeshift-autosnap if needed
-  if pacman -Q timeshift &>/dev/null; then
+  # Snapshot tooling — bootloader-aware strategy:
+  #   Limine + btrfs  -> Snapper + snap-pac + limine-snapper-sync (bootable
+  #                      snapshot menu in Limine, kept in sync automatically).
+  #                      Set up in bootloader_config.sh; skip Timeshift here.
+  #   Everything else -> Timeshift + timeshift-autosnap (as before)
+  if [ "$(detect_bootloader)" = "limine" ] && is_btrfs_system && [ -f /etc/snapper/configs/root ]; then
+    log_info "Limine + Snapper snapshot integration active — skipping timeshift-autosnap"
+  elif pacman -Q snapper &>/dev/null && [ -f /etc/snapper/configs/root ] && ! pacman -Q timeshift &>/dev/null; then
+    log_info "Snapper already configured without Timeshift — skipping timeshift-autosnap"
+  elif pacman -Q timeshift &>/dev/null; then
     log_success "Timeshift detected - installing timeshift-autosnap for automatic snapshots..."
     if command -v yay >/dev/null 2>&1; then
       if yay -S --noconfirm --needed timeshift-autosnap >>"$INSTALL_LOG" 2>&1; then
@@ -276,12 +297,86 @@ detect_and_install_gpu_drivers() {
     install_packages_quietly vulkan-intel lib32-vulkan-intel
     log_success "Intel drivers and Vulkan support installed"
     log_info "Intel GPU will use i915 or xe driver after reboot"
+  elif lspci | grep -Eiq 'vga.*nvidia|3d.*nvidia|display.*nvidia'; then
+    configure_nvidia_drivers
   else
-    echo -e "${THEME_WARN}No AMD or Intel GPU detected. Using basic Mesa drivers already installed.${RESET}"
+    echo -e "${THEME_WARN}No AMD, Intel or NVIDIA GPU detected. Using basic Mesa drivers already installed.${RESET}"
   fi
 
   # Verify GPU driver is loaded
   verify_gpu_driver
+}
+
+# NVIDIA proprietary driver setup (opt-in — user confirms before anything is installed)
+configure_nvidia_drivers() {
+  ui_info "NVIDIA GPU detected."
+  log_warning "NVIDIA proprietary drivers are opt-in because they can complicate a rolling-release system"
+
+  if ! gum_confirm "Install NVIDIA proprietary drivers (nvidia-open)?" "Recommended for Turing (GTX 16xx) and newer. Skip if unsure or on an older GPU — nouveau will be kept."; then
+    log_info "NVIDIA driver installation skipped by user — keeping nouveau"
+    return 0
+  fi
+
+  local nvidia_pkg="nvidia-open" nvidia_kernel_pkg=""
+
+  # Match kernel variant to the installed one so the module matches the running kernel
+  if pacman -Q linux-lts &>/dev/null && ! pacman -Q linux &>/dev/null; then
+    nvidia_kernel_pkg="nvidia-open-lts"
+  fi
+
+  ui_info "Installing NVIDIA drivers and Vulkan support..."
+  if [ -n "$nvidia_kernel_pkg" ]; then
+    install_packages_quietly "$nvidia_kernel_pkg" nvidia-utils lib32-nvidia-utils egl-wayland
+  else
+    install_packages_quietly "$nvidia_pkg" nvidia-utils lib32-nvidia-utils egl-wayland
+  fi
+
+  if [ $? -ne 0 ]; then
+    log_error "NVIDIA driver installation failed — system will keep using nouveau"
+    return 1
+  fi
+
+  enable_nvidia_drm_mode_setting
+
+  log_success "NVIDIA drivers installed (open kernel modules)"
+  log_warning "A reboot is required for the NVIDIA driver to take effect"
+}
+
+# DRM kernel mode setting is required for Wayland with the proprietary driver.
+enable_nvidia_drm_mode_setting() {
+  local cmdline_conf="/etc/cmdline.d/nvidia-drm.conf"
+  local mkinitcpio_conf="/etc/mkinitcpio.conf"
+
+  # Path 1: systemd.kernel-install / UKI systems read /etc/kernel/cmdline or /etc/cmdline.d
+  if [ -f /etc/kernel/cmdline ] || [ -f /etc/kernel/cmdline.d ]; then
+    if ! grep -q 'nvidia-drm.modeset' /etc/kernel/cmdline 2>/dev/null; then
+      sudo mkdir -p /etc/cmdline.d
+      echo 'kernel_cmdline+=("nvidia-drm.modeset=1")' | sudo tee "$cmdline_conf" >/dev/null
+      log_success "Added nvidia-drm.modeset=1 via /etc/cmdline.d"
+    fi
+  fi
+
+  # Path 2: GRUB
+  if [ -f /etc/default/grub ]; then
+    if ! grep -q 'nvidia-drm.modeset' /etc/default/grub; then
+      sudo sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"/GRUB_CMDLINE_LINUX_DEFAULT="\1 nvidia-drm.modeset=1"/' /etc/default/grub
+      if command -v grub-mkconfig >/dev/null 2>&1; then
+        sudo grub-mkconfig -o /boot/grub/grub.cfg >>"$INSTALL_LOG" 2>&1 || log_warning "Failed to regenerate grub.cfg — run it manually after reboot"
+      fi
+      log_success "Added nvidia-drm.modeset=1 to GRUB"
+    fi
+  fi
+
+  # Path 3: mkinitcpio MODULES — ensures KMS starts early enough for Wayland
+  if [ -f "$mkinitcpio_conf" ]; then
+    if ! grep -q '^MODULES=.*nvidia' "$mkinitcpio_conf"; then
+      sudo sed -i 's/^MODULES=(\([^)]*\))/MODULES=(\1 nvidia nvidia_modeset nvidia_uvm nvidia_drm)/' "$mkinitcpio_conf"
+      log_success "Added NVIDIA modules to mkinitcpio for early KMS"
+      if command -v mkinitcpio >/dev/null 2>&1; then
+        sudo mkinitcpio -P >>"$INSTALL_LOG" 2>&1 || log_warning "mkinitcpio regeneration failed — run 'sudo mkinitcpio -P' manually"
+      fi
+    fi
+  fi
 }
 
 # Function to verify GPU driver is loaded correctly
@@ -382,7 +477,8 @@ should_skip_acpi() {
   
   # 1. Skip only for very old pre-Zen AMD CPUs (pre-2017)
   if [ "$cpu_vendor" = "amd" ]; then
-    if [ "$cpu_family" -lt "23" ]; then  # Family 23+ is Zen 2 and newer
+    # Guard: cpu family can be missing on some VMs/ARM — treat as modern
+    if [[ "$cpu_family" =~ ^[0-9]+$ ]] && [ "$cpu_family" -lt "23" ]; then  # Family 23+ is Zen and newer
       log_info "Legacy AMD CPU detected (family $cpu_family) - using minimal ACPI"
       echo "minimal"
       return 0
@@ -654,6 +750,8 @@ detect_memory_size() {
 
   log_info "Total system memory: ${ram_gb}GB"
 
+  setup_zram "$ram_gb"
+
   # Apply memory-based optimizations
   if [ "$ram_gb" -lt 4 ]; then
     log_warning "Low memory system detected (< 4GB)"
@@ -721,6 +819,44 @@ detect_memory_size() {
   sudo sysctl -p /etc/sysctl.d/99-swappiness.conf >>"$INSTALL_LOG" 2>&1
 
   log_success "Memory-based optimizations applied"
+}
+
+# Set up zram swap via zram-generator. Gives low-RAM systems breathing room
+# and benefits all systems (compressed in-memory swap is faster than disk).
+setup_zram() {
+  local ram_gb="$1"
+
+  # Skip if the system already has real swap configured — don't fight the user's setup
+  if lsblk -rno TYPE 2>/dev/null | grep -q '^swap$'; then
+    log_info "Disk swap already configured — skipping zram setup"
+    return 0
+  fi
+
+  if ! command -v zramctl >/dev/null 2>&1 && ! pacman -Q zram-generator &>/dev/null; then
+    install_packages_quietly zram-generator || {
+      log_warning "Could not install zram-generator — skipping zram setup"
+      return 0
+    }
+  fi
+
+  # Size: half of RAM, capped at 8G (rule of thumb for modern systems with fast CPUs)
+  local zram_size_mb=$(( ram_gb * 1024 / 2 ))
+  [ "$zram_size_mb" -gt 8192 ] && zram_size_mb=8192
+  [ "$zram_size_mb" -lt 1024 ] && zram_size_mb=1024
+
+  if [ ! -f /etc/systemd/zram-generator.conf ]; then
+    sudo tee /etc/systemd/zram-generator.conf >/dev/null <<EOF
+# Generated by archinstaller
+[zram0]
+zram-size = ${zram_size_mb}M
+compression-algorithm = zstd
+EOF
+    sudo systemctl daemon-reload >>"$INSTALL_LOG" 2>&1 || true
+    sudo systemctl start systemd-zram-setup@zram0.service >>"$INSTALL_LOG" 2>&1 || true
+    log_success "zram configured: ${zram_size_mb}MB with zstd compression"
+  else
+    log_info "zram-generator.conf already exists — skipping"
+  fi
 }
 
 # Function to detect filesystem type and apply optimizations
@@ -823,23 +959,24 @@ EOF
 
 # Function to detect audio system
 detect_audio_system() {
-  step "Detecting audio system"
+  step "Setting up audio system"
 
-  if systemctl --user is-active --quiet pipewire 2>/dev/null || systemctl is-active --quiet pipewire 2>/dev/null; then
-    log_success "PipeWire audio system detected"
-    # Install PipeWire specific packages if not already installed
-    install_packages_quietly pipewire-alsa pipewire-jack pipewire-pulse
-    log_success "PipeWire compatibility packages installed"
-  elif systemctl --user is-active --quiet pulseaudio 2>/dev/null || pgrep -x pulseaudio >/dev/null 2>&1; then
-    log_success "PulseAudio audio system detected"
-    # Ensure PulseAudio bluetooth support
-    if pacman -Q bluez &>/dev/null; then
-      install_packages_quietly pulseaudio-bluetooth
-      log_success "PulseAudio Bluetooth support installed"
-    fi
+  # Install unconditionally: during installation no user session is running,
+  # so runtime detection always reports "nothing detected" on a fresh system.
+  # PipeWire is the standard on modern Plasma and replaces PulseAudio entirely.
+  if pacman -Q pulseaudio &>/dev/null; then
+    log_info "PulseAudio detected — PipeWire stack will replace it (pipewire-pulse takes over)"
+    install_packages_quietly pipewire wireplumber pipewire-alsa pipewire-jack pipewire-pulse
+    # Remove PulseAudio so both don't fight over the audio socket.
+    # pulseaudio-alsa is a config shim pointing at pipewire/pulse — safe to remove with it.
+    # -Rdd is needed because pipewire-pulse Provides/Conflicts with pulseaudio;
+    # removing the dep-cycle strictly would also try to remove pipewire-packetry.
+    sudo pacman -Rdd --noconfirm pulseaudio pulseaudio-alsa >>"$INSTALL_LOG" 2>&1 || \
+      sudo pacman -Rns --noconfirm pulseaudio >>"$INSTALL_LOG" 2>&1 || true
+    log_success "PipeWire installed and PulseAudio removed"
   else
-    log_info "No audio system detected or not running yet"
-    log_info "PipeWire is recommended for modern systems"
+    install_packages_quietly pipewire wireplumber pipewire-alsa pipewire-jack pipewire-pulse
+    log_success "PipeWire audio stack installed"
   fi
 }
 
@@ -941,18 +1078,9 @@ check_battery_status() {
         log_warning "Consider plugging in AC adapter for installation"
         log_info "Installation may take 20-30 minutes"
 
-        if command -v gum >/dev/null 2>&1; then
-          if ! gum confirm --default=false "Continue on battery power?"; then
-            log_error "Installation cancelled - please connect AC adapter"
-            exit 1
-          fi
-        else
-          read -r -p "Continue on battery power? [y/N]: " response
-          response=${response,,}
-          if [[ "$response" != "y" && "$response" != "yes" ]]; then
-            log_error "Installation cancelled - please connect AC adapter"
-            exit 1
-          fi
+        if ! gum_confirm "Continue on battery power?"; then
+          log_error "Installation cancelled - please connect AC adapter"
+          exit 1
         fi
       elif [ "$status" = "Charging" ] || [ "$status" = "Full" ]; then
         log_success "Battery is charging or full - safe to proceed"
@@ -1430,7 +1558,7 @@ EOF
       [ -f "/boot/vmlinuz-$k" ] || kernels_ok=false
     done
     if $kernels_ok; then
-      sudo mkinitcpio -P linux-zen linux-lts 2>/dev/null && log_success "Initramfs updated for gaming P-State"
+      sudo mkinitcpio -P 2>>"$INSTALL_LOG" && log_success "Initramfs regenerated for gaming P-State"
     else
       log_warning "Initramfs not updated — missing kernel images"
     fi
@@ -1464,7 +1592,7 @@ EOF
       [ -f "/boot/vmlinuz-$k" ] || kernels_ok=false
     done
     if $kernels_ok; then
-      sudo mkinitcpio -P linux linux-lts 2>/dev/null && log_success "Initramfs updated for system P-State"
+      sudo mkinitcpio -P 2>>"$INSTALL_LOG" && log_success "Initramfs regenerated for system P-State"
     else
       log_warning "Initramfs not updated — missing kernel images"
     fi
@@ -1508,38 +1636,18 @@ setup_laptop_optimizations() {
     # Automatic mode - enable optimizations without prompting
     enable_laptop_opts=true
     log_info "Auto-optimization mode enabled - applying laptop optimizations"
-  elif command -v gum >/dev/null 2>&1; then
-    # Interactive mode with gum
-    echo ""
-    gum style --foreground "$GUM_WARN" "Laptop-specific optimizations available for $(echo $manufacturer | tr '[:lower:]' '[:upper]') $laptop_model:"
-    gum style --margin "0 2" --foreground "$GUM_TEXT" "CPU-specific optimizations ($(echo $cpu_vendor | tr '[:lower:]' '[:upper]'))"
-    
-    # Show manufacturer-specific optimizations
-    for opt in "${manufacturer_opts[@]}"; do
-      gum style --margin "0 2" --foreground "$GUM_TEXT" "$opt"
-    done
-    
-    echo ""
-    gum style --foreground "$GUM_WARN" "Tip: Set AUTO_LAPTOP_OPTS=true to skip this prompt in future"
-    if gum confirm --default=true "Enable laptop optimizations?"; then
-      enable_laptop_opts=true
-    fi
   else
-    # Non-interactive mode
     echo ""
-    echo -e "${THEME_WARN}Laptop-specific optimizations available for $(echo $manufacturer | tr '[:lower:]' '[:upper]') $laptop_model:${RESET}"
-    echo -e "  \u2022 CPU-specific optimizations ($(echo $cpu_vendor | tr '[:lower:]' '[:upper]'))"
-    
+    log_warning "Laptop-specific optimizations available for $(echo $manufacturer | tr '[:lower:]' '[:upper]') $laptop_model:"
+    ui_info "CPU-specific optimizations ($(echo $cpu_vendor | tr '[:lower:]' '[:upper]'))"
+
     # Show manufacturer-specific optimizations
     for opt in "${manufacturer_opts[@]}"; do
-      echo -e "  \u2022 $opt"
+      ui_info "  • $opt"
     done
-    
+
     echo ""
-    echo -e "${THEME_TEXT}Tip: Set AUTO_LAPTOP_OPTS=true to enable optimizations automatically${RESET}"
-    read -r -p "Enable laptop optimizations? [Y/n]: " response
-    response=${response,,}
-    if [[ "$response" != "n" && "$response" != "no" ]]; then
+    if gum_confirm "Enable laptop optimizations?" "Tip: Set AUTO_LAPTOP_OPTS=true to skip this prompt in future."; then
       enable_laptop_opts=true
       # Remember the choice for future runs
       mkdir -p "$HOME/.config"
@@ -1606,12 +1714,21 @@ setup_advanced_optimizations() {
   # Apply sysctl optimizations for better performance
   log_info "Applying kernel parameter optimizations..."
   
-  # Network optimizations
-  echo "net.core.default_qdisc=fq_codel" | sudo tee -a /etc/sysctl.d/99-archinstaller.conf >/dev/null
-  echo "net.ipv4.tcp_congestion_control=bbr" | sudo tee -a /etc/sysctl.d/99-archinstaller.conf >/dev/null
-
-  echo "vm.swappiness=10" | sudo tee -a /etc/sysctl.d/99-archinstaller.conf >/dev/null
-  echo "vm.vfs_cache_pressure=50" | sudo tee -a /etc/sysctl.d/99-archinstaller.conf >/dev/null
+  # Idempotent upsert: replace existing keys instead of appending duplicates
+  # on re-runs (tee -a grows the file unboundedly)
+  local sysctl_conf="/etc/sysctl.d/99-archinstaller.conf"
+  set_sysctl_key() {
+    local key="$1" value="$2"
+    if sudo grep -q "^${key}=" "$sysctl_conf" 2>/dev/null; then
+      sudo sed -i "s|^${key}=.*|${key}=${value}|" "$sysctl_conf"
+    else
+      echo "${key}=${value}" | sudo tee -a "$sysctl_conf" >/dev/null
+    fi
+  }
+  set_sysctl_key "net.core.default_qdisc" "fq_codel"
+  set_sysctl_key "net.ipv4.tcp_congestion_control" "bbr"
+  set_sysctl_key "vm.swappiness" "10"
+  set_sysctl_key "vm.vfs_cache_pressure" "50"
 
   sudo sysctl --system >>"$INSTALL_LOG" 2>&1
   

@@ -154,7 +154,16 @@ update_system() {
 
 set_sudo_pwfeedback() {
   if ! sudo grep -q '^Defaults.*pwfeedback' /etc/sudoers /etc/sudoers.d/* 2>/dev/null; then
-    run_step "Enabling sudo password feedback" bash -c "echo 'Defaults env_reset,pwfeedback' | sudo EDITOR='tee -a' visudo"
+    # Write to sudoers.d with validation BEFORE installing — a broken main
+    # sudoers file can lock the user out of sudo entirely
+    local tmp_sudoers=$(mktemp)
+    echo 'Defaults pwfeedback' > "$tmp_sudoers"
+    if sudo visudo -cf "$tmp_sudoers" >/dev/null 2>&1; then
+      run_step "Enabling sudo password feedback" bash -c "sudo install -m 440 '$tmp_sudoers' /etc/sudoers.d/90-archinstaller-pwfeedback"
+    else
+      log_error "Generated sudoers snippet failed validation — skipping pwfeedback setup"
+    fi
+    rm -f "$tmp_sudoers"
   else
     log_warning "sudo pwfeedback already enabled. Skipping."
   fi

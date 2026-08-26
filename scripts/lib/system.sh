@@ -88,7 +88,9 @@ detect_gpu() {
     local gpu="unknown"
     
     if command -v lspci &>/dev/null; then
-        if lspci | grep -qi "amd.*radeon\|amd.*gpu"; then
+        if lspci | grep -qi "nvidia"; then
+            gpu="nvidia"
+        elif lspci | grep -qi "amd.*radeon\|amd.*gpu"; then
             gpu="amd"
         elif lspci | grep -qi "intel.*vga\|intel.*gpu"; then
             gpu="intel"

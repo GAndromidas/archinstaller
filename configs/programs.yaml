@@ -153,6 +153,7 @@ desktop_environments:
       - kio-admin
       - kscreen
       - kwalletmanager
+      - kwallet-pam
       - kvantum
       - okular
       - plasma-firewall

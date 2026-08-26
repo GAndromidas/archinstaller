@@ -186,22 +186,27 @@ create_wol_service() {
 
     log_info "Creating systemd service for WoL on $iface"
 
-    # Find ethtool path
+    # Find ethtool path — fail loudly rather than baking a bogus path into the unit
     local ethtool_path
-    ethtool_path=$(command -v ethtool) || ethtool_path="/usr/bin/ethtool"
+    ethtool_path=$(command -v ethtool) || {
+        log_error "ethtool not found — cannot create WoL service for $iface"
+        return 1
+    }
 
-    # Create systemd service file
+    # Create systemd service file.
+    # Bring the link up first: ethtool silently does nothing on a down interface.
+    # Run before network.target so WoL is set before any network manager may
+    # reset it; do NOT pull in network-pre.target (that's for network daemons).
     sudo tee "$service_file" > /dev/null <<EOF
 [Unit]
 Description=Enable Wake-on-LAN for $iface
-After=network-pre.target
-Before=shutdown.target reboot.target halt.target
-Wants=network-pre.target
+After=systemd-modules-load.service
+Before=network.target
 
 [Service]
 Type=oneshot
+ExecStart=/usr/bin/ip link set $iface up
 ExecStart=$ethtool_path -s $iface wol g
-ExecStop=$ethtool_path -s $iface wol g
 RemainAfterExit=yes
 
 [Install]
@@ -270,8 +275,9 @@ prompt_interface_selection() {
     # Find active interface (with internet)
     active_iface=$(get_active_ethernet_interface)
     
-    ui_info "Multiple ethernet interfaces detected:"
-    echo ""
+    # All informational output goes to stderr — stdout is the return value
+    ui_info "Multiple ethernet interfaces detected:" >&2
+    echo "" >&2
     
     # Build choices array
     local i=1
@@ -285,47 +291,50 @@ prompt_interface_selection() {
             status="${THEME_WARN}[No Internet]${RESET}"
         fi
         
-        echo -e "${THEME_TEXT}$i)${RESET} $iface $status"
-        echo -e "   MAC: ${mac_addr:-N/A}"
-        echo ""
+        echo -e "${THEME_TEXT}$i)${RESET} $iface $status" >&2
+        echo -e "   MAC: ${mac_addr:-N/A}" >&2
+        echo "" >&2
         choices+=("$iface")
         i=$((i + 1))
     done
     
-    echo -e "${THEME_TEXT}a)${RESET} Configure ALL interfaces"
-    echo -e "${THEME_TEXT}s)${RESET} Skip Wake-on-LAN configuration"
-    echo ""
+    echo -e "${THEME_TEXT}a)${RESET} Configure ALL interfaces" >&2
+    echo -e "${THEME_TEXT}s)${RESET} Skip Wake-on-LAN configuration" >&2
+    echo "" >&2
     
     while true; do
-        echo -ne "${THEME_TEXT_BOLD}Select option [1-${#interfaces[@]}, a, s]:${RESET} "
-        read -r choice
+        echo -ne "${THEME_TEXT_BOLD}Select option [1-${#interfaces[@]}, a, s]:${RESET} " >&2
+        # EOF must not loop forever
+        read -r choice < /dev/tty || return 1
         
         case "$choice" in
             [0-9]*)
                 if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le ${#interfaces[@]} ]; then
                     local selected_iface="${choices[$((choice-1))]}"
-                    echo ""
-                    ui_info "Selected interface: $selected_iface"
+                    echo "" >&2
+                    # Info output must go to stderr — this function's stdout is
+                    # captured by the caller as the return value
+                    ui_info "Selected interface: $selected_iface" >&2
                     echo "$selected_iface"
                     return 0
                 else
-                    ui_error "Invalid selection. Please try again."
+                    ui_error "Invalid selection. Please try again." >&2
                 fi
                 ;;
             a|A)
-                echo ""
-                ui_info "Configuring ALL ethernet interfaces"
+                echo "" >&2
+                ui_info "Configuring ALL ethernet interfaces" >&2
                 echo "ALL"
                 return 0
                 ;;
             s|S)
-                echo ""
-                ui_info "Wake-on-LAN configuration skipped"
+                echo "" >&2
+                ui_info "Wake-on-LAN configuration skipped" >&2
                 echo "SKIP"
                 return 0
                 ;;
             *)
-                ui_error "Invalid option. Please try again."
+                ui_error "Invalid option. Please try again." >&2
                 ;;
         esac
     done

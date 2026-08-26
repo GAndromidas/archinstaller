@@ -76,8 +76,8 @@ else
 fi
 
 # Ensure critical variables are defined
-: "${HOME:=/home/$USER}"
 : "${USER:=$(whoami)}"
+: "${HOME:=/home/$USER}"
 : "${XDG_CURRENT_DESKTOP:=}"
 : "${INSTALL_LOG:=$HOME/.archinstaller.log}"
 
@@ -202,9 +202,11 @@ check_system_compatibility() {
         issues+=("Not running on Arch Linux or EndeavourOS")
     fi
     
-    # Check disk space
-    local available_space=$(df / | awk 'NR==2 {print $4}')
-    if [[ $available_space -lt 2097152 ]]; then
+    # Check disk space (guard against unexpected df output)
+    local available_space=$(df -k --output=avail / 2>/dev/null | awk 'NR==2 {print $1}')
+    if [[ ! "$available_space" =~ ^[0-9]+$ ]]; then
+        log_warning "Could not determine available disk space"
+    elif [[ $available_space -lt 2097152 ]]; then
         issues+=("Insufficient disk space (need 2GB, have $((available_space / 1024 / 1024))GB)")
     fi
     
@@ -426,19 +428,20 @@ update_system_mirrors() {
   local mirror_repo="arch"
   
   # Detect mirror repo silently
-  if [[ -f /etc/os-release ]] && grep -q 'ID="endeavouros"' /etc/os-release 2>/dev/null; then
+  if [[ -f /etc/os-release ]] && grep -q '^ID=?endeavouros"?$' /etc/os-release 2>/dev/null; then
     mirror_repo="endeavour"
   fi
   
-  # Run mirror update silently in background
-  # Redirect all output to /dev/null for silent operation
-  nohup bash -c "sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist '$mirror_repo' >/dev/null 2>&1 && sudo pacman -Syy >/dev/null 2>&1" >>"$INSTALL_LOG" 2>&1 &
-  
-  # Give immediate feedback that mirrors are syncing
+  # Run mirror update synchronously — a backgrounded pacman races the main
+  # installer's pacman calls for the database lock, and a backgrounded sudo
+  # may prompt for a password with no way to enter it.
   ui_info "Syncing package mirrors..."
-  ui_success "Mirrors are being updated in background"
-  
-  # Return immediately without blocking
+  if sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist "$mirror_repo" >>"$INSTALL_LOG" 2>&1; then
+    sudo pacman -Syy >>"$INSTALL_LOG" 2>&1
+    ui_success "Mirrors updated successfully"
+  else
+    ui_warn "Mirror update failed — keeping existing mirrors"
+  fi
   return 0
 }
 
@@ -478,7 +481,7 @@ is_headless_system() {
 show_menu() {
   # Display detected OS information - use /etc/os-release for EndeavourOS
   local detected_os=""
-  if [[ -f /etc/os-release ]] && grep -q 'ID="endeavouros"' /etc/os-release 2>/dev/null; then
+  if [[ -f /etc/os-release ]] && grep -q '^ID=?endeavouros"?$' /etc/os-release 2>/dev/null; then
     detected_os="EndeavourOS"
   elif [[ -f /etc/arch-release ]]; then
     detected_os="Arch Linux"
@@ -521,7 +524,7 @@ validate_install_mode() {
 show_gum_menu() {
   # Display detected OS information - use /etc/os-release for EndeavourOS
   local detected_os=""
-  if [[ -f /etc/os-release ]] && grep -q 'ID="endeavouros"' /etc/os-release 2>/dev/null; then
+  if [[ -f /etc/os-release ]] && grep -q '^ID=?endeavouros"?$' /etc/os-release 2>/dev/null; then
     detected_os="EndeavourOS"
   elif [[ -f /etc/arch-release ]]; then
     detected_os="Arch Linux"
@@ -579,7 +582,7 @@ show_gum_menu() {
 show_traditional_menu() {
   # Display detected OS information - use /etc/os-release for EndeavourOS
   local detected_os=""
-  if [[ -f /etc/os-release ]] && grep -q 'ID="endeavouros"' /etc/os-release 2>/dev/null; then
+  if [[ -f /etc/os-release ]] && grep -q '^ID=?endeavouros"?$' /etc/os-release 2>/dev/null; then
     detected_os="EndeavourOS"
   elif [[ -f /etc/arch-release ]]; then
     detected_os="Arch Linux"
@@ -654,7 +657,10 @@ get_installed_kernel_types() {
   pacman -Q linux-lts &>/dev/null && kernel_types+=("linux-lts")
   pacman -Q linux-zen &>/dev/null && kernel_types+=("linux-zen")
   pacman -Q linux-hardened &>/dev/null && kernel_types+=("linux-hardened")
-  echo "${kernel_types[@]}"
+  if [ ${#kernel_types[@]} -eq 0 ]; then
+    return 0
+  fi
+  printf '%s\n' "${kernel_types[@]}"
 }
 
 # Function: install_packages_quietly
@@ -720,7 +726,10 @@ gum_confirm() {
                 gum style --foreground "$GUM_WARN" "$description"
             fi
 
-            if gum confirm --default=true --prompt.foreground "$GUM_PRIMARY" --selected.background "$GUM_PRIMARY" "$question"; then
+            # Read from /dev/tty explicitly — when step scripts run under
+            # dashboard_run, stdin may not be the keyboard, and gum would
+            # otherwise fail instantly (returning "no" silently).
+            if gum confirm --default=true --prompt.foreground "$GUM_PRIMARY" --selected.background "$GUM_PRIMARY" "$question" </dev/tty; then
                 exit 0
             else
                 exit 1
@@ -736,11 +745,12 @@ gum_confirm() {
             echo -e "${THEME_WARN}${description}${RESET}"
         fi
 
-        local response
-        while true; do
-            read -r -p "$(echo -e "${THEME_SECONDARY}${question} [Y/n]: ${RESET}")" response
-            response=${response,,} # tolower
-            case "$response" in
+        if [ -t 0 ]; then
+            local response
+            while true; do
+                read -r -p "$(echo -e "${THEME_SECONDARY}${question} [Y/n]: ${RESET}")" response || return 1
+                response=${response,,} # tolower
+                case "$response" in
                 ""|y|yes)
                     return 0 # Yes
                     ;;
@@ -751,7 +761,8 @@ gum_confirm() {
                     echo -e "\n${THEME_ERROR}Please answer Y (yes) or N (no).${RESET}\n"
                     ;;
             esac
-        done
+            done
+        fi
     fi
 }
 
@@ -832,7 +843,9 @@ prompt_reboot() {
 # ============================================================================
 preload_package_lists() {
   step "Preloading package lists for faster installation"
-  sudo pacman -Sy --noconfirm >>"$INSTALL_LOG" 2>&1
+  # Refresh DB and upgrade together — a bare -Sy followed by installs is a
+  # partial upgrade and can break dependency resolution on Arch
+  sudo pacman -Syu --noconfirm >>"$INSTALL_LOG" 2>&1
   if command -v yay >/dev/null; then
     yay -Sy --noconfirm >>"$INSTALL_LOG" 2>&1
   else
@@ -843,7 +856,8 @@ preload_package_lists() {
 # Optimized system update
 fast_system_update() {
   step "Performing optimized system update"
-  sudo pacman -Syu --noconfirm --overwrite="*"
+  # No --overwrite="*": blindly clobbering conflicting files can break the system
+  sudo pacman -Syu --noconfirm
   if command -v yay >/dev/null; then
     yay -Syu --noconfirm
   else
@@ -854,8 +868,8 @@ fast_system_update() {
 # Function to collect errors from custom scripts
 collect_custom_script_errors() {
   local script_name="$1"
-  local script_errors=("$@")
   shift
+  local script_errors=("$@")
   for error in "${script_errors[@]}"; do
     ERRORS+=("$script_name: $error")
   done

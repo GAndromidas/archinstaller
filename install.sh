@@ -107,14 +107,21 @@ source "$SCRIPTS_DIR/common.sh"
 source "$SCRIPTS_DIR/lib/dashboard.sh"
 
 # Install gum silently for enhanced UI experience
-if ! command -v gum >/dev/null 2>&1; then
-  log_to_file "Installing gum for enhanced UI experience..."
-  if sudo pacman -S --noconfirm gum >>"$INSTALL_LOG" 2>&1; then
-    log_to_file "Gum installed successfully"
-  else
-    log_to_file "Failed to install gum, falling back to basic UI"
+# (deferred until after sudo authentication below — see the sudo -v block)
+install_gum_if_missing() {
+  if ! command -v gum >/dev/null 2>&1; then
+    if ! command -v pacman >/dev/null 2>&1; then
+      log_to_file "pacman not found, cannot install gum — falling back to basic UI"
+      return 1
+    fi
+    log_to_file "Installing gum for enhanced UI experience..."
+    if sudo pacman -S --noconfirm --needed gum >>"$INSTALL_LOG" 2>&1; then
+      log_to_file "Gum installed successfully"
+    else
+      log_to_file "Failed to install gum, falling back to basic UI"
+    fi
   fi
-fi
+}
 
 # Initialize core library
 init_core
@@ -176,13 +183,17 @@ check_system_requirements() {
     hardware_issues+=("Legacy BIOS mode detected - some features may not work optimally")
   fi
 
-  if lspci | grep -qi vga; then
-    local gpu_vendor=$(lspci | grep -i vga | head -1 | awk '{print $1}' | cut -d: -f2)
-    case "$gpu_vendor" in
-      *"Intel"*) log_to_file "Intel GPU detected - mesa drivers will be configured" ;;
-      *"AMD"*)   log_to_file "AMD GPU detected - open-source drivers will be configured" ;;
-      *)         log_to_file "Unknown GPU detected - generic drivers will be used" ;;
-    esac
+  if command -v lspci >/dev/null 2>&1 && lspci | grep -qi vga; then
+    # Match on the descriptive text of the VGA line, not the PCI address field
+    if lspci | grep -i vga | grep -qiE 'intel'; then
+      log_to_file "Intel GPU detected - mesa drivers will be configured"
+    elif lspci | grep -i vga | grep -qiE 'amd|ati|radeon'; then
+      log_to_file "AMD GPU detected - open-source drivers will be configured"
+    elif lspci | grep -i vga | grep -qiE 'nvidia'; then
+      log_to_file "NVIDIA GPU detected - proprietary or nouveau drivers may be configured"
+    else
+      log_to_file "Unknown GPU detected - generic drivers will be used"
+    fi
   else
     hardware_issues+=("No GPU detected - this may be a headless system")
   fi
@@ -223,7 +234,8 @@ check_system_requirements() {
   log_to_file "System requirements and hardware compatibility checks passed"
 }
 
-# Run system checks — stdout goes to log, interactive prompts use /dev/tty
+# Run system checks. UI helpers write to /dev/tty so interactive prompts stay
+# visible even with stdout redirected to the log.
 check_system_requirements >> "$INSTALL_LOG" 2>&1
 
 show_menu
@@ -317,14 +329,14 @@ show_resume_menu() {
       echo ""
       
       if [ "$has_failures" = true ]; then
-        if gum confirm --default=true "Found failed steps. Retry failed steps first?"; then
+        if gum_confirm "Found failed steps. Retry failed steps first?"; then
           ui_info "Will retry failed steps during installation"
           return 0
-        elif gum confirm --default=false "Resume from last completed step?"; then
+        elif gum_confirm "Resume from last completed step?"; then
           ui_success "Resuming installation from last completed step..."
           return 0
         else
-          if gum confirm --default=false "Start fresh installation (this will clear previous progress)?"; then
+          if gum_confirm "Start fresh installation?" "This will clear previous progress."; then
             rm -f "$STATE_FILE" 2>/dev/null || true
             ui_info "Starting fresh installation..."
             return 0
@@ -334,11 +346,11 @@ show_resume_menu() {
           fi
         fi
       else
-        if gum confirm --default=true "Resume installation from where you left off?"; then
+        if gum_confirm "Resume installation from where you left off?"; then
           ui_success "Resuming installation..."
           return 0
         else
-          if gum confirm --default=false "Start fresh installation (this will clear previous progress)?"; then
+          if gum_confirm "Start fresh installation?" "This will clear previous progress."; then
             rm -f "$STATE_FILE" 2>/dev/null || true
             ui_info "Starting fresh installation..."
             return 0
@@ -374,7 +386,7 @@ show_resume_menu() {
         echo "3. Start fresh installation"
         echo "4. Cancel"
         echo ""
-        read -p "Choose an option (1-4): " choice
+        read -r -p "Choose an option (1-4): " choice || choice="4"
         
         case "$choice" in
           1)
@@ -400,15 +412,11 @@ show_resume_menu() {
             ;;
         esac
       else
-        echo "Resume installation from where you left off? (y/n)"
-        read -r response
-        if [[ "$response" =~ ^[Yy]$ ]]; then
+        if gum_confirm "Resume installation from where you left off?"; then
           ui_success "Resuming installation..."
           return 0
         else
-          echo "Start fresh installation? (y/n)"
-          read -r fresh_response
-          if [[ "$fresh_response" =~ ^[Yy]$ ]]; then
+          if gum_confirm "Start fresh installation?" "This will clear previous progress."; then
             rm -f "$STATE_FILE" 2>/dev/null || true
             ui_info "Starting fresh installation..."
             return 0
@@ -441,6 +449,8 @@ fi
 if [ "$DRY_RUN" = false ]; then
   ui_info "Please enter your sudo password to begin the installation:"
   sudo -v || { ui_error "Sudo required. Exiting."; exit 1; }
+  # Now that sudo is authenticated, install gum if missing
+  install_gum_if_missing
 else
   ui_info "Dry-run mode: Skipping sudo authentication"
 fi
@@ -449,10 +459,13 @@ fi
 if [ "$DRY_RUN" = false ]; then
   while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
   SUDO_KEEPALIVE_PID=$!
-  # Enhanced trap with error handling
-  trap 'cleanup_on_error $? $LINENO; save_log_on_exit' EXIT INT TERM ERR
+  # Enhanced trap with error handling.
+  # NOTE: no ERR trap — without `set -e` it fires on every handled failure
+  # (grep no-match, arithmetic, etc.) and corrupts resume state with bogus
+  # FAILED entries. EXIT/INT/TERM are sufficient.
+  trap 'cleanup_on_error $? $LINENO; save_log_on_exit' EXIT INT TERM
 else
-  trap 'cleanup_on_error $? $LINENO; save_log_on_exit' EXIT INT TERM ERR
+  trap 'cleanup_on_error $? $LINENO; save_log_on_exit' EXIT INT TERM
 fi
 
 # Function to mark step as completed with atomic append

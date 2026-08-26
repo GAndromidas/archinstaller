@@ -15,13 +15,21 @@ cleanup_and_optimize() {
   else
     log_warning "lsblk not available. Skipping SSD optimization."
   fi
-  run_step "Cleaning /tmp directory" sudo find /tmp -mindepth 1 -maxdepth 1 ! -path '/tmp/systemd-*' ! -path '/tmp/.X*' ! -path '/tmp/pulse-*' -exec rm -rf {} + 2>/dev/null || true
+  # Age-safe /tmp cleanup: keep live session sockets intact (X11, Wayland,
+  # ICE, dbus, pulse) by only removing files older than 2 days.
+  run_step "Cleaning old files from /tmp" sudo find /tmp -mindepth 1 -maxdepth 1 -mtime +2 -exec rm -rf {} + 2>/dev/null || true
   run_step "Syncing disk writes" sync
 }
 
 setup_maintenance() {
   step "Performing comprehensive system cleanup"
-  run_step "Cleaning pacman cache" sudo pacman -Sc --noconfirm
+  # paccache keeps the last 2 versions (incl. current) — pacman -Sc purges
+  # everything except the installed version, leaving no rollback option
+  if command -v paccache >/dev/null 2>&1; then
+    run_step "Cleaning pacman cache (keep 2 versions)" sudo paccache -rk2
+  else
+    run_step "Cleaning pacman cache" sudo pacman -Sc --noconfirm
+  fi
   run_step "Cleaning yay cache" yay -Sc --noconfirm
 
   # Flatpak cleanup - remove unused packages and runtimes

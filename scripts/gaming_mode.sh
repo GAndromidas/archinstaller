@@ -146,7 +146,10 @@ main() {
 	fi
 
 	# Crucial: Ensure multilib is actually working before attempting to install steam/wine
-	check_and_enable_multilib
+	if ! check_and_enable_multilib; then
+		ui_error "Multilib setup failed — steam/wine installation will likely fail"
+		return 1
+	fi
 
 
 	install_pacman_packages

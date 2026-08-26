@@ -98,7 +98,7 @@ handle_de_packages() {
 	fi
 
 	local de
-	de=$(echo "$XDG_CURRENT_DESKTOP" | tr '[:upper:]' '[:lower:]')
+	de=$(echo "${XDG_CURRENT_DESKTOP:-}" | tr '[:upper:]' '[:lower:]')
 
 	case "$de" in
 	kde)
@@ -131,7 +131,7 @@ handle_flatpak_packages() {
 	fi
 
 	local de
-	de=$(echo "$XDG_CURRENT_DESKTOP" | tr '[:upper:]' '[:lower:]')
+	de=$(echo "${XDG_CURRENT_DESKTOP:-}" | tr '[:upper:]' '[:lower:]')
 	[[ -z "$de" ]] && de="generic"
 
 	local de_flatpaks=()

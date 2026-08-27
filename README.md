@@ -46,6 +46,7 @@ CPU Detection:
 GPU Detection:
   AMD: Open-source drivers + Vulkan
   Intel: Integrated graphics + VA-API
+  NVIDIA: GPU detection with driver configuration
   
 Storage Optimization:
   NVMe: none scheduler + trim optimizations
@@ -80,7 +81,8 @@ Laptop Features:
 #### Performance Optimization
 - **I/O Scheduling**: Automatic selection based on storage type (NVMe: none, SSD: mq-deadline, HDD: bfq)
 - **Memory Management**: Dynamic swappiness based on total RAM
-- **Parallel Downloads**: Pacman parallel package fetching (10 concurrent)
+- **Parallel Downloads**: Dynamic ParallelDownloads based on available RAM (4-16 concurrent)
+- **Package Management**: Single pacman sync, batch Flatpak installs, yay BatchInstall
 
 ### Desktop Environment Integration
 | Environment | Optimizations | Features |
@@ -104,7 +106,7 @@ UFW/Firewalld:
 Fail2ban:
   - 1-hour ban duration (increased from default 10min)
   - 3 retry limit (decreased from default 5)
-  - systemd backend for better integration
+  - Auto-detects ufw or firewalld backend for proper integration
   - Automatic brute-force detection
 
 # User Security
@@ -121,9 +123,10 @@ The system services step includes comprehensive service management:
 | Service Type | Services Enabled | Notes |
 |--------------|------------------|-------|
 | **Essential** | cronie, sshd, fstrim.timer, paccache.timer | All modes |
-| **Desktop** | bluetooth.service | Standard/Minimal/Gaming (not Server) |
+| **Desktop** | bluetooth.service | Standard/Minimal (not Server) |
 | **Optional** | rustdesk.service, timeshift-autosnap.timer | If installed |
-| **Firewall** | UFW or Firewalld | UFW for Arch, Firewalld for EndeavourOS |
+| **Firewall** | UFW or Firewalld | Auto-detected; fail2ban configures backend accordingly |
+| **Server** | systemd-timesyncd | Server mode only |
 | **GPU Drivers** | AMD/Intel with Vulkan | Auto-detected and installed |
 
 ### Gaming Mode (Optional)
@@ -166,8 +169,9 @@ Choose the perfect setup for your use case:
 |------|-------------|-------------|
 | **Standard** | Full-featured desktop | General users, enthusiasts |
 | **Minimal** | Lightweight essentials | Low-spec hardware, minimal bloat |
-| **Server** | Headless configuration | Docker, SSH, server utilities |
-| **Gaming** | Gaming-optimized | Steam, Heroic Games Launcher, Faugus Launcher, performance tools |
+| **Server** | Headless configuration | Docker, Docker Compose, sysctl tuning, no Portainer/Watchtower |
+
+**Gaming Mode** is offered as an optional add-on during Standard or Minimal installation.
 
 ---
 
@@ -201,6 +205,34 @@ OPTIONS:
   -v, --verbose   Enable detailed output
   -q, --quiet     Minimal output mode
   -d, --dry-run   Preview changes only
+  --server        Configure as server (Docker, sysctl tuning, no Portainer/Watchtower)
+```
+
+### Server Mode Configuration
+
+When running with `--server`, the installer configures:
+
+```yaml
+Docker Hardening:
+  - Log rotation: 10MB max, 3 files
+  - Live-restore: enabled
+  - No-new-privileges: enabled
+  - Userland proxy: disabled
+  - Iptables: enabled
+
+Sysctl Tuning:
+  - TCP keepalive: 60s interval, 6 probes
+  - File descriptors: 65536 max
+  - TCP reuse: enabled
+  - TCP fin timeout: 15s
+  - Buffer sizes: optimized for throughput
+
+Time Synchronization:
+  - systemd-timesyncd enabled
+
+Packages:
+  - Docker + Docker Compose (no Portainer/Watchtower)
+  - htop, tmux, rsync, base-devel
 ```
 
 ---
@@ -248,18 +280,17 @@ flatpak:         # Flatpak applications
 - Development essentials (base-devel, git, curl)
 - Zsh shell with Oh-My-Zsh, Starship prompt, Fastfetch
 - System monitoring tools (btop, inxi, hwinfo)
-- Pacman optimization (ParallelDownloads, Color, VerbosePkgLists, ILoveCandy, multilib)
+- Pacman optimization (Dynamic ParallelDownloads based on RAM, Color, VerbosePkgLists, ILoveCandy, multilib)
 - CPU microcode (intel-ucode or amd-ucode)
 - Kernel headers for all installed kernels
 - Locale generation (en_US.UTF-8 + auto-detected country locale)
-
 ### Mode-Specific Packages
+
 | Mode | Desktop | Applications | Tools |
 |------|-------------|-------------|------|
 | **Standard** | Full DE (KDE/GNOME/Cosmic) | Filezilla, Kdenlive, LibreOffice, Dropbox, RustDesk, Ventoy | Performance monitoring |
 | **Minimal** | Lightweight DE | MPV, RustDesk | Basic utilities |
-| **Server** | No DE | Docker, Docker Compose, Nano | Server utilities (btop, inxi, nmap, samba) |
-| **Gaming** | Gaming-optimized DE | Steam, Heroic Games Launcher, Faugus Launcher, Wine, Discord | GameMode, MangoHud, Goverlay |
+| **Server** | No DE | Docker + Docker Compose only | Server utilities (btop, inxi, nmap, samba, htop, tmux, rsync, base-devel) |
 
 ### Installation Steps
 
@@ -271,25 +302,24 @@ The installer includes 10 comprehensive steps for complete system setup:
 | **2. Shell Setup** | Zsh + Oh-My-Zsh + Starship + Fastfetch | All modes |
 | **3. Yay Installation** | AUR helper setup | All modes |
 | **4. Programs Installation** | Mode-specific applications from YAML configs | All modes |
-| **5. Gaming Mode** | Steam, Wine, GameMode, MangoHud, Discord, gaming launchers | Gaming mode only |
+| **5. Gaming Mode** | Steam, Wine, GameMode, MangoHud, Discord, gaming launchers | Optional (Standard/Minimal) |
 | **6. Bootloader Configuration** | Kernel params, GRUB/systemd-boot/Limine config | Standard/Minimal/Gaming |
-| **7. Fail2ban Setup** | SSH security hardening (1hr ban, 3 retries) | All modes |
-| **8. System Services** | Firewall (UFW/Firewalld), user groups, GPU drivers, power management | All modes |
-| **9. Wake-on-LAN Configuration** | Multi-adapter WoL setup with laptop detection | Desktop systems |
-| **10. Maintenance** | Cache cleanup, orphan removal, SSD optimization | All modes |
+| **7. System Services** | Firewall (UFW/Firewalld), user groups, GPU drivers, power management | All modes |
+| **8. Fail2ban Setup** | SSH security hardening (1hr ban, 3 retries, auto-detects firewall backend) | All modes |
+| **9. Wake-on-LAN Configuration** | Multi-adapter WoL setup with laptop detection | Desktop systems only (skipped in server mode) |
+| **10. Maintenance** | Cache cleanup (paccache), orphan removal, SSD optimization | All modes |
 
 ---
 
 ## Security Features
 
 ### Enabled by Default
-```bash
 
 | Feature | Status | Configuration |
 |---------|--------|---------------|
 | **Firewall** | Active | UFW (Arch) or Firewalld (EndeavourOS) with secure policies |
-| **SSH Protection** | Active | Fail2ban with 1hr ban, 3 retries, systemd backend |
-| **Wake-on-LAN** | Desktop Only | Multi-adapter with smart selection, laptop detection |
+| **SSH Protection** | Active | Fail2ban with 1hr ban, 3 retries, auto-detects ufw/firewalld backend |
+| **Wake-on-LAN** | Desktop Only | Skipped in server mode; multi-adapter with smart selection, laptop detection |
 | **User Groups** | Active | wheel, video, storage, optical, scanner, lp, rfkill |
 | **Bootloader** | Active | GRUB/systemd-boot/Limine with kernel optimization |
 | **Sudo** | Active | Password feedback enabled |
@@ -303,7 +333,7 @@ The installer includes 10 comprehensive steps for complete system setup:
 | Component | Support | Notes |
 |-----------|---------|-------|
 | **CPU** | Intel, AMD | Microcode + optimizations |
-| **GPU** | AMD, Intel | Driver auto-detection |
+| **GPU** | AMD, Intel, NVIDIA | Driver auto-detection |
 | **Storage** | NVMe, SSD, HDD | I/O scheduler optimization |
 | **Form Factor** | Desktop, Laptop, VM | Power management + thermal |
 | **Laptop Brands** | 15+ Manufacturers | Brand-specific optimizations |
@@ -351,17 +381,19 @@ The installer includes automatic laptop detection and optimizations:
 
 | Issue | Solution |
 |-------|----------|
-| **Installation Interrupted** | Resume from `~/.archinstaller.state` |
+| **Installation Interrupted** | Resume from `/tmp/archinstaller.state` |
 | **No Internet Connection** | Check `ping archlinux.org` |
 | **Insufficient Disk Space** | Minimum 2GB free required |
-| **Package Installation Failures** | Check `~/.archinstaller.log` |
+| **Package Installation Failures** | Check `/tmp/archinstaller.log` |
 
 ### Log Files
 
 ```bash
-~/.archinstaller.log     # Complete installation log
-~/.archinstaller.state   # Progress tracking
+/tmp/archinstaller.log     # Complete installation log
+/tmp/archinstaller.state   # Progress tracking
 ```
+
+> **Note:** Log files are stored in `/tmp` and are automatically cleaned up on reboot. Manual cleanup is available via the post-install prompt.
 
 ---
 
@@ -390,22 +422,35 @@ The installer includes automatic laptop detection and optimizations:
 |-----------|--------|
 | **Core Functionality** | Production Ready |
 | **Hardware Detection** | Stable |
-| **Smart AMD P-State** | ✅ Implemented |
-| **Advanced Optimizations** | ✅ CachyOS-Inspired |
+| **Smart AMD P-State** | Implemented |
+| **Advanced Optimizations** | CachyOS-Inspired |
+| **Dashboard UI** | Professional Wizard-Style |
 | **Gaming Mode** | Tested |
+| **Server Mode** | Production Ready |
 | **Security Hardening** | Active |
+| **Comprehensive Logging** | All output captured |
 | **Documentation** | Complete |
 
 ### Recent Major Improvements
 
-#### Comprehensive System Configuration
-- **🚀 Complete Package Management**: YAML-based configuration for all modes and desktop environments
-- **🎮 Gaming Mode**: Steam, Wine, GameMode, MangoHud, Discord with Flatpak integration
-- **🛡️ Enhanced Security**: Fail2ban with 1hr ban, 3 retries, systemd backend
-- **� Service Management**: Automatic firewall (UFW/Firewalld), user groups, GPU drivers
-- **� Laptop Detection**: Automatic laptop detection with power management optimizations
-- **🌐 Wake-on-LAN**: Multi-adapter support with smart selection and laptop detection
-- **🎨 Desktop Integration**: DE-specific packages for KDE Plasma 6+, GNOME 46+, Cosmic
+#### Performance & Reliability
+- **Speed Optimizations**: Single pacman sync, dynamic ParallelDownloads based on RAM, batch Flatpak installs, yay BatchInstall, Flathub added once
+- **Dashboard UI**: Professional wizard-style display with step timers, progress bars, and elapsed time
+- **Resume Support**: Automatic detection of interrupted installations with state tracking
+- **Smart Caching**: Cached `supports_gum()` check, removed unnecessary sleeps
+
+#### Server Mode Enhancements
+- **CLI Flag**: `--server` flag for headless configuration
+- **Docker Hardening**: daemon.json with log rotation, live-restore, no-new-privileges, disable userland-proxy
+- **Sysctl Tuning**: TCP keepalive, file descriptors, buffer sizes, connection reuse for servers
+- **Time Synchronization**: systemd-timesyncd enabled for server time sync
+- **Package Cleanup**: Removed Portainer/Watchtower; only Docker + Docker Compose
+
+#### Security & Bug Fixes
+- **Fail2ban**: Auto-detects ufw or firewalld backend for proper integration
+- **15 Bug Fixes**: Server mode exit 0, mirrorlist URL, background mirror race, NVIDIA GPU detection, printf ANSI escapes, and more
+- **Timer Fixes**: Negative elapsed time clamped, accurate wall time tracking
+- **Comprehensive Logging**: All `ui_*` functions now log to file; log and state files moved to `/tmp` for auto-cleanup
 
 ---
 

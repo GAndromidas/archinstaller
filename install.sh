@@ -560,7 +560,9 @@ save_log_on_exit() {
       echo "Check the log above for details."
     else
       echo "Installation completed successfully!"
-      echo "Total installation time: $(($(date +%s) - START_TIME)) seconds"
+      local elapsed=$(( $(date +%s) - START_TIME ))
+      (( elapsed < 0 )) && elapsed=0
+      echo "Total installation time: ${elapsed} seconds"
     fi
   } >> "$INSTALL_LOG"
 }

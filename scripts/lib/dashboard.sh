@@ -20,7 +20,6 @@ DASHBOARD_ROW_OFFSET=0
 
 dashboard_init() {
     clear
-    DASHBOARD_START_TIME=$(date +%s)
     DASHBOARD_STEP_START=0
     DASHBOARD_STEP_TIMES=()
     DASHBOARD_STEP_NAMES=()
@@ -87,6 +86,9 @@ dashboard_init() {
     # Bottom border
     echo -e "${THEME_BORDER}  └$(printf '─%.0s' $(seq 1 $w))┘${RESET}"
     DASHBOARD_FRAME_END=$row
+
+    # Start timer AFTER frame is drawn so init overhead isn't counted
+    DASHBOARD_START_TIME=$(date +%s)
 
     tput cup $((DASHBOARD_ROW_OFFSET + DASHBOARD_FRAME_END + 1)) 0
 }
@@ -244,6 +246,7 @@ dashboard_finish() {
     done
 
     local wall_time=$(( $(date +%s) - DASHBOARD_START_TIME ))
+    (( wall_time < 0 )) && wall_time=0
     local cols
     cols=$(tput cols 2>/dev/null || echo 80)
     local w=$((cols - 4))

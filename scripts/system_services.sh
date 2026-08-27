@@ -103,8 +103,8 @@ configure_user_groups() {
 }
 
 enable_services() {
-  # For server mode, we enable only a minimal set of services and then exit this script
-  # to prevent any desktop-specific logic (like display manager setup) from running.
+  # Server mode enables a minimal set of services, desktop mode adds extras.
+  # Both paths continue to shared optimizations (memory, filesystem, storage, audio, kernel).
   if [[ "$INSTALL_MODE" == "server" ]]; then
     ui_info "Server mode: Enabling only essential services (cronie, sshd, etc.)."
     local services=(
@@ -117,25 +117,15 @@ enable_services() {
     for svc in "${services[@]}"; do
       echo -e "  - $svc"
     done
-    # Enable each service individually with proper error handling
-    local enable_success=true
-    for svc in "${services[@]}"; do
-      if ! sudo systemctl enable --now "$svc" >>"$INSTALL_LOG" 2>&1; then
-        log_error "Failed to enable $svc service"
-        enable_success=false
-      else
-        log_success "Enabled $svc service"
-      fi
-    done
-    
-    if [[ "$enable_success" == true ]]; then
+    # Enable all services in a single systemctl call (faster than one-by-one)
+    if sudo systemctl enable --now "${services[@]}" >>"$INSTALL_LOG" 2>&1; then
       log_success "All essential services enabled successfully."
     else
       log_error "Some services failed to enable"
     fi
     
-    exit 0
-  fi
+    # Continue to shared optimizations (memory, filesystem, storage, audio, kernel)
+  else
 
   local services=(
     bluetooth.service
@@ -191,18 +181,8 @@ enable_services() {
   for svc in "${services[@]}"; do
     echo -e "  - $svc"
   done
-  # Enable each service individually with proper error handling
-  local enable_success=true
-  for svc in "${services[@]}"; do
-    if ! sudo systemctl enable --now "$svc" >>"$INSTALL_LOG" 2>&1; then
-      log_error "Failed to enable $svc service"
-      enable_success=false
-    else
-      log_success "Enabled $svc service"
-    fi
-  done
-  
-  if [[ "$enable_success" == true ]]; then
+  # Enable all services in a single systemctl call (faster than one-by-one)
+  if sudo systemctl enable --now "${services[@]}" >>"$INSTALL_LOG" 2>&1; then
     log_success "All essential services enabled successfully."
   else
     log_error "Some services failed to enable"
@@ -227,37 +207,7 @@ enable_services() {
   else
     log_warning "Some services may need attention: ${failed_services[*]}"
   fi
-}
-
-# Function to get total RAM in GB (rounded to common consumer sizes)
-# Accounts for kernel memory reservation (e.g., 32GB shows as ~31GB, 8GB as ~7.5GB, etc.)
-# Only returns: 2GB, 4GB, 8GB, 16GB, or 32GB
-get_ram_gb() {
-  local ram_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-
-  # Convert to MB for better precision
-  local ram_mb=$((ram_kb / 1024))
-
-  # Calculate actual GB with decimal precision
-  local ram_gb_precise=$(echo "scale=2; $ram_mb / 1024" | bc -l)
-
-  # Round to common consumer RAM sizes: 2GB, 4GB, 8GB, 16GB, 32GB+
-  local rounded_gb
-
-  if (( $(echo "$ram_gb_precise < 3" | bc -l) )); then
-    rounded_gb=2
-  elif (( $(echo "$ram_gb_precise < 6" | bc -l) )); then
-    rounded_gb=4
-  elif (( $(echo "$ram_gb_precise < 12" | bc -l) )); then
-    rounded_gb=8
-  elif (( $(echo "$ram_gb_precise < 24" | bc -l) )); then
-    rounded_gb=16
-  else
-    # Anything 24GB+ is treated as 32GB
-    rounded_gb=32
   fi
-
-  echo $rounded_gb
 }
 
 detect_and_install_gpu_drivers() {
@@ -271,13 +221,23 @@ detect_and_install_gpu_drivers() {
     install_packages_quietly xf86-video-amdgpu vulkan-radeon lib32-vulkan-radeon
     log_success "AMD drivers and Vulkan support installed"
     log_info "AMD GPU will use AMDGPU driver after reboot"
+  elif lspci | grep -Eiq 'vga.*nvidia|3d.*nvidia|display.*nvidia'; then
+    echo -e "${THEME_TEXT}NVIDIA GPU detected. Installing NVIDIA drivers and Vulkan support...${RESET}"
+    # Determine correct NVIDIA package set based on installed kernels
+    local nvidia_packages=(nvidia-dkms nvidia-utils lib32-nvidia-utils vulkan-icd-loader lib32-vulkan-icd-loader)
+    # Add nvidia-settings for GUI configuration
+    nvidia_packages+=(nvidia-settings)
+    install_packages_quietly "${nvidia_packages[@]}"
+    log_success "NVIDIA drivers and Vulkan support installed"
+    log_info "NVIDIA GPU will use proprietary driver after reboot"
+    log_info "Ensure 'nvidia-dkms' is in your mkinitcpio MODULES array if using custom kernel"
   elif lspci | grep -Eiq 'vga.*intel|3d.*intel|display.*intel'; then
     echo -e "${THEME_TEXT}Intel GPU detected. Installing Intel drivers and Vulkan support...${RESET}"
     install_packages_quietly vulkan-intel lib32-vulkan-intel
     log_success "Intel drivers and Vulkan support installed"
     log_info "Intel GPU will use i915 or xe driver after reboot"
   else
-    echo -e "${THEME_WARN}No AMD or Intel GPU detected. Using basic Mesa drivers already installed.${RESET}"
+    echo -e "${THEME_WARN}No AMD, Intel, or NVIDIA GPU detected. Using basic Mesa drivers already installed.${RESET}"
   fi
 
   # Verify GPU driver is loaded
@@ -310,37 +270,9 @@ verify_gpu_driver() {
   fi
 }
 
-# Function to detect if system is a laptop
-is_laptop() {
-  # Check multiple indicators for laptop detection
-  if [ -d /sys/class/power_supply/BAT0 ] || [ -d /sys/class/power_supply/BAT1 ]; then
-    return 0
-  fi
-  if command -v dmidecode >/dev/null 2>&1; then
-    if sudo dmidecode -s chassis-type | grep -qiE 'Notebook|Laptop|Portable'; then
-      return 0
-    fi
-  fi
-  if [ -f /sys/class/dmi/id/chassis_type ]; then
-    local chassis_type=$(cat /sys/class/dmi/id/chassis_type)
-    # 8=Portable, 9=Laptop, 10=Notebook, 14=Sub Notebook
-    if [[ "$chassis_type" =~ ^(8|9|10|14)$ ]]; then
-      return 0
-    fi
-  fi
-  return 1
-}
+# NOTE: is_laptop() uses the cached version from system.sh (sourced via common.sh)
 
-# Function to detect CPU vendor
-detect_cpu_vendor() {
-  if grep -qi "GenuineIntel" /proc/cpuinfo; then
-    echo "intel"
-  elif grep -qi "AuthenticAMD" /proc/cpuinfo; then
-    echo "amd"
-  else
-    echo "unknown"
-  fi
-}
+# NOTE: detect_cpu_vendor() uses the cached version from system.sh (sourced via common.sh)
 
 # Function to install ACPI with smart compatibility handling
 install_smart_acpi() {
@@ -1607,11 +1539,14 @@ setup_advanced_optimizations() {
   log_info "Applying kernel parameter optimizations..."
   
   # Network optimizations
-  echo "net.core.default_qdisc=fq_codel" | sudo tee -a /etc/sysctl.d/99-archinstaller.conf >/dev/null
-  echo "net.ipv4.tcp_congestion_control=bbr" | sudo tee -a /etc/sysctl.d/99-archinstaller.conf >/dev/null
-
-  echo "vm.swappiness=10" | sudo tee -a /etc/sysctl.d/99-archinstaller.conf >/dev/null
-  echo "vm.vfs_cache_pressure=50" | sudo tee -a /etc/sysctl.d/99-archinstaller.conf >/dev/null
+  {
+    echo "# Advanced network and memory optimizations generated by archinstaller"
+    echo "net.core.default_qdisc=fq_codel"
+    echo "net.ipv4.tcp_congestion_control=bbr"
+    echo ""
+    echo "# Reduce vfs cache pressure (complements swappiness from 99-swappiness.conf)"
+    echo "vm.vfs_cache_pressure=50"
+  } | sudo tee /etc/sysctl.d/99-archinstaller.conf >/dev/null
 
   sudo sysctl --system >>"$INSTALL_LOG" 2>&1
   
@@ -1665,4 +1600,5 @@ detect_filesystem_type
 detect_storage_type
 detect_audio_system
 detect_kernel_type
+setup_advanced_optimizations
 setup_laptop_optimizations

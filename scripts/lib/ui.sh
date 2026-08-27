@@ -47,9 +47,17 @@ __print_thick_border_line() {
     echo -e "${THEME_BORDER}#${RESET} ${content}$(printf '%*s' $pad '') ${THEME_BORDER}#${RESET}"
 }
 
-# Check if gum is available
+# Check if gum is available (cached after first call)
+__supports_gum_cache=""
 supports_gum() {
-    command -v gum &>/dev/null
+    if [ -z "$__supports_gum_cache" ]; then
+        if command -v gum &>/dev/null; then
+            __supports_gum_cache="true"
+        else
+            __supports_gum_cache="false"
+        fi
+    fi
+    [ "$__supports_gum_cache" = "true" ]
 }
 
 # Unified menu function with arrow navigation

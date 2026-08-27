@@ -7,10 +7,47 @@ source "$SCRIPT_DIR/common.sh"
 
 # Function to detect network speed and optimize downloads
 detect_network_speed() {
-  step "Configuring download settings"
+  step "Detecting network speed and optimizing download settings"
 
-  log_info "Setting ParallelDownloads to 10 (standard setting)"
-  export PACMAN_PARALLEL=10
+  # Test download speed using a small 1MB file from Arch mirrors
+  local speed_bytes=0
+  if command -v curl >/dev/null; then
+    speed_bytes=$(curl -s -o /dev/null -w "%{speed_bytes}" \
+      --connect-timeout 5 --max-time 10 \
+      "https://geo.mirror.pkgbuild.com/core/os/x86_64/core.db" 2>/dev/null || echo "0")
+  fi
+
+  # Convert to MB/s
+  local speed_mbps=0
+  if [ "$speed_bytes" -gt 0 ] 2>/dev/null; then
+    speed_mbps=$((speed_bytes / 1024 / 1024))
+  fi
+
+  # Set ParallelDownloads based on speed tier
+  local parallel_downloads
+  if [ "$speed_mbps" -ge 50 ]; then
+    # Very fast connection (50+ MB/s): max parallel downloads
+    parallel_downloads=20
+    log_success "Network: Very fast (${speed_mbps} MB/s) - ParallelDownloads = $parallel_downloads"
+  elif [ "$speed_mbps" -ge 20 ]; then
+    # Fast connection (20-50 MB/s)
+    parallel_downloads=15
+    log_success "Network: Fast (${speed_mbps} MB/s) - ParallelDownloads = $parallel_downloads"
+  elif [ "$speed_mbps" -ge 5 ]; then
+    # Moderate connection (5-20 MB/s)
+    parallel_downloads=10
+    log_success "Network: Moderate (${speed_mbps} MB/s) - ParallelDownloads = $parallel_downloads"
+  elif [ "$speed_mbps" -ge 1 ]; then
+    # Slow connection (1-5 MB/s)
+    parallel_downloads=5
+    log_warning "Network: Slow (${speed_mbps} MB/s) - ParallelDownloads = $parallel_downloads"
+  else
+    # Very slow or speed test failed
+    parallel_downloads=5
+    log_warning "Network: Speed unknown or very slow - ParallelDownloads = $parallel_downloads (safe default)"
+  fi
+
+  export PACMAN_PARALLEL="$parallel_downloads"
 }
 
 check_prerequisites() {
@@ -102,14 +139,14 @@ install_all_packages() {
   step "Installing all packages"
   echo -e "${THEME_TEXT}Installing ${#packages_to_install[@]} helper utilities + ${#all_packages[@]} total packages via Pacman...${RESET}"
 
-  printf "${THEME_TEXT}Attempting batch installation...${RESET}\n"
+  printf '%b' "${THEME_TEXT}Attempting batch installation...${RESET}\n"
   if sudo pacman -S --noconfirm --needed "${all_packages[@]}" >>"$INSTALL_LOG" 2>&1; then
-    printf "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
+    printf '%b' "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
     INSTALLED_PACKAGES+=("${all_packages[@]}")
     return 0
   fi
 
-  printf "${THEME_WARN} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
+  printf '%b' "${THEME_WARN} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
 
   if [ ${#all_packages[@]} -eq 0 ]; then
     log_warning "No packages to install individually"
@@ -149,7 +186,7 @@ install_all_packages() {
 }
 
 update_system() {
-  run_step "System update" sudo pacman -Syyu --noconfirm
+  run_step "System update" sudo pacman -Syu --noconfirm
 }
 
 set_sudo_pwfeedback() {
@@ -209,14 +246,14 @@ install_kernel_headers_for_all() {
   done
 
   # Try batch install first
-  printf "${THEME_TEXT}Attempting batch installation for headers...${RESET}\n"
+  printf '%b' "${THEME_TEXT}Attempting batch installation for headers...${RESET}\n"
   if sudo pacman -S --noconfirm --needed "${header_packages[@]}" >>"$INSTALL_LOG" 2>&1; then
-    printf "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
+    printf '%b' "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
     INSTALLED_PACKAGES+=("${header_packages[@]}")
     return 0
   fi
 
-  printf "${THEME_WARN} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
+  printf '%b' "${THEME_WARN} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
 
   for kernel in "${kernel_types[@]}"; do
     local headers_package="${kernel}-headers"
@@ -279,16 +316,32 @@ generate_locales() {
   run_step "Regenerating locales" sudo locale-gen
 }
 
-# Execute system preparation
+# Execute system preparation — optimized order:
+# 1. Prerequisites + network speed detection
+# 2. Configure pacman (ParallelDownloads, multilib, color)
+# 3. Update mirrors FIRST so all subsequent downloads are fast
+# 4. Sync databases once (after mirror update)
+# 5. Full system update (single -y, not -yy)
+# 6. Install packages (benefits from fast mirrors + parallel downloads)
+# 7. Remaining setup tasks
 check_prerequisites
-detect_network_speed  # This now installs speedtest-cli silently before testing
+detect_network_speed
 configure_pacman
-install_all_packages
-update_system_mirrors  # Update mirrors BEFORE system update
+update_system_mirrors
+run_step "Syncing package databases" sudo pacman -Syy
 update_system
+install_all_packages
 set_sudo_pwfeedback
 install_cpu_microcode
 install_kernel_headers_for_all
 
+# Add Flathub remote once upfront (used by programs.sh and gaming_mode.sh later)
+if command -v flatpak >/dev/null 2>&1; then
+  if ! sudo flatpak remote-list --system 2>/dev/null | grep -q flathub; then
+    step "Adding Flathub remote"
+    sudo flatpak remote-add --if-not-exists --system flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+    log_success "Flathub remote added"
+  fi
+fi
 
 generate_locales

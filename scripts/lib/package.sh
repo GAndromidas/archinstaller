@@ -29,16 +29,16 @@ pacman_install_single() {
     local verbose="${2:-false}"
 
     if [ "$verbose" = true ]; then
-        printf "${THEME_TEXT}Installing Pacman package:${RESET} %-30s" "$pkg"
+        printf '%b' "${THEME_TEXT}Installing Pacman package:${RESET} %-30s" "$pkg"
     fi
 
     local output
     if output=$(sudo pacman -S --noconfirm --needed "$pkg" 2>&1); then
-        [ "$verbose" = true ] && printf "${THEME_SUCCESS} ✓ Success${RESET}\n"
+        [ "$verbose" = true ] && printf '%b' "${THEME_SUCCESS} ✓ Success${RESET}\n"
         INSTALLED_PACKAGES+=("$pkg")
         return 0
     else
-        [ "$verbose" = true ] && printf "${THEME_ERROR} ✗ Failed${RESET}\n"
+        [ "$verbose" = true ] && printf '%b' "${THEME_ERROR} ✗ Failed${RESET}\n"
         if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
             echo "$output" | sed 's/^/    /'
         fi
@@ -60,16 +60,16 @@ yay_install_single() {
     fi
 
     if [ "$verbose" = true ]; then
-        printf "${THEME_TEXT}Installing AUR package:${RESET} %-30s" "$pkg"
+        printf '%b' "${THEME_TEXT}Installing AUR package:${RESET} %-30s" "$pkg"
     fi
 
     local output
     if output=$(yay -S --noconfirm --needed "$pkg" 2>&1); then
-        [ "$verbose" = true ] && printf "${THEME_SUCCESS} ✓ Success${RESET}\n"
+        [ "$verbose" = true ] && printf '%b' "${THEME_SUCCESS} ✓ Success${RESET}\n"
         INSTALLED_PACKAGES+=("$pkg")
         return 0
     else
-        [ "$verbose" = true ] && printf "${THEME_ERROR} ✗ Failed${RESET}\n"
+        [ "$verbose" = true ] && printf '%b' "${THEME_ERROR} ✗ Failed${RESET}\n"
         if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
             echo "$output" | sed 's/^/    /'
         fi
@@ -91,22 +91,66 @@ flatpak_install_single() {
     fi
 
     if [ "$verbose" = true ]; then
-        printf "${THEME_TEXT}Installing Flatpak app:${RESET} %-30s" "$pkg"
+        printf '%b' "${THEME_TEXT}Installing Flatpak app:${RESET} %-30s" "$pkg"
     fi
 
     local output
     if output=$(sudo flatpak install -y --noninteractive flathub "$pkg" 2>&1); then
-        [ "$verbose" = true ] && printf "${THEME_SUCCESS} ✓ Success${RESET}\n"
+        [ "$verbose" = true ] && printf '%b' "${THEME_SUCCESS} ✓ Success${RESET}\n"
         INSTALLED_PACKAGES+=("$pkg")
         return 0
     else
-        [ "$verbose" = true ] && printf "${THEME_ERROR} ✗ Failed${RESET}\n"
+        [ "$verbose" = true ] && printf '%b' "${THEME_ERROR} ✗ Failed${RESET}\n"
         if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
             echo "$output" | sed 's/^/    /'
         fi
         FAILED_PACKAGES+=("$pkg")
         return 1
     fi
+}
+fi
+
+# Batch install Flatpak packages (much faster than one-by-one)
+if ! declare -f flatpak_install_batch >/dev/null 2>&1; then
+flatpak_install_batch() {
+    local packages=("$@")
+    local total=${#packages[@]}
+
+    if [ "$total" -eq 0 ]; then
+        return 0
+    fi
+
+    if ! command -v flatpak &>/dev/null; then
+        log_error "Flatpak not found"
+        return 1
+    fi
+
+    ui_info "Installing $total Flatpak applications..."
+
+    # Try batch install first (flatpak supports multiple app IDs)
+    local output
+    if output=$(sudo flatpak install -y --noninteractive flathub "${packages[@]}" 2>&1); then
+        ui_success "Flatpak batch installation successful ($total apps)"
+        INSTALLED_PACKAGES+=("${packages[@]}")
+        return 0
+    fi
+
+    # Fallback: install one by one (some apps may not be available)
+    ui_warn "Batch install had failures, trying individually..."
+    local failed=0
+    for pkg in "${packages[@]}"; do
+        if flatpak_install_single "$pkg" true; then
+            INSTALLED_PACKAGES+=("$pkg")
+        else
+            ((failed++))
+        fi
+    done
+
+    if [ "$failed" -gt 0 ]; then
+        ui_warn "$failed Flatpak app(s) failed to install"
+        return 1
+    fi
+    return 0
 }
 fi
 
@@ -146,7 +190,7 @@ install_package_generic() {
                     error_output=$(yay -S --noconfirm --needed "$pkg" 2>&1)
                     ;;
                 flatpak)
-                    error_output=$(sudo flatpak install --noninteractive -y "$pkg" 2>&1)
+                    error_output=$(sudo flatpak install -y --noninteractive flathub "$pkg" 2>&1)
                     ;;
             esac
 
@@ -226,7 +270,7 @@ fi
 if ! declare -f update_system >/dev/null 2>&1; then
 update_system() {
     ui_info "Updating system packages..."
-    if sudo pacman -Syu --noconfirm --overwrite="*"; then
+    if sudo pacman -Syu --noconfirm; then
         ui_success "System updated successfully"
     else
         ui_error "System update failed"
@@ -248,7 +292,7 @@ fi
 if ! declare -f preload_package_lists >/dev/null 2>&1; then
 preload_package_lists() {
     ui_info "Preloading package lists..."
-    sudo pacman -Sy --noconfirm >>"$INSTALL_LOG" 2>&1
+    # Database is already synced from system_preparation.sh — just update yay if available
     if command -v yay >/dev/null; then
         yay -Sy --noconfirm >>"$INSTALL_LOG" 2>&1
     fi
@@ -261,7 +305,7 @@ enable_multilib() {
     if ! grep -q "^\[multilib\]" /etc/pacman.conf; then
         echo -e "\n[multilib]\nInclude = /etc/pacman.d/mirrorlist" | sudo tee -a /etc/pacman.conf >/dev/null
         ui_success "Enabled multilib repository"
-        sudo pacman -Sy
+        # Database sync will happen on next pacman -S call
     else
         ui_info "Multilib repository already enabled"
     fi

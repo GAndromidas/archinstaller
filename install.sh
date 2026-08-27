@@ -29,8 +29,8 @@ INSTALLATION MODES:
     Standard        Complete setup with all recommended packages (intermediate users)
     Minimal         Essential tools only for lightweight installations (new users)
     Server          Headless configuration (Docker, SSH, server utilities)
-    Gaming          Gaming-optimized setup with Steam, Heroic Games Launcher,
-                    Faugus Launcher, and performance tools
+
+    Gaming mode is offered as an optional step during Standard/Minimal installations.
 
 FEATURES:
     - Hardware-aware CPU detection (Intel/AMD with microcode updates)
@@ -434,7 +434,6 @@ if [ "$DRY_RUN" = true ]; then
   ui_info "Package installations will be simulated"
   ui_info "System configurations will be previewed"
   echo ""
-  sleep 2
 fi
 
 # Prompt for sudo using UI helpers
@@ -477,7 +476,7 @@ mark_step_complete() {
 
 # Function to check if step was completed
 is_step_complete() {
-  [ -f "$STATE_FILE" ] && grep -qE "^(COMPLETED: )?$1$" "$STATE_FILE"
+  [ -f "$STATE_FILE" ] && grep -qE "^COMPLETED: ${1}$|^${1}$" "$STATE_FILE"
 }
 
 
@@ -516,6 +515,7 @@ cleanup_on_error() {
     fi
     
     # Check if steps actually failed — if all steps completed, don't mark as failure
+    # Use state file as source of truth (more reliable than ERRORS array which runs in subshells)
     if [ -f "$STATE_FILE" ] && ! grep -q "^FAILED:" "$STATE_FILE" 2>/dev/null; then
       log_warning "All installation steps completed successfully despite external signal (exit code $exit_code)"
       return 0

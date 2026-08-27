@@ -29,8 +29,8 @@ install_yay() {
       break
     fi
     if [[ $attempt -lt $pacman_retries ]]; then
-      log_warning "pacman attempt $attempt failed, retrying in 3 seconds..."
-      sleep 3
+      log_warning "pacman attempt $attempt failed, retrying..."
+      sleep 1
     fi
   done
   if [[ $pacman_ok -eq 0 ]]; then
@@ -77,6 +77,20 @@ install_yay() {
     log_error "yay installation verification failed"
     return 1
   fi
+
+  # Configure yay for faster AUR builds
+  ui_info "Configuring yay for optimal performance..."
+  local yay_config_dir="$HOME/.config/yay"
+  mkdir -p "$yay_config_dir"
+  cat > "$yay_config_dir/config.json" << 'YAYEOF'
+{
+    "bottomup": true,
+    "devel": false,
+    "cleanAfter": false,
+    "batchInstall": true
+}
+YAYEOF
+  log_success "yay configured with BatchInstall=true for faster AUR builds"
 
   # Import GPG keys for makepkg (prevents常见 AUR build failures)
   ui_info "Importing GPG keys..."

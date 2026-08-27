@@ -99,7 +99,8 @@ detect_gpu() {
     echo "$gpu"
 }
 
-# Get RAM in GB
+# Get RAM in GB (rounded to common consumer sizes: 2/4/8/16/32)
+# Accounts for kernel memory reservation (e.g., 32GB shows as ~31GB)
 get_ram_gb() {
     local cache_key="ram_gb"
     
@@ -110,10 +111,24 @@ get_ram_gb() {
     
     local ram_kb
     ram_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-    local ram_gb=$((ram_kb / 1024 / 1024))
+    local ram_mb=$((ram_kb / 1024))
+    local ram_gb_precise=$(echo "scale=2; $ram_mb / 1024" | bc -l)
+    local rounded_gb
+
+    if (( $(echo "$ram_gb_precise < 3" | bc -l) )); then
+        rounded_gb=2
+    elif (( $(echo "$ram_gb_precise < 6" | bc -l) )); then
+        rounded_gb=4
+    elif (( $(echo "$ram_gb_precise < 12" | bc -l) )); then
+        rounded_gb=8
+    elif (( $(echo "$ram_gb_precise < 24" | bc -l) )); then
+        rounded_gb=16
+    else
+        rounded_gb=32
+    fi
     
-    SYSTEM_CACHE[$cache_key]="$ram_gb"
-    echo "$ram_gb"
+    SYSTEM_CACHE[$cache_key]="$rounded_gb"
+    echo "$rounded_gb"
 }
 
 # Detect if system uses Btrfs filesystem

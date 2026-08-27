@@ -44,9 +44,9 @@ INSTALLATION_START_TIME=0   # Overall installation start time
 TOTAL_STEPS=10
 : "${VERBOSE:=false}"   # Can be overridden/exported by caller
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"  # Script directory
-CONFIGS_DIR="$SCRIPT_DIR/../configs"                           # Config files directory
-SCRIPTS_DIR="$SCRIPT_DIR"                                      # Scripts directory
+COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"  # common.sh directory (scripts/)
+CONFIGS_DIR="$COMMON_DIR/../configs"                           # Config files directory
+SCRIPTS_DIR="$COMMON_DIR"                                      # Scripts directory
 
 
 # Distribution detection
@@ -83,7 +83,7 @@ fi
 
 # Source library modules (provides log_*, ui_*, step, run_step, package, system functions)
 for __lib_module in core ui system package config; do
-    source "$SCRIPT_DIR/lib/$__lib_module.sh"
+    source "$COMMON_DIR/lib/$__lib_module.sh"
 done
 unset __lib_module
 
@@ -411,7 +411,7 @@ generate_default_mirrorlist() {
 
   sudo tee /etc/pacman.d/mirrorlist >/dev/null <<'EOF'
 ## Default Arch Linux mirrorlist
-Server = http://mirror.archlinux.de/sites/archlinux.org/$repo/os/$arch
+Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch
 EOF
   log_success "Basic mirrorlist created."
 }
@@ -430,13 +430,13 @@ update_system_mirrors() {
     mirror_repo="endeavour"
   fi
   
-  # Run mirror update silently in background
-  # Redirect all output to /dev/null for silent operation
-  nohup bash -c "sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist '$mirror_repo' >/dev/null 2>&1 && sudo pacman -Syy >/dev/null 2>&1" >>"$INSTALL_LOG" 2>&1 &
-  
-  # Give immediate feedback that mirrors are syncing
-  ui_info "Syncing package mirrors..."
-  ui_success "Mirrors are being updated in background"
+  # Run mirror update synchronously to avoid race condition with subsequent pacman operations
+  if sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist "$mirror_repo" >>"$INSTALL_LOG" 2>&1; then
+    sudo pacman -Syy >>"$INSTALL_LOG" 2>&1
+    ui_success "Mirrors updated successfully"
+  else
+    log_warning "Mirror update failed, continuing with existing mirrors"
+  fi
   
   # Return immediately without blocking
   return 0
@@ -777,7 +777,6 @@ prompt_reboot() {
       echo -e "${THEME_TEXT}Rebooting your system...${RESET}"
       echo -e "${THEME_HEADER}Thank you for using Arch Installer!${RESET}"
       echo ""
-      sleep 2
       sudo reboot
     else
       echo ""
@@ -794,9 +793,8 @@ prompt_reboot() {
         ""|y|yes)
           echo ""
           echo -e "${THEME_TEXT}Rebooting your system...${RESET}"
-          echo -e "${THEME_WARN}Thank you for using Arch Installer!${RESET}"
+          echo -e "${THEME_HEADER}Thank you for using Arch Installer!${RESET}"
           echo ""
-          sleep 2
           sudo reboot
           break
           ;;
@@ -843,7 +841,7 @@ preload_package_lists() {
 # Optimized system update
 fast_system_update() {
   step "Performing optimized system update"
-  sudo pacman -Syu --noconfirm --overwrite="*"
+  sudo pacman -Syu --noconfirm
   if command -v yay >/dev/null; then
     yay -Syu --noconfirm
   else

@@ -22,7 +22,7 @@ pacman:
 
 # Flatpak applications for gaming
 flatpak:
-  apps:
+  packages:
     - name: com.heroicgameslauncher.hgl
       description: "Heroic Games Launcher for Epic Games Store"
     - name: io.github.Faugus.faugus-launcher

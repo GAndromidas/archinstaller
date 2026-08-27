@@ -26,16 +26,10 @@ check_and_enable_multilib() {
 	if ! grep -q "^\[multilib\]" /etc/pacman.conf; then
 		echo -e "\n[multilib]\nInclude = /etc/pacman.d/mirrorlist" | sudo tee -a /etc/pacman.conf >/dev/null
 		log_success "Enabled multilib repository for gaming mode"
+		# Sync databases to pick up multilib (single sync, not full -Syy)
+		sudo pacman -Syy --noconfirm >>"$INSTALL_LOG" 2>&1
 	else
 		log_success "Multilib repository already enabled"
-	fi
-	
-	# Sync repositories to ensure multilib is available
-	if sudo pacman -Sy; then
-		log_success "Repositories synchronized successfully"
-	else
-		log_error "Failed to synchronize repositories"
-		return 1
 	fi
 }
 
@@ -51,7 +45,7 @@ load_package_lists() {
 
 	# Using config.sh library functions for YAML parsing
 	read_yaml_packages_with_desc "$GAMING_YAML" ".pacman.packages" pacman_gaming_programs temp_descriptions
-	read_yaml_packages_with_desc "$GAMING_YAML" ".flatpak.apps" flatpak_gaming_programs temp_descriptions
+	read_yaml_packages_with_desc "$GAMING_YAML" ".flatpak.packages" flatpak_gaming_programs temp_descriptions
 	return 0
 }
 
@@ -64,16 +58,16 @@ install_pacman_packages() {
 	ui_info "Installing ${#pacman_gaming_programs[@]} pacman packages for gaming..."
 
 	# Try batch install first
-	printf "${THEME_TEXT}Attempting batch installation...${RESET}\n"
+	printf '%b' "${THEME_TEXT}Attempting batch installation...${RESET}\n"
 	# We capture stderr to a variable to print if it fails
 	local batch_output
 	if batch_output=$(sudo pacman -S --noconfirm --needed "${pacman_gaming_programs[@]}" 2>&1); then
-		printf "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
+		printf '%b' "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
 		GAMING_INSTALLED+=("${pacman_gaming_programs[@]}")
 		return
 	fi
 
-	printf "${THEME_WARN} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
+	printf '%b' "${THEME_WARN} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
 
 	for pkg in "${pacman_gaming_programs[@]}"; do
 		if pacman_install_single "$pkg" true; then GAMING_INSTALLED+=("$pkg"); else GAMING_ERRORS+=("$pkg (pacman)"); fi
@@ -82,22 +76,14 @@ install_pacman_packages() {
 
 install_flatpak_packages() {
 	if ! command -v flatpak >/dev/null; then ui_warn "flatpak is not installed. Skipping gaming Flatpaks."; return; fi
-
-	# Ensure flathub remote exists (system-wide)
-	if ! sudo flatpak remote-list | grep -q flathub; then
-		step "Adding Flathub remote"
-		sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-	fi
+	# Flathub remote is added once in system_preparation.sh — no need to check here
 
 	if [[ ${#flatpak_gaming_programs[@]} -eq 0 ]]; then
 		ui_info "No Flatpak applications for gaming mode to install."
 		return
 	fi
-	ui_info "Installing ${#flatpak_gaming_programs[@]} Flatpak applications for gaming..."
 
-	for pkg in "${flatpak_gaming_programs[@]}"; do
-		if flatpak_install_single "$pkg" true; then GAMING_INSTALLED+=("$pkg (Flatpak)"); else GAMING_ERRORS+=("$pkg (Flatpak)"); fi
-	done
+	flatpak_install_batch "${flatpak_gaming_programs[@]}"
 }
 
 # ===== Configuration Functions =====

@@ -7,27 +7,27 @@ source "$SCRIPT_DIR/common.sh"
 
 cleanup_and_optimize() {
   step "Performing final cleanup and optimizations"
-  # Check if lsblk is available for SSD detection
+  # Run fstrim in background (does not block other cleanup)
   if command_exists lsblk; then
     if lsblk -d -o rota | grep -q '^0$'; then
-      run_step "Running fstrim on SSDs" sudo fstrim -v /
+      sudo fstrim -v / >>"$INSTALL_LOG" 2>&1 &
+      log_info "TRIM started in background"
     fi
   else
     log_warning "lsblk not available. Skipping SSD optimization."
   fi
   run_step "Cleaning /tmp directory" sudo find /tmp -mindepth 1 -maxdepth 1 ! -path '/tmp/systemd-*' ! -path '/tmp/.X*' ! -path '/tmp/pulse-*' -exec rm -rf {} + 2>/dev/null || true
-  run_step "Syncing disk writes" sync
 }
 
 setup_maintenance() {
   step "Performing comprehensive system cleanup"
-  run_step "Cleaning pacman cache" sudo pacman -Sc --noconfirm
-  run_step "Cleaning yay cache" yay -Sc --noconfirm
+  # Use paccache instead of pacman -Sc (keeps last 3 versions, safer for resume)
+  run_step "Cleaning old pacman packages (keeping 3 versions)" sudo paccache -r
+  run_step "Cleaning yay cache" yay -Sc --noconfirm 2>/dev/null || true
 
-  # Flatpak cleanup - remove unused packages and runtimes
+  # Flatpak cleanup - single call removes both unused packages and runtimes
   if command -v flatpak >/dev/null 2>&1; then
-    run_step "Removing unused flatpak packages" sudo flatpak uninstall --unused --noninteractive -y
-    run_step "Removing unused flatpak runtimes" sudo flatpak uninstall --unused --noninteractive -y
+    run_step "Removing unused flatpak packages and runtimes" sudo flatpak uninstall --unused --noninteractive -y
     log_success "Flatpak cleanup completed"
   else
     log_info "Flatpak not installed, skipping flatpak cleanup"

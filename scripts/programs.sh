@@ -29,12 +29,12 @@ specific_remove_programs=() # DE-specific removals
 
 pacman_remove() {
 	local pkg="$1"
-	printf "${THEME_WARN}Removing Pacman package:${RESET} %-30s" "$pkg"
+	printf '%b' "${THEME_WARN}Removing Pacman package:${RESET} %-30s" "$pkg"
 	if sudo pacman -Rns --noconfirm "$pkg" >>"$INSTALL_LOG" 2>&1; then
-		printf "${THEME_SUCCESS} ✓ Success${RESET}\n"
+		printf '%b' "${THEME_SUCCESS} ✓ Success${RESET}\n"
 		return 0
 	else
-		printf "${THEME_ERROR} ✗ Failed${RESET}\n"
+		printf '%b' "${THEME_ERROR} ✗ Failed${RESET}\n"
 		return 1
 	fi
 }
@@ -230,14 +230,14 @@ install_pacman_packages() {
 	ui_info "Installing ${#essential_programs[@]} pacman packages..."
 
 	# Try batch install first for speed
-	printf "${THEME_TEXT}Attempting batch installation...${RESET}\n"
+	printf '%b' "${THEME_TEXT}Attempting batch installation...${RESET}\n"
 	if sudo pacman -S --noconfirm --needed "${essential_programs[@]}" >>"$INSTALL_LOG" 2>&1; then
-		printf "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
+		printf '%b' "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
 		PROGRAMS_INSTALLED+=("${essential_programs[@]}")
 		return
 	fi
 
-	printf "${THEME_WARN} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
+	printf '%b' "${THEME_WARN} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
 	for pkg in "${essential_programs[@]}"; do
 		if pacman_install_single "$pkg" true; then PROGRAMS_INSTALLED+=("$pkg"); else PROGRAMS_ERRORS+=("$pkg (pacman)"); fi
 	done
@@ -249,16 +249,16 @@ install_aur_packages() {
 	ui_info "Installing ${#yay_programs[@]} AUR packages with yay..."
 
 	# Try batch install first
-	printf "${THEME_TEXT}Attempting batch installation...${RESET}\n"
+	printf '%b' "${THEME_TEXT}Attempting batch installation...${RESET}\n"
 	if yay -S --noconfirm --needed "${yay_programs[@]}" >>"$INSTALL_LOG" 2>&1; then
-		printf "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
+		printf '%b' "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
 		for pkg in "${yay_programs[@]}"; do
 			PROGRAMS_INSTALLED+=("$pkg (AUR)")
 		done
 		return
 	fi
 
-	printf "${THEME_WARN} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
+	printf '%b' "${THEME_WARN} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
 	for pkg in "${yay_programs[@]}"; do
 		if yay_install_single "$pkg" true; then PROGRAMS_INSTALLED+=("$pkg (AUR)"); else PROGRAMS_ERRORS+=("$pkg (AUR)"); fi
 	done
@@ -266,16 +266,10 @@ install_aur_packages() {
 
 install_flatpak_packages() {
 	if ! command -v flatpak >/dev/null; then ui_warn "flatpak is not installed. Skipping Flatpak packages."; return; fi
-	if ! flatpak remote-list | grep -q flathub; then
-		step "Adding Flathub remote"
-		flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-	fi
+	# Flathub remote is added once in system_preparation.sh — no need to check here
 	if [[ ${#flatpak_programs[@]} -eq 0 ]]; then ui_info "No Flatpak applications to install."; return; fi
-	ui_info "Installing ${#flatpak_programs[@]} Flatpak applications..."
 
-	for pkg in "${flatpak_programs[@]}"; do
-		if flatpak_install_single "$pkg" true; then PROGRAMS_INSTALLED+=("$pkg (Flatpak)"); else PROGRAMS_ERRORS+=("$pkg (Flatpak)"); fi
-	done
+	flatpak_install_batch "${flatpak_programs[@]}"
 }
 
 remove_pacman_packages() {

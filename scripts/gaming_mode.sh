@@ -1,9 +1,5 @@
 #!/bin/bash
-set -euo pipefail
-
-# Ensure HOME is set before any path resolution
-: "${HOME:=/root}"
-export HOME
+set -uo pipefail
 
 # Gaming and performance tweaks installation for Arch Linux
 # Get the directory where this script is located, resolving symlinks
@@ -35,8 +31,7 @@ check_and_enable_multilib() {
 	fi
 	
 	# Sync repositories to ensure multilib is available
-	# Use -Sy with --overwrite to avoid partial-upgrade issues
-	if sudo pacman -Sy --overwrite='*' 2>>"$INSTALL_LOG"; then
+	if sudo pacman -Sy; then
 		log_success "Repositories synchronized successfully"
 	else
 		log_error "Failed to synchronize repositories"
@@ -151,10 +146,7 @@ main() {
 	fi
 
 	# Crucial: Ensure multilib is actually working before attempting to install steam/wine
-	if ! check_and_enable_multilib; then
-		ui_error "Multilib setup failed — steam/wine installation will likely fail"
-		return 1
-	fi
+	check_and_enable_multilib
 
 
 	install_pacman_packages

@@ -30,8 +30,6 @@ Transform your minimal Arch Linux installation into a fully configured, optimize
 | **Security-First** | Comprehensive hardening enabled by default with firewall and fail2ban |
 | **Performance-Optimized** | Intelligent I/O scheduling and kernel tuning for optimal responsiveness |
 | **Reliable** | Resume functionality for interrupted installations with progress tracking |
-| **Idempotent** | Re-running on an already-configured system is safe — no duplicates, no broken configs |
-| **Update-Friendly** | `--force` re-applies updated defaults after you `git pull` the installer |
 
 ---
 
@@ -46,10 +44,8 @@ CPU Detection:
   AMD: amd-ucode + microcode updates
   
 GPU Detection:
-  AMD: Open-source drivers + Vulkan (Vulkan RADV + lib32)
-  Intel: Integrated graphics + Vulkan (ANV + lib32)
-  NVIDIA: Optional proprietary drivers (opt-in, nvidia-open)
-          with DRM kernel mode setting for Wayland
+  AMD: Open-source drivers + Vulkan
+  Intel: Integrated graphics + VA-API
   
 Storage Optimization:
   NVMe: none scheduler + trim optimizations
@@ -69,23 +65,17 @@ Laptop Features:
 |------------|----------|-------------|
 | **GRUB** | Timeout optimization, boot menu management | Automatic configuration |
 | **systemd-boot** | EFI support, kernel fallback | Automatic entry management |
-| **Limine** | Modern UEFI, fast boot support, bootable snapshot menu | Automatic entry generation for all installed kernels |
-
-All bootloader configs are generated safely:
-- Entries generated from every installed kernel (`/boot/vmlinuz-*`) — never a hardcoded list
-- Config validated before replacing; backup kept and restored if generation fails
-- Windows dual-boot auto-detected via EFI System partitions (works across drives) and added as a proper UEFI chainload entry
+| **Limine** | Modern UEFI, fast boot support | Simple configuration |
 
 #### Advanced Performance Optimization (CachyOS-Inspired)
 
 - **Smart Memory Management**: Dynamic swappiness based on system RAM (<4GB: 60, 4-8GB: 30, 8-16GB: 10, 16GB+: 1)
-- **zRAM Swap**: Automatic zram-generator setup (half of RAM, zstd, capped at 8GB) when no disk swap exists
 - **Intelligent Storage Optimization**: Automatic I/O scheduler detection (NVMe: none, SSD: mq-deadline, HDD: bfq)
-- **Advanced Kernel Tuning**: BBR congestion control, fq_codel queue discipline, filesystem-specific tuning
-- **Hardware-Aware Configuration**: NVMe detection, virtualization awareness
+- **Advanced Kernel Tuning**: Process scheduling, network stack optimization, filesystem-specific tuning
+- **Hardware-Aware Configuration**: NVMe detection, zRAM monitoring, virtualization awareness
 - **Transparent Hugepages**: Disabled for desktop systems to improve performance
 - **Persistent Settings**: All optimizations survive reboots via udev rules and systemd services
-- **GPU Driver Detection**: Automatic installation of AMD/Intel drivers with Vulkan support; optional NVIDIA open-kernel-module setup with early KMS
+- **GPU Driver Detection**: Automatic installation of AMD/Intel drivers with Vulkan support
 
 #### Performance Optimization
 - **I/O Scheduling**: Automatic selection based on storage type (NVMe: none, SSD: mq-deadline, HDD: bfq)
@@ -95,11 +85,9 @@ All bootloader configs are generated safely:
 ### Desktop Environment Integration
 | Environment | Optimizations | Features |
 |-------------|---------------|----------|
-| **KDE Plasma 6+** | DE-specific packages (bluedevil, dolphin, kate, okular, etc.) | KDE Connect integration, plasma-firewall, kwallet-pam (auto wallet unlock), power-profiles-daemon |
+| **KDE Plasma 6+** | DE-specific packages (bluedevil, dolphin, kate, okular, etc.) | KDE Connect integration, plasma-firewall, system monitor |
 | **GNOME 46+** | DE-specific packages (adw-gtk-theme, gnome-tweaks, seahorse, etc.) | Extension manager, dark theme, modern tweaks |
 | **Cosmic** | DE-specific packages (transmission-gtk) | Cosmic Tweaks via Flatpak |
-
-Audio is handled by a complete PipeWire stack (pipewire, wireplumber, pipewire-alsa/jack/pulse). If PulseAudio is present it is replaced to avoid conflicts.
 
 ### Security & Stability
 
@@ -111,24 +99,13 @@ UFW/Firewalld:
   - SSH automatically allowed
   - KDE Connect ports opened when detected (1714-1764/tcp/udp)
   - EndeavourOS uses firewalld by default, Arch uses UFW
-  - Firewalld default zone: block (safer than drop, denies without ICMP responses)
-  - Idempotent: safe to re-run without duplicating rules
 
 # SSH Protection
 Fail2ban:
-  - Auto-detects firewall backend and uses the correct banaction:
-    * UFW        → banaction = ufw
-    * Firewalld  → banaction = firewallcmd-ipset (modern; replaces deprecated firewallcmd-allports)
-    * Neither    → banaction = iptables-multiport (fail2ban default)
-  - Drops configuration in /etc/fail2ban/jail.d/archinstaller.local (survives package updates)
-  - Configured BEFORE service start (jails active from first boot)
-  - sshd jail explicitly enabled — no silent no-op protection
   - 1-hour ban duration (increased from default 10min)
   - 3 retry limit (decreased from default 5)
   - systemd backend for better integration
-  - Daemon readiness verified with polling (not fixed sleep)
-  - Legacy jail.local (no jails enabled) auto-detected and migrated
-  - SSH jail validated as active before reporting success
+  - Automatic brute-force detection
 
 # User Security
 Sudo:
@@ -145,25 +122,9 @@ The system services step includes comprehensive service management:
 |--------------|------------------|-------|
 | **Essential** | cronie, sshd, fstrim.timer, paccache.timer | All modes |
 | **Desktop** | bluetooth.service | Standard/Minimal/Gaming (not Server) |
-| **Power Profiles** | power-profiles-daemon.service | Plasma systems — enables Performance/Balanced/Power Saver switching |
-| **Optional** | rustdesk.service, timeshift-autosnap.timer OR limine-snapper-sync.service | Snapshot tooling is bootloader-aware (see below) |
+| **Optional** | rustdesk.service, timeshift-autosnap.timer | If installed |
 | **Firewall** | UFW or Firewalld | UFW for Arch, Firewalld for EndeavourOS |
-| **GPU Drivers** | AMD/Intel with Vulkan; NVIDIA opt-in | Auto-detected and installed |
-| **Audio** | PipeWire stack | Replaces PulseAudio if present |
-
-### Snapshot Strategy (Bootloader-Aware)
-
-The installer picks the right snapshot tooling for your bootloader automatically:
-
-| Bootloader | Root FS | Snapshot Tool | Boot Menu Integration |
-|------------|---------|---------------|----------------------|
-| **Limine** | btrfs | Snapper + snap-pac + limine-snapper-sync | ✅ Bootable `Snapshots` submenu in Limine, auto-synced |
-| **GRUB** | any | Timeshift + timeshift-autosnap | Rollback via Timeshift |
-| **systemd-boot** | any | Timeshift + timeshift-autosnap | Rollback via Timeshift |
-
-On Limine + btrfs systems, limine-snapper-sync keeps the Limine snapshot entries always in sync with snapper: newly created snapshots appear in the boot menu, deleted ones disappear. Snapshots taken before pacman transactions (via snap-pac) can be booted directly for rollback.
-
-> **Note:** The AUR build of limine-snapper-sync occasionally fails due to upstream gradle issues. This is non-fatal — snapshots still work via snapper/snap-pac; only the automatic boot-menu sync needs a later retry with `yay -S limine-snapper-sync`.
+| **GPU Drivers** | AMD/Intel with Vulkan | Auto-detected and installed |
 
 ### Gaming Mode (Optional)
 
@@ -208,8 +169,6 @@ Choose the perfect setup for your use case:
 | **Server** | Headless configuration | Docker, SSH, server utilities |
 | **Gaming** | Gaming-optimized | Steam, Heroic Games Launcher, Faugus Launcher, performance tools |
 
-> **Note:** The installer auto-detects headless systems and switches to Server mode automatically. Use `--dry-run` to preview what would be installed without making any changes.
-
 ---
 
 ## Quick Start
@@ -242,23 +201,7 @@ OPTIONS:
   -v, --verbose   Enable detailed output
   -q, --quiet     Minimal output mode
   -d, --dry-run   Preview changes only
-  -f, --force     Re-apply all settings (re-runs steps even if previously completed)
 ```
-
-#### Update Workflow
-
-When you update the installer (e.g., `git pull`), use `--force` to re-apply new defaults to an already-configured system:
-
-```bash
-git pull              # get latest changes
-./install.sh --force  # re-apply updated settings, skip completed steps
-```
-
-Without `--force`, the installer uses its built-in idempotency (state file at `~/.archinstaller.state`, config diff checks, `pacman --needed`) to skip already-applied steps safely. With `--force`, all main steps re-run to pick up the latest defaults.
-
-#### Resume from Interruption
-
-If the installer is interrupted (Ctrl+C, crash, reboot), just re-run it. It detects the state file and offers to resume, retry failed steps, or start fresh.
 
 ---
 
@@ -301,7 +244,7 @@ flatpak:         # Flatpak applications
 
 ### Common Across All Modes
 
-- System utilities (android-tools, bat, btop, eza, fastfetch, fzf, starship, zoxide, expac, cmatrix, cpupower, dosfstools, duf, firefox, fwupd, gnome-disk-utility, hwinfo, inxi, ncdu, net-tools, nmap, noto-fonts-extra, samba, sl, speedtest-cli, sshfs, ttf-hack-nerd, ttf-liberation, unrar, wakeonlan, xdg-desktop-portal-gtk)
+- System utilities (android-tools, bat, btop, chromium, cmatrix, cpupower, dosfstools, duf, firefox, fwupd, gnome-disk-utility, hwinfo, inxi, ncdu, net-tools, nmap, noto-fonts-extra, samba, sl, speedtest-cli, sshfs, ttf-hack-nerd, ttf-liberation, unrar, wakeonlan, xdg-desktop-portal-gtk)
 - Development essentials (base-devel, git, curl)
 - Zsh shell with Oh-My-Zsh, Starship prompt, Fastfetch
 - System monitoring tools (btop, inxi, hwinfo)
@@ -329,11 +272,11 @@ The installer includes 10 comprehensive steps for complete system setup:
 | **3. Yay Installation** | AUR helper setup | All modes |
 | **4. Programs Installation** | Mode-specific applications from YAML configs | All modes |
 | **5. Gaming Mode** | Steam, Wine, GameMode, MangoHud, Discord, gaming launchers | Gaming mode only |
-| **6. Bootloader Configuration** | Kernel params, GRUB/systemd-boot/Limine config, snapshot integration (Limine+btrfs) | Standard/Minimal/Gaming |
-| **7. Fail2ban Setup** | SSH security hardening (configured before service start) | All modes |
-| **8. System Services** | Firewall (UFW/Firewalld), user groups, GPU drivers, PipeWire audio, zRAM, power management | All modes |
+| **6. Bootloader Configuration** | Kernel params, GRUB/systemd-boot/Limine config | Standard/Minimal/Gaming |
+| **7. Fail2ban Setup** | SSH security hardening (1hr ban, 3 retries) | All modes |
+| **8. System Services** | Firewall (UFW/Firewalld), user groups, GPU drivers, power management | All modes |
 | **9. Wake-on-LAN Configuration** | Multi-adapter WoL setup with laptop detection | Desktop systems |
-| **10. Maintenance** | Cache cleanup (keeps 2 versions for rollback), orphan removal, SSD optimization | All modes |
+| **10. Maintenance** | Cache cleanup, orphan removal, SSD optimization | All modes |
 
 ---
 
@@ -345,12 +288,11 @@ The installer includes 10 comprehensive steps for complete system setup:
 | Feature | Status | Configuration |
 |---------|--------|---------------|
 | **Firewall** | Active | UFW (Arch) or Firewalld (EndeavourOS) with secure policies |
-| **SSH Protection** | Active | Fail2ban with 1hr ban, 3 retries, systemd backend, sshd jail enabled; auto-detects firewall (ufw / firewallcmd-ipset / iptables-multiport) |
+| **SSH Protection** | Active | Fail2ban with 1hr ban, 3 retries, systemd backend |
 | **Wake-on-LAN** | Desktop Only | Multi-adapter with smart selection, laptop detection |
 | **User Groups** | Active | wheel, video, storage, optical, scanner, lp, rfkill |
 | **Bootloader** | Active | GRUB/systemd-boot/Limine with kernel optimization |
-| **Sudo** | Active | Password feedback enabled (validated via visudo before install) |
-| **Snapshots** | Bootloader-aware | Snapper+Limine menu (btrfs) or Timeshift+autosnap |
+| **Sudo** | Active | Password feedback enabled |
 
 ---
 
@@ -361,12 +303,10 @@ The installer includes 10 comprehensive steps for complete system setup:
 | Component | Support | Notes |
 |-----------|---------|-------|
 | **CPU** | Intel, AMD | Microcode + optimizations |
-| **GPU** | AMD, Intel, NVIDIA* | Driver auto-detection; NVIDIA proprietary is opt-in |
+| **GPU** | AMD, Intel | Driver auto-detection |
 | **Storage** | NVMe, SSD, HDD | I/O scheduler optimization |
 | **Form Factor** | Desktop, Laptop, VM | Power management + thermal |
 | **Laptop Brands** | 15+ Manufacturers | Brand-specific optimizations |
-
-\* NVIDIA: installs nvidia-open (or nvidia-open-lts) with DRM kernel mode setting for Wayland. Recommended for Turing (GTX 16xx)+ GPUs; pre-Turing GPUs should stay on nouveau.
 
 ### Bootloader Support
 
@@ -423,10 +363,6 @@ The installer includes automatic laptop detection and optimizations:
 ~/.archinstaller.state   # Progress tracking
 ```
 
-### Bootloader Safety
-
-Bootloader configuration changes are backed up automatically (`limine.conf.backup.<timestamp>` etc.) and only applied after validation. If a generated config would leave the system unbootable, the existing config is kept. Keep a live USB handy when testing bootloader changes.
-
 ---
 
 ## Contributing
@@ -458,41 +394,18 @@ Bootloader configuration changes are backed up automatically (`limine.conf.backu
 | **Advanced Optimizations** | ✅ CachyOS-Inspired |
 | **Gaming Mode** | Tested |
 | **Security Hardening** | Active |
-| **Limine Snapshot Menu** | ✅ New — needs real-hardware testing |
-| **NVIDIA (opt-in)** | ✅ New — needs real-hardware testing |
 | **Documentation** | Complete |
 
 ### Recent Major Improvements
 
-#### Production Hardening & Idempotency
-- **🔁 Re-Apply After Updates**: New `--force` / `-f` flag re-runs all steps (state file bypassed, configs re-overwritten) so updating the installer and re-running actually applies new defaults
-- **🆔 Full Idempotency by Default**: Plain re-runs safely skip already-applied settings via `pacman --needed`, config diffs, drop-in existence checks, and `pacman -Q` pre-checks — no duplicates, no broken configs
-- **🔄 Resume from Interruption**: Detects `~/.archinstaller.state` on re-run; offers to resume, retry failed steps, or start fresh
-- **🛡️ Production-Grade Error Handling**: All scripts use `set -euo pipefail` with `HOME` guard for chroot/fresh-install safety
-- **⏱️ Reliable Polling**: `fail2ban` daemon readiness verified by polling, not fixed sleeps
-
-#### Fail2ban Auto-Detection
-- Detects firewall backend and uses the correct `banaction`:
-  - UFW → `ufw` (integrates with UFW rules)
-  - Firewalld → `firewallcmd-ipset` (modern; replaces deprecated `firewallcmd-allports`)
-  - Neither → `iptables-multiport` (fail2ban default)
-- `banaction` is read from `$FIREWALL_PREFERENCE` (set by distribution detection)
-- Drops config in `/etc/fail2ban/jail.d/archinstaller.local` (survives package updates)
-- Legacy `jail.local` (no jails enabled) is auto-detected and migrated
-
-#### Robustness & Consistency Overhaul
-- **🛡️ Safe Bootloader Configs**: Limine entries generated from all installed kernels with validation-before-install and automatic backup restore — no more unbootable configs
-- **📸 Bootable Snapshots**: Limine + btrfs systems get a bootable snapshot menu via Snapper + limine-snapper-sync, always in sync; other bootloaders keep Timeshift + timeshift-autosnap
-- **🪟 Correct Windows Dual-Boot**: Windows detected across drives via its ESP and added as a proper UEFI entry
-- **🎮 Optional NVIDIA Support**: Opt-in nvidia-open installation with DRM mode setting for Wayland (Turing+)
-- **🔊 Reliable Audio**: PipeWire stack installed unconditionally; PulseAudio replaced if present
-- **💾 zRAM by Default**: zram-generator sized from RAM when no disk swap exists
-- **⚡ Power Profiles**: power-profiles-daemon enabled on Plasma systems so powerdevil switching works
-- **🔑 KWallet PAM**: Wallet unlocks automatically at login on KDE systems
-- **🧪 Dry-Run That's Honest**: `--dry-run` now skips all mutating steps, not just package installs
-- **🎨 Unified UI**: All yes/no prompts go through one helper with safe EOF/non-interactive defaults (never auto-confirms destructive actions)
-- **🔧 Partial-Upgrade Safety**: Full `-Syu` upgrades everywhere; no blind `--overwrite` flags
-- **🧹 Safer Maintenance**: Age-based /tmp cleanup (live session sockets preserved), pacman cache keeps 2 versions for rollback
+#### Comprehensive System Configuration
+- **🚀 Complete Package Management**: YAML-based configuration for all modes and desktop environments
+- **🎮 Gaming Mode**: Steam, Wine, GameMode, MangoHud, Discord with Flatpak integration
+- **🛡️ Enhanced Security**: Fail2ban with 1hr ban, 3 retries, systemd backend
+- **� Service Management**: Automatic firewall (UFW/Firewalld), user groups, GPU drivers
+- **� Laptop Detection**: Automatic laptop detection with power management optimizations
+- **🌐 Wake-on-LAN**: Multi-adapter support with smart selection and laptop detection
+- **🎨 Desktop Integration**: DE-specific packages for KDE Plasma 6+, GNOME 46+, Cosmic
 
 ---
 

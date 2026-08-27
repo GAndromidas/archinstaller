@@ -1,9 +1,5 @@
 #!/bin/bash
-set -euo pipefail
-
-# Ensure HOME is set before any path resolution
-: "${HOME:=/root}"
-export HOME
+set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
@@ -105,11 +101,14 @@ check_kernel_options_consistency() {
       gum style --foreground "$GUM_WARN" "Kernel options are inconsistent across entries"
       gum style --foreground "$GUM_TEXT" "This may cause boot issues"
       echo ""
-    fi
-    if gum_confirm "Sync all kernel entries to use the same options?"; then
-      sync_all_kernel_options
+      if gum confirm "Sync all kernel entries to use the same options?"; then
+        sync_all_kernel_options
+      else
+        log_warning "Kernel options left inconsistent — manual review recommended"
+      fi
     else
-      log_warning "Kernel options left inconsistent — manual review recommended"
+      log_warning "Inconsistent kernel options detected — auto-syncing for system stability"
+      sync_all_kernel_options
     fi
   fi
 }
@@ -433,6 +432,7 @@ configure_limine_basic() {
   esac
 
   local limine_tmp=$(mktemp)
+  trap 'rm -f "$limine_tmp"' RETURN
   {
     cat << EOF
 # Limine Bootloader Configuration
@@ -446,82 +446,73 @@ interface_resolution: 1024x768
 EOF
 
     local kernels_added=()
-    local kernel_name kernel_initramfs entry_title
 
-    # Generate an entry for EVERY installed kernel, not just a hardcoded few —
-    # a config with no matching entry leaves the system unbootable.
-    for kernel_img in /boot/vmlinuz-*; do
-      [ -e "$kernel_img" ] || continue
-      kernel_name="${kernel_img#/boot/vmlinuz-}"
-      kernel_initramfs="/boot/initramfs-${kernel_name}.img"
-      [ -f "$kernel_initramfs" ] || continue
-
-      case "$kernel_name" in
-        linux)          entry_title="Arch Linux" ;;
-        linux-lts)      entry_title="Arch Linux (LTS)" ;;
-        linux-zen)      entry_title="Arch Linux (linux-zen)" ;;
-        *)              entry_title="Arch Linux ($kernel_name)" ;;
-      esac
-
-      cat << EOF
-$entry_title
+    if pacman -Qi linux-zen &>/dev/null; then
+      if [[ -f "/boot/vmlinuz-linux-zen" ]] && [[ -f "/boot/initramfs-linux-zen.img" ]]; then
+        cat << EOF
+Arch Linux (linux-zen)
 protocol: linux
-path: boot():/vmlinuz-$kernel_name
+path: boot():/vmlinuz-linux-zen
 cmdline: $cmdline
-module_path: boot():/initramfs-$kernel_name.img
+module_path: boot():/initramfs-linux-zen.img
 EOF
-      kernels_added+=("$kernel_name")
-      ui_info "Added $entry_title entry to Limine"
-    done
-
-    # Safety net: refuse to install a config without at least one kernel entry,
-    # and restore the backup so the system stays bootable.
-    if [ ${#kernels_added[@]} -eq 0 ]; then
-      log_error "No bootable kernel entries could be generated — keeping existing limine.conf"
-      rm -f "$limine_tmp"
-      return 1
+        kernels_added+=("zen")
+        ui_info "Added Arch Linux (linux-zen) entry to Limine"
+      fi
     fi
 
-    # Detect Windows via partition type (EFI System partitions), not hardcoded device paths.
-    # On UEFI, Windows boots via its ESP's bootmgfw.efi — not by chainloading the NTFS partition.
+    if [[ -f "/boot/vmlinuz-linux" ]] && [[ -f "/boot/initramfs-linux.img" ]]; then
+      cat << EOF
+
+Arch Linux
+protocol: linux
+path: boot():/vmlinuz-linux
+cmdline: $cmdline
+module_path: boot():/initramfs-linux.img
+EOF
+      kernels_added+=("standard")
+      ui_info "Added standard kernel entry to Limine"
+    fi
+
+    if [[ -f "/boot/vmlinuz-linux-lts" ]] && [[ -f "/boot/initramfs-linux-lts.img" ]]; then
+      cat << EOF
+
+Arch Linux (LTS)
+protocol: linux
+path: boot():/vmlinuz-linux-lts
+cmdline: $cmdline
+module_path: boot():/initramfs-linux-lts.img
+EOF
+    fi
+
     local windows_found=false
-    if command -v lsblk >/dev/null 2>&1; then
-      while IFS= read -r esp_path; do
-        if sudo test -f "${esp_path}/EFI/Microsoft/Boot/bootmgfw.efi" 2>/dev/null; then
-          local esp_partuuid
-          esp_partuuid=$(lsblk -rno PATH,PARTUUID "$esp_path" 2>/dev/null | awk '{print $2}')
-          if [ -n "$esp_partuuid" ]; then
-            cat << EOF
+    for disk in /dev/sda1 /dev/sdb1 /dev/sdc1 /dev/nvme0n1p1 /dev/nvme1n1p1; do
+      if [ -b "$disk" ] && sudo file -s "$disk" 2>/dev/null | grep -q "NTFS"; then
+        cat << EOF
 
 /Windows
-protocol: efi
-path: uuid($esp_partuuid):/EFI/Microsoft/Boot/bootmgfw.efi
+protocol: chainloader
+path: chainloader():$disk
+driver: chainloader
 EOF
-            log_success "Added Windows entry via ESP: $esp_path"
-            windows_found=true
-          else
-            log_warning "Found Windows ESP at $esp_path but could not determine PARTUUID — skipping Windows entry"
-          fi
-          break
-        fi
-      done < <(lsblk -rno PATH,PARTTYPENAME 2>/dev/null | awk '$2 == "EFI System" {print $1}')
-    fi
+        log_success "Added Windows entry: $disk"
+        windows_found=true
+        break
+      fi
+    done
 
     if [ "$windows_found" = false ]; then
       log_info "No Windows partition detected"
     fi
 
   } > "$limine_tmp"
-
-  # Only replace the live config if the generated one is valid
-  if ! grep -q '^protocol: linux$' "$limine_tmp"; then
-    log_error "Generated Limine config is invalid — keeping existing configuration"
-    rm -f "$limine_tmp"
-    return 1
-  fi
   sudo mv "$limine_tmp" "$limine_config"
 
-  log_success "Limine configured with ${#kernels_added[@]} kernel entr(ies)"
+  if pacman -Qi linux-zen &>/dev/null; then
+    log_success "Limine configured with Arch Linux (linux-zen) prioritized"
+  else
+    log_success "Idempotent Limine configuration completed"
+  fi
   log_info "Configuration file: $limine_config"
   log_info "Kernels configured: ${kernels_added[*]}"
   log_info "Limine bootloader configured successfully"
@@ -567,140 +558,6 @@ set_loader_config() {
 }
 
 # ============================================================================
-# PART 4: SNAPSHOT INTEGRATION (Limine + btrfs only)
-# ============================================================================
-
-# Bootable snapshot menu for Limine via Snapper.
-# limine-snapper-sync keeps the //Snapshots entries in limine.conf in sync with
-# snapper automatically — created snapshots appear, deleted ones disappear.
-# GRUB/systemd-boot systems keep using Timeshift + timeshift-autosnap instead
-# (handled in system_services.sh).
-configure_limine_snapper_integration() {
-  if [ "$BOOTLOADER" != "limine" ]; then
-    return 0
-  fi
-  if ! is_btrfs_system; then
-    log_info "Root is not btrfs — Limine snapshot menu requires btrfs. Skipping."
-    return 0
-  fi
-
-  step "Configuring Limine snapshot menu (Snapper)"
-
-  # Already configured? Just make sure the service is enabled and exit.
-  if [ -f /etc/snapper/configs/root ] && pacman -Q limine-snapper-sync &>/dev/null; then
-    log_info "Snapper + limine-snapper-sync already configured"
-    sudo systemctl enable --now limine-snapper-sync.service >>"$INSTALL_LOG" 2>&1 || true
-    return 0
-  fi
-
-  ui_warn "This sets up bootable snapshot entries in the Limine menu using Snapper."
-  ui_info "Snapshots taken before pacman transactions will appear in a Snapshots submenu"
-  ui_info "and can be booted directly for rollback. This replaces Timeshift autosnap."
-
-  if ! gum_confirm "Set up Limine snapshot menu with Snapper?" "Requires btrfs root (detected). Timeshift is unaffected but timeshift-autosnap will not be installed."; then
-    log_info "Limine/Snapper setup skipped by user — falling back to Timeshift flow"
-    return 0
-  fi
-
-  # 1. Install snapper + snap-pac from repos
-  install_packages_quietly snapper snap-pac || {
-    log_error "Failed to install snapper/snap-pac — aborting snapshot setup"
-    return 1
-  }
-
-  # 2. Create snapper root config if missing
-  if [ ! -f /etc/snapper/configs/root ]; then
-    sudo snapper -c root create-config / >>"$INSTALL_LOG" 2>&1 || {
-      log_error "Failed to create snapper root config — aborting snapshot setup"
-      return 1
-    }
-    log_success "Created snapper root config"
-  fi
-
-  # Sensible retention: keep rollback useful without filling the disk
-  sudo snapper -c root set-config "TIMELINE_LIMIT=10" "NUMBER_LIMIT=20" >>"$INSTALL_LOG" 2>&1 || true
-
-  # 3. Install limine-snapper-sync from AUR (non-fatal on failure)
-  if command -v yay >/dev/null 2>&1; then
-    ui_info "Installing limine-snapper-sync from AUR (this may take a while)..."
-    if yay_install_single "limine-snapper-sync" false; then
-      sudo systemctl enable --now limine-snapper-sync.service >>"$INSTALL_LOG" 2>&1 || \
-        log_warning "Could not enable limine-snapper-sync.service — enable it manually after reboot"
-      log_success "limine-snapper-sync installed and enabled — Limine snapshot entries will stay in sync"
-    else
-      log_warning "limine-snapper-sync AUR build failed — snapshots still work via snapper/snap-pac,"
-      log_warning "but the Limine snapshot menu will not be auto-synced. Retry later with: yay -S limine-snapper-sync"
-    fi
-  else
-    log_warning "yay not available — cannot install limine-snapper-sync (AUR)."
-    log_warning "Snapshots work via snapper/snap-pac; install limine-snapper-sync later for the boot menu."
-  fi
-
-  # 4. Add //Snapshots under each kernel entry in limine.conf (idempotent)
-  add_snapshots_directive_to_limine
-
-  # 5. ESP size check — bootable snapshot entries consume ESP space
-  check_esp_size_for_snapshots
-
-  log_success "Limine snapshot integration complete"
-}
-
-# Append '//Snapshots' inside every kernel entry block in limine.conf.
-add_snapshots_directive_to_limine() {
-  local limine_config="/boot/limine.conf"
-  [ -f "$limine_config" ] || { log_warning "limine.conf not found — cannot add //Snapshots"; return 1; }
-
-  if grep -q '^\s*//Snapshots' "$limine_config"; then
-    log_info "//Snapshots directive already present in limine.conf"
-    return 0
-  fi
-
-  local tmp=$(mktemp)
-  # Insert '//Snapshots' right after the FIRST 'protocol:' line of the first
-  # kernel entry. Limine's snapshot integration expects it inside the entry
-  # block; our generated config uses unindented keys, so anchor on 'protocol:'.
-  awk '
-    !inserted && /^protocol:/ {
-      print
-      print "//Snapshots"
-      inserted = 1
-      next
-    }
-    { print }
-  ' "$limine_config" > "$tmp"
-
-  if grep -q '^	*//Snapshots' "$tmp"; then
-    sudo cp "$tmp" "$limine_config" && log_success "Added //Snapshots to kernel entries in limine.conf"
-  else
-    log_warning "Could not insert //Snapshots automatically — add '//Snapshots' inside your Arch Linux entry manually"
-  fi
-  rm -f "$tmp"
-}
-
-# Warn if the ESP looks too small for storing bootable snapshot kernels.
-check_esp_size_for_snapshots() {
-  local esp_mnt=""
-  for m in /efi /boot /boot/efi; do
-    if findmnt -n -o SOURCE "$m" >/dev/null 2>&1 && [[ $(findmnt -n -o FSTYPE "$m") == vfat ]]; then
-      esp_mnt="$m"
-      break
-    fi
-  done
-  [ -n "$esp_mnt" ] || return 0
-
-  local size_mb=$(df -m --output=avail "$esp_mnt" 2>/dev/null | awk 'NR==2 {print $1}')
-  local total_mb=$(df -m --output=size "$esp_mnt" 2>/dev/null | awk 'NR==2 {print $1}')
-  [[ "$total_mb" =~ ^[0-9]+$ ]] || return 0
-
-  if [ "$total_mb" -lt 4000 ]; then
-    log_warning "ESP at $esp_mnt is ${total_mb}MB — limine-snapper-sync recommends 4GB+ when storing bootable snapshot kernels"
-    log_warning "Old snapshot entries are auto-pruned when ESP usage exceeds limits, but consider enlarging the ESP"
-  else
-    log_info "ESP at $esp_mnt has ${total_mb}MB total (${size_mb}MB free) — sufficient for snapshot entries"
-  fi
-}
-
-# ============================================================================
 # MAIN EXECUTION
 # ============================================================================
 
@@ -711,7 +568,6 @@ elif [ "$BOOTLOADER" = "systemd-boot" ]; then
     configure_boot
 elif [ "$BOOTLOADER" = "limine" ]; then
     configure_limine_basic
-    configure_limine_snapper_integration
 else
     log_warning "No bootloader detected or bootloader is unsupported. Defaulting to systemd-boot configuration."
     configure_boot

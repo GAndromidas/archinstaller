@@ -1,9 +1,5 @@
 #!/bin/bash
-set -euo pipefail
-
-# Ensure HOME is set before any path resolution
-: "${HOME:=/root}"
-export HOME
+set -uo pipefail
 
 # ============================================================================
 # UI Library - Unified Terminal Interface with Blue/White Theme
@@ -85,8 +81,7 @@ ui_menu() {
         echo ""
         local selection
         while true; do
-            # EOF (non-tty / Ctrl+D) must not loop forever
-            read -r -p "$(echo -e "${THEME_SECONDARY}Select option [1-$((i-1))]: ${RESET}")" selection || return 1
+            read -r -p "$(echo -e "${THEME_SECONDARY}Select option [1-$((i-1))]: ${RESET}")" selection
             if [[ "$selection" =~ ^[0-9]+$ ]] && [ "$selection" -ge 1 ] && [ "$selection" -le "$((i-1))" ]; then
                 echo "${options[$((selection-1))]}"
                 return 0
@@ -159,8 +154,7 @@ ui_confirm() {
         fi
         local response
         while true; do
-            # EOF (non-tty / Ctrl+D) must not auto-confirm — default to NO
-            read -r -p "$(echo -e "${THEME_SECONDARY}${question} [Y/n]: ${RESET}")" response || return 1
+            read -r -p "$(echo -e "${THEME_SECONDARY}${question} [Y/n]: ${RESET}")" response
             response=${response,,}
             case "$response" in
                 ""|y|yes) return 0 ;;

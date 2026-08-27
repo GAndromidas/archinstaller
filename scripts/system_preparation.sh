@@ -1,9 +1,5 @@
 #!/bin/bash
-set -euo pipefail
-
-# Ensure HOME is set before any path resolution
-: "${HOME:=/root}"
-export HOME
+set -uo pipefail
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -46,57 +42,38 @@ configure_pacman() {
   generate_default_mirrorlist
 
   local parallel_downloads="${PACMAN_PARALLEL:-10}"
-  local force="${FORCE_REAPPLY:-false}"
 
-  # ParallelDownloads: only change if it doesn't match target value
-  # In --force mode, always update to the target value
-  local current_parallel
-  current_parallel=$(grep -E '^ParallelDownloads\s*=' /etc/pacman.conf 2>/dev/null | grep -o '[0-9]\+' | head -1)
-  if [ -z "$current_parallel" ]; then
-    if grep -q '^#ParallelDownloads' /etc/pacman.conf; then
-      sudo sed -i "s/^#ParallelDownloads.*/ParallelDownloads = $parallel_downloads/" /etc/pacman.conf
-      log_success "Set ParallelDownloads = $parallel_downloads"
-    else
-      sudo sed -i "/^\[options\]/a ParallelDownloads = $parallel_downloads" /etc/pacman.conf
-      log_success "Added ParallelDownloads = $parallel_downloads"
-    fi
-  elif [ "$current_parallel" != "$parallel_downloads" ] || [ "$force" = true ]; then
+  if grep -q "^#ParallelDownloads" /etc/pacman.conf; then
+    sudo sed -i "s/^#ParallelDownloads.*/ParallelDownloads = $parallel_downloads/" /etc/pacman.conf
+    log_success "Uncommented and set ParallelDownloads = $parallel_downloads"
+  elif grep -q "^ParallelDownloads" /etc/pacman.conf; then
     sudo sed -i "s/^ParallelDownloads.*/ParallelDownloads = $parallel_downloads/" /etc/pacman.conf
-    log_success "Updated ParallelDownloads = $parallel_downloads (was $current_parallel)"
+    log_success "Updated ParallelDownloads = $parallel_downloads"
   else
-    log_info "ParallelDownloads already set to $parallel_downloads"
+    sudo sed -i "/^\[options\]/a ParallelDownloads = $parallel_downloads" /etc/pacman.conf
+    log_success "Added ParallelDownloads = $parallel_downloads"
   fi
 
-  # Color: only uncomment if commented
-  if grep -q '^#Color' /etc/pacman.conf; then
+  if grep -q "^#Color" /etc/pacman.conf; then
     sudo sed -i 's/^#Color/Color/' /etc/pacman.conf
     log_success "Uncommented Color setting"
-  elif grep -q '^Color' /etc/pacman.conf; then
-    log_info "Color already enabled"
   fi
 
-  # VerbosePkgLists: only uncomment if commented
-  if grep -q '^#VerbosePkgLists' /etc/pacman.conf; then
+  if grep -q "^#VerbosePkgLists" /etc/pacman.conf; then
     sudo sed -i 's/^#VerbosePkgLists/VerbosePkgLists/' /etc/pacman.conf
     log_success "Uncommented VerbosePkgLists setting"
-  elif grep -q '^VerbosePkgLists' /etc/pacman.conf; then
-    log_info "VerbosePkgLists already enabled"
   fi
 
-  # ILoveCandy: only add if not present (check both commented and uncommented)
-  if ! grep -q '^ILoveCandy' /etc/pacman.conf && ! grep -q '^#ILoveCandy' /etc/pacman.conf; then
+  if ! grep -q "^ILoveCandy" /etc/pacman.conf; then
     sudo sed -i '/^Color/a ILoveCandy' /etc/pacman.conf
     log_success "Added ILoveCandy setting"
-  else
-    log_info "ILoveCandy already configured"
   fi
 
-  # Multilib: only add if not present
-  if ! grep -q '^\[multilib\]' /etc/pacman.conf; then
+  if ! grep -q "^\[multilib\]" /etc/pacman.conf; then
     echo -e "\n[multilib]\nInclude = /etc/pacman.d/mirrorlist" | sudo tee -a /etc/pacman.conf >/dev/null
     log_success "Enabled multilib repository"
   else
-    log_info "Multilib repository already enabled"
+    log_success "Multilib repository already enabled"
   fi
 
   echo ""
@@ -177,16 +154,7 @@ update_system() {
 
 set_sudo_pwfeedback() {
   if ! sudo grep -q '^Defaults.*pwfeedback' /etc/sudoers /etc/sudoers.d/* 2>/dev/null; then
-    # Write to sudoers.d with validation BEFORE installing — a broken main
-    # sudoers file can lock the user out of sudo entirely
-    local tmp_sudoers=$(mktemp)
-    echo 'Defaults pwfeedback' > "$tmp_sudoers"
-    if sudo visudo -cf "$tmp_sudoers" >/dev/null 2>&1; then
-      run_step "Enabling sudo password feedback" bash -c "sudo install -m 440 '$tmp_sudoers' /etc/sudoers.d/90-archinstaller-pwfeedback"
-    else
-      log_error "Generated sudoers snippet failed validation — skipping pwfeedback setup"
-    fi
-    rm -f "$tmp_sudoers"
+    run_step "Enabling sudo password feedback" bash -c "echo 'Defaults env_reset,pwfeedback' | sudo EDITOR='tee -a' visudo"
   else
     log_warning "sudo pwfeedback already enabled. Skipping."
   fi

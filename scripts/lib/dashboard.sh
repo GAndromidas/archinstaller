@@ -1,9 +1,5 @@
 #!/bin/bash
-set -euo pipefail
-
-# Ensure HOME is set before any path resolution
-: "${HOME:=/root}"
-export HOME
+set -uo pipefail
 
 # ============================================================================
 # Dashboard Module — Professional wizard-style installation display
@@ -156,12 +152,6 @@ dashboard_step() {
 
 dashboard_run() {
     local script_path=$1
-
-    # Dry-run: never execute mutating step scripts
-    if [ "${DRY_RUN:-false}" = true ]; then
-        ui_info "Dry-run: skipping $(basename "$script_path") (would run for real without --dry-run)"
-        return 0
-    fi
 
     # Position cursor below dashboard frame for interactive prompts
     tput cup $((DASHBOARD_ROW_OFFSET + DASHBOARD_FRAME_END + 1)) 0

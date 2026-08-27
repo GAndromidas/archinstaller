@@ -1,10 +1,5 @@
 #!/bin/bash
-# wakeonlan_config.sh - Configure Wake-on-LAN
-set -euo pipefail
-
-# Ensure HOME is set before any path resolution
-: "${HOME:=/root}"
-export HOME
+set -uo pipefail
 
 # ============================================================================
 # Wake-on-LAN Configuration for ArchInstaller
@@ -27,8 +22,7 @@ is_laptop() {
     
     # Check DMI product type for laptop/chassis
     if command -v dmidecode &>/dev/null; then
-        local chassis_type
-        chassis_type=$(sudo dmidecode -s chassis-type 2>/dev/null | tr '[:upper:]' '[:lower:]')
+        local chassis_type=$(dmidecode -s chassis-type 2>/dev/null | tr '[:upper:]' '[:lower:]')
         case "$chassis_type" in
             "laptop"|"notebook"|"portable"|"sub notebook"|"convertible"|"detachable")
                 return 0
@@ -192,27 +186,22 @@ create_wol_service() {
 
     log_info "Creating systemd service for WoL on $iface"
 
-    # Find ethtool path — fail loudly rather than baking a bogus path into the unit
+    # Find ethtool path
     local ethtool_path
-    ethtool_path=$(command -v ethtool) || {
-        log_error "ethtool not found — cannot create WoL service for $iface"
-        return 1
-    }
+    ethtool_path=$(command -v ethtool) || ethtool_path="/usr/bin/ethtool"
 
-    # Create systemd service file.
-    # Bring the link up first: ethtool silently does nothing on a down interface.
-    # Run before network.target so WoL is set before any network manager may
-    # reset it; do NOT pull in network-pre.target (that's for network daemons).
+    # Create systemd service file
     sudo tee "$service_file" > /dev/null <<EOF
 [Unit]
 Description=Enable Wake-on-LAN for $iface
-After=systemd-modules-load.service
-Before=network.target
+After=network-pre.target
+Before=shutdown.target reboot.target halt.target
+Wants=network-pre.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/ip link set $iface up
 ExecStart=$ethtool_path -s $iface wol g
+ExecStop=$ethtool_path -s $iface wol g
 RemainAfterExit=yes
 
 [Install]
@@ -281,9 +270,8 @@ prompt_interface_selection() {
     # Find active interface (with internet)
     active_iface=$(get_active_ethernet_interface)
     
-    # All informational output goes to stderr — stdout is the return value
-    ui_info "Multiple ethernet interfaces detected:" >&2
-    echo "" >&2
+    ui_info "Multiple ethernet interfaces detected:"
+    echo ""
     
     # Build choices array
     local i=1
@@ -297,50 +285,47 @@ prompt_interface_selection() {
             status="${THEME_WARN}[No Internet]${RESET}"
         fi
         
-        echo -e "${THEME_TEXT}$i)${RESET} $iface $status" >&2
-        echo -e "   MAC: ${mac_addr:-N/A}" >&2
-        echo "" >&2
+        echo -e "${THEME_TEXT}$i)${RESET} $iface $status"
+        echo -e "   MAC: ${mac_addr:-N/A}"
+        echo ""
         choices+=("$iface")
         i=$((i + 1))
     done
     
-    echo -e "${THEME_TEXT}a)${RESET} Configure ALL interfaces" >&2
-    echo -e "${THEME_TEXT}s)${RESET} Skip Wake-on-LAN configuration" >&2
-    echo "" >&2
+    echo -e "${THEME_TEXT}a)${RESET} Configure ALL interfaces"
+    echo -e "${THEME_TEXT}s)${RESET} Skip Wake-on-LAN configuration"
+    echo ""
     
     while true; do
-        echo -ne "${THEME_TEXT_BOLD}Select option [1-${#interfaces[@]}, a, s]:${RESET} " >&2
-        # EOF must not loop forever
-        read -r choice < /dev/tty || return 1
+        echo -ne "${THEME_TEXT_BOLD}Select option [1-${#interfaces[@]}, a, s]:${RESET} "
+        read -r choice
         
         case "$choice" in
             [0-9]*)
                 if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le ${#interfaces[@]} ]; then
                     local selected_iface="${choices[$((choice-1))]}"
-                    echo "" >&2
-                    # Info output must go to stderr — this function's stdout is
-                    # captured by the caller as the return value
-                    ui_info "Selected interface: $selected_iface" >&2
+                    echo ""
+                    ui_info "Selected interface: $selected_iface"
                     echo "$selected_iface"
                     return 0
                 else
-                    ui_error "Invalid selection. Please try again." >&2
+                    ui_error "Invalid selection. Please try again."
                 fi
                 ;;
             a|A)
-                echo "" >&2
-                ui_info "Configuring ALL ethernet interfaces" >&2
+                echo ""
+                ui_info "Configuring ALL ethernet interfaces"
                 echo "ALL"
                 return 0
                 ;;
             s|S)
-                echo "" >&2
-                ui_info "Wake-on-LAN configuration skipped" >&2
+                echo ""
+                ui_info "Wake-on-LAN configuration skipped"
                 echo "SKIP"
                 return 0
                 ;;
             *)
-                ui_error "Invalid option. Please try again." >&2
+                ui_error "Invalid option. Please try again."
                 ;;
         esac
     done

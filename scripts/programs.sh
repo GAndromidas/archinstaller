@@ -1,9 +1,5 @@
 #!/bin/bash
-set -euo pipefail
-
-# Ensure HOME is set before any path resolution
-: "${HOME:=/root}"
-export HOME
+set -uo pipefail
 
 # Get the directory where this script is located, resolving symlinks
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -102,7 +98,7 @@ handle_de_packages() {
 	fi
 
 	local de
-	de=$(echo "${XDG_CURRENT_DESKTOP:-}" | tr '[:upper:]' '[:lower:]')
+	de=$(echo "$XDG_CURRENT_DESKTOP" | tr '[:upper:]' '[:lower:]')
 
 	case "$de" in
 	kde)
@@ -135,7 +131,7 @@ handle_flatpak_packages() {
 	fi
 
 	local de
-	de=$(echo "${XDG_CURRENT_DESKTOP:-}" | tr '[:upper:]' '[:lower:]')
+	de=$(echo "$XDG_CURRENT_DESKTOP" | tr '[:upper:]' '[:lower:]')
 	[[ -z "$de" ]] && de="generic"
 
 	local de_flatpaks=()
@@ -284,24 +280,8 @@ install_flatpak_packages() {
 
 remove_pacman_packages() {
 	if [[ ${#specific_remove_programs[@]} -eq 0 ]]; then return; fi
-	ui_info "Removing ${#specific_remove_programs[@]} conflicting/unnecessary packages (only those installed)..."
-
-	# Idempotency: only attempt to remove packages that are actually installed
-	local to_remove=()
+	ui_info "Removing ${#specific_remove_programs[@]} conflicting/unnecessary packages..."
 	for pkg in "${specific_remove_programs[@]}"; do
-		if pacman -Q "$pkg" &>/dev/null; then
-			to_remove+=("$pkg")
-		else
-			log_info "$pkg not installed, skipping removal"
-		fi
-	done
-
-	if [[ ${#to_remove[@]} -eq 0 ]]; then
-		log_info "No packages to remove"
-		return 0
-	fi
-
-	for pkg in "${to_remove[@]}"; do
 		if pacman_remove "$pkg"; then PROGRAMS_REMOVED+=("$pkg"); else PROGRAMS_ERRORS+=("$pkg (removal)"); fi
 	done
 }

@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euo pipefail
+set -uo pipefail
 
 # Installation log file
 INSTALL_LOG="$HOME/.archinstaller.log"
@@ -17,7 +17,6 @@ OPTIONS:
     -v, --verbose   Enable verbose output (show all package installation details)
     -q, --quiet     Quiet mode (minimal output)
     -d, --dry-run   Preview what will be installed without making changes
-    -f, --force     Re-apply all settings (re-run steps even if previously completed)
 
 DESCRIPTION:
     ArchInstaller transforms a fresh Arch Linux installation into a fully
@@ -82,10 +81,8 @@ EOF
 }
 
 
-# Clear terminal for clean interface (skip in non-interactive/dry-run/quiet modes)
-if [ -t 1 ] && [ "${DRY_RUN:-false}" = false ] && [ "${VERBOSE:-false}" = false ]; then
-  clear
-fi
+# Clear terminal for clean interface
+clear
 
 # Get's directory where this script is located (archinstaller root)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -110,7 +107,14 @@ source "$SCRIPTS_DIR/common.sh"
 source "$SCRIPTS_DIR/lib/dashboard.sh"
 
 # Install gum silently for enhanced UI experience
-# (deferred until after sudo authentication below — see the sudo -v block)
+if ! command -v gum >/dev/null 2>&1; then
+  log_to_file "Installing gum for enhanced UI experience..."
+  if sudo pacman -S --noconfirm gum >>"$INSTALL_LOG" 2>&1; then
+    log_to_file "Gum installed successfully"
+  else
+    log_to_file "Failed to install gum, falling back to basic UI"
+  fi
+fi
 
 # Initialize core library
 init_core
@@ -135,9 +139,6 @@ for arg in "$@"; do
       DRY_RUN=true
       VERBOSE=true
       ;;
-    --force|-f)
-      FORCE_REAPPLY=true
-      ;;
     *)
       echo "Unknown option: $arg"
       echo "Use --help for usage information"
@@ -149,7 +150,6 @@ export VERBOSE
 export DRY_RUN
 export INSTALL_LOG
 export START_TIME
-export FORCE_REAPPLY="${FORCE_REAPPLY:-false}"
 
 arch_ascii
 
@@ -176,27 +176,22 @@ check_system_requirements() {
     hardware_issues+=("Legacy BIOS mode detected - some features may not work optimally")
   fi
 
-  if command -v lspci >/dev/null 2>&1 && lspci | grep -qi vga; then
-    # Match on the descriptive text of the VGA line, not the PCI address field
-    if lspci | grep -i vga | grep -qiE 'intel'; then
-      log_to_file "Intel GPU detected - mesa drivers will be configured"
-    elif lspci | grep -i vga | grep -qiE 'amd|ati|radeon'; then
-      log_to_file "AMD GPU detected - open-source drivers will be configured"
-    elif lspci | grep -i vga | grep -qiE 'nvidia'; then
-      log_to_file "NVIDIA GPU detected - proprietary or nouveau drivers may be configured"
-    else
-      log_to_file "Unknown GPU detected - generic drivers will be used"
-    fi
+  if lspci | grep -qi vga; then
+    local gpu_vendor=$(lspci | grep -i vga | head -1 | awk '{print $1}' | cut -d: -f2)
+    case "$gpu_vendor" in
+      *"Intel"*) log_to_file "Intel GPU detected - mesa drivers will be configured" ;;
+      *"AMD"*)   log_to_file "AMD GPU detected - open-source drivers will be configured" ;;
+      *)         log_to_file "Unknown GPU detected - generic drivers will be used" ;;
+    esac
   else
     hardware_issues+=("No GPU detected - this may be a headless system")
   fi
 
-  local root_device
-  root_device=$(findmnt -n -o SOURCE / 2>/dev/null | cut -d'[' -f1 | cut -d'/' -f3)
+  local root_device=$(findmnt -n -o SOURCE / | cut -d'[' -f1 | cut -d'/' -f3)
   if [ -n "$root_device" ]; then
     if echo "$root_device" | grep -q "nvme"; then
       log_to_file "NVMe storage detected - NVMe optimizations will be applied"
-    elif [ -b "/dev/$root_device" ] && [ -f "/sys/block/${root_device}/queue/rotational" ] && [ "$(cat /sys/block/${root_device}/queue/rotational 2>/dev/null)" = "0" ]; then
+    elif [ -b "/dev/$root_device" ] && [ "$(cat /sys/block/${root_device}/queue/rotational 2>/dev/null)" = "0" ]; then
       log_to_file "SSD storage detected - SSD optimizations will be applied"
     else
       log_to_file "HDD storage detected - HDD optimizations will be applied"
@@ -228,8 +223,7 @@ check_system_requirements() {
   log_to_file "System requirements and hardware compatibility checks passed"
 }
 
-# Run system checks. UI helpers write to /dev/tty so interactive prompts stay
-# visible even with stdout redirected to the log.
+# Run system checks — stdout goes to log, interactive prompts use /dev/tty
 check_system_requirements >> "$INSTALL_LOG" 2>&1
 
 show_menu
@@ -323,14 +317,14 @@ show_resume_menu() {
       echo ""
       
       if [ "$has_failures" = true ]; then
-        if gum_confirm "Found failed steps. Retry failed steps first?"; then
+        if gum confirm --default=true "Found failed steps. Retry failed steps first?"; then
           ui_info "Will retry failed steps during installation"
           return 0
-        elif gum_confirm "Resume from last completed step?"; then
+        elif gum confirm --default=false "Resume from last completed step?"; then
           ui_success "Resuming installation from last completed step..."
           return 0
         else
-          if gum_confirm "Start fresh installation?" "This will clear previous progress."; then
+          if gum confirm --default=false "Start fresh installation (this will clear previous progress)?"; then
             rm -f "$STATE_FILE" 2>/dev/null || true
             ui_info "Starting fresh installation..."
             return 0
@@ -340,11 +334,11 @@ show_resume_menu() {
           fi
         fi
       else
-        if gum_confirm "Resume installation from where you left off?"; then
+        if gum confirm --default=true "Resume installation from where you left off?"; then
           ui_success "Resuming installation..."
           return 0
         else
-          if gum_confirm "Start fresh installation?" "This will clear previous progress."; then
+          if gum confirm --default=false "Start fresh installation (this will clear previous progress)?"; then
             rm -f "$STATE_FILE" 2>/dev/null || true
             ui_info "Starting fresh installation..."
             return 0
@@ -380,7 +374,7 @@ show_resume_menu() {
         echo "3. Start fresh installation"
         echo "4. Cancel"
         echo ""
-        read -r -p "Choose an option (1-4): " choice || choice="4"
+        read -p "Choose an option (1-4): " choice
         
         case "$choice" in
           1)
@@ -406,11 +400,15 @@ show_resume_menu() {
             ;;
         esac
       else
-        if gum_confirm "Resume installation from where you left off?"; then
+        echo "Resume installation from where you left off? (y/n)"
+        read -r response
+        if [[ "$response" =~ ^[Yy]$ ]]; then
           ui_success "Resuming installation..."
           return 0
         else
-          if gum_confirm "Start fresh installation?" "This will clear previous progress."; then
+          echo "Start fresh installation? (y/n)"
+          read -r fresh_response
+          if [[ "$fresh_response" =~ ^[Yy]$ ]]; then
             rm -f "$STATE_FILE" 2>/dev/null || true
             ui_info "Starting fresh installation..."
             return 0
@@ -443,23 +441,6 @@ fi
 if [ "$DRY_RUN" = false ]; then
   ui_info "Please enter your sudo password to begin the installation:"
   sudo -v || { ui_error "Sudo required. Exiting."; exit 1; }
-  # Now that sudo is authenticated, install gum silently for enhanced UI
-  # Suppress all pacman output so menu shows correctly with gum
-  install_gum_if_missing() {
-    if ! command -v gum >/dev/null 2>&1; then
-      if command -v pacman >/dev/null 2>&1; then
-        log_to_file "Installing gum silently for enhanced UI..."
-        sudo pacman -S --noconfirm --needed --quiet gum >>"$INSTALL_LOG" 2>&1 || \
-          sudo pacman -S --noconfirm --needed gum >>/dev/null 2>&1 || true
-        if command -v gum >/dev/null 2>&1; then
-          log_to_file "Gum installed successfully"
-        else
-          log_to_file "Failed to install gum — using basic UI"
-        fi
-      fi
-    fi
-  }
-  install_gum_if_missing
 else
   ui_info "Dry-run mode: Skipping sudo authentication"
 fi
@@ -468,13 +449,10 @@ fi
 if [ "$DRY_RUN" = false ]; then
   while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
   SUDO_KEEPALIVE_PID=$!
-  # Enhanced trap with error handling.
-  # NOTE: no ERR trap — without `set -e` it fires on every handled failure
-  # (grep no-match, arithmetic, etc.) and corrupts resume state with bogus
-  # FAILED entries. EXIT/INT/TERM are sufficient.
-  trap 'cleanup_on_error $? $LINENO; save_log_on_exit' EXIT INT TERM
+  # Enhanced trap with error handling
+  trap 'cleanup_on_error $? $LINENO; save_log_on_exit' EXIT INT TERM ERR
 else
-  trap 'cleanup_on_error $? $LINENO; save_log_on_exit' EXIT INT TERM
+  trap 'cleanup_on_error $? $LINENO; save_log_on_exit' EXIT INT TERM ERR
 fi
 
 # Function to mark step as completed with atomic append
@@ -498,11 +476,7 @@ mark_step_complete() {
 }
 
 # Function to check if step was completed
-# Respects FORCE_REAPPLY: when set, always return false (re-run everything)
 is_step_complete() {
-  if [ "${FORCE_REAPPLY:-false}" = true ]; then
-    return 1
-  fi
   [ -f "$STATE_FILE" ] && grep -qE "^(COMPLETED: )?$1$" "$STATE_FILE"
 }
 

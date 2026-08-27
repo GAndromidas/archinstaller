@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euo pipefail
+set -uo pipefail
 
 # ============================================================================
 # Package Management Library - Pacman, AUR, Flatpak operations
@@ -16,8 +16,7 @@ is_package_installed() {
             pacman -Q "$pkg" &>/dev/null
             ;;
         flatpak)
-            # Match exact application ID (list output includes remotes/origins as extra columns)
-            flatpak list --app --columns=application 2>/dev/null | grep -qxF "$pkg"
+            flatpak list | grep -q "^$pkg" &>/dev/null
             ;;
     esac
 }
@@ -95,8 +94,6 @@ flatpak_install_single() {
         printf "${THEME_TEXT}Installing Flatpak app:${RESET} %-30s" "$pkg"
     fi
 
-    ensure_flathub_remote || return 1
-
     local output
     if output=$(sudo flatpak install -y --noninteractive flathub "$pkg" 2>&1); then
         [ "$verbose" = true ] && printf "${THEME_SUCCESS} ✓ Success${RESET}\n"
@@ -112,21 +109,6 @@ flatpak_install_single() {
     fi
 }
 fi
-
-# Ensure the Flathub remote exists at system scope before installing.
-# Installs run with sudo (system-wide), so the remote must be added with sudo too;
-# a user-scope remote is invisible to system installations.
-ensure_flathub_remote() {
-    command -v flatpak &>/dev/null || return 1
-    if ! sudo flatpak remotes --columns=name 2>/dev/null | grep -qx "flathub"; then
-        ui_info "Adding Flathub remote..."
-        sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo >>"$INSTALL_LOG" 2>&1 || {
-            log_error "Failed to add Flathub remote"
-            return 1
-        }
-    fi
-    return 0
-}
 
 # Generic package installer with error handling
 if ! declare -f install_package_generic >/dev/null 2>&1; then
@@ -155,28 +137,27 @@ install_package_generic() {
             ui_info "Dry-run: Would install $pkg via $manager_name"
             INSTALLED_PACKAGES+=("$pkg")
         else
-            local error_output=0
+            local error_output
             case "$manager" in
                 pacman)
-                    error_output=$(sudo pacman -S --noconfirm --needed "$pkg" 2>&1) || error_output=1
+                    error_output=$(sudo pacman -S --noconfirm --needed "$pkg" 2>&1)
                     ;;
                 aur)
-                    error_output=$(yay -S --noconfirm --needed "$pkg" 2>&1) || error_output=1
+                    error_output=$(yay -S --noconfirm --needed "$pkg" 2>&1)
                     ;;
                 flatpak)
-                    ensure_flathub_remote || { FAILED_PACKAGES+=("$pkg"); ((failed++) || true); continue; }
-                    error_output=$(sudo flatpak install --noninteractive -y --system flathub "$pkg" 2>&1) || error_output=1
+                    error_output=$(sudo flatpak install --noninteractive -y "$pkg" 2>&1)
                     ;;
             esac
 
-            if [ "$error_output" = 0 ]; then
+            if [ $? -eq 0 ]; then
                 INSTALLED_PACKAGES+=("$pkg")
             else
                 ui_error "Failed to install $pkg"
                 FAILED_PACKAGES+=("$pkg")
                 log_error "Failed to install $pkg via $manager_name"
                 echo "$error_output" >> "$INSTALL_LOG"
-                failed=$((failed + 1))
+                ((failed++))
             fi
         fi
     done
@@ -237,10 +218,6 @@ remove_package() {
         flatpak)
             sudo flatpak uninstall -y "$pkg"
             ;;
-        *)
-            log_error "Unknown package manager: $manager"
-            return 1
-            ;;
     esac
 }
 fi
@@ -249,9 +226,7 @@ fi
 if ! declare -f update_system >/dev/null 2>&1; then
 update_system() {
     ui_info "Updating system packages..."
-    # No --overwrite: blindly clobbering conflicting files can break the system.
-    # If a real file conflict appears, it should be resolved explicitly.
-    if sudo pacman -Syu --noconfirm; then
+    if sudo pacman -Syu --noconfirm --overwrite="*"; then
         ui_success "System updated successfully"
     else
         ui_error "System update failed"
@@ -273,8 +248,7 @@ fi
 if ! declare -f preload_package_lists >/dev/null 2>&1; then
 preload_package_lists() {
     ui_info "Preloading package lists..."
-    # Refresh DB and upgrade together to avoid partial-upgrade breakage on Arch
-    sudo pacman -Syu --noconfirm >>"$INSTALL_LOG" 2>&1
+    sudo pacman -Sy --noconfirm >>"$INSTALL_LOG" 2>&1
     if command -v yay >/dev/null; then
         yay -Sy --noconfirm >>"$INSTALL_LOG" 2>&1
     fi

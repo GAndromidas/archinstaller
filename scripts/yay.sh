@@ -1,11 +1,8 @@
 #!/bin/bash
+
 # yay.sh - Install yay AUR helper
 # This script installs yay, which is required for AUR package installation
-set -euo pipefail
-
-# Ensure HOME is set before any path resolution
-: "${HOME:=/root}"
-export HOME
+set -uo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -64,10 +61,7 @@ install_yay() {
   # Build yay
   ui_info "Building and installing yay..."
   echo -e "${THEME_TEXT}Please enter your sudo password to build and install yay:${RESET}"
-  if ! sudo -v; then
-    log_error "Sudo authentication failed — cannot install yay"
-    return 1
-  fi
+  sudo -v
   if makepkg -si --noconfirm --needed 2>&1 | tee -a "$INSTALL_LOG"; then
     log_success "yay built and installed successfully"
   else
@@ -84,7 +78,12 @@ install_yay() {
     return 1
   fi
 
-  # Clean up (trap will fire on RETURN, but call explicitly for clarity)
+  # Import GPG keys for makepkg (prevents常见 AUR build failures)
+  ui_info "Importing GPG keys..."
+  gpg --keyserver keyserver.ubuntu.com --recv-keys 0xEA33F3A8DE0F8D6E 2>/dev/null || true
+
+  # Clean up
+  ui_info "Cleaning up temporary files..."
   cleanup_tempdir
   trap - RETURN
 }

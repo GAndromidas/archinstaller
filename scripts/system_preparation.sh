@@ -1,5 +1,9 @@
 #!/bin/bash
-set -uo pipefail
+set -euo pipefail
+
+# Ensure HOME is set before any path resolution
+: "${HOME:=/root}"
+export HOME
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -42,38 +46,57 @@ configure_pacman() {
   generate_default_mirrorlist
 
   local parallel_downloads="${PACMAN_PARALLEL:-10}"
+  local force="${FORCE_REAPPLY:-false}"
 
-  if grep -q "^#ParallelDownloads" /etc/pacman.conf; then
-    sudo sed -i "s/^#ParallelDownloads.*/ParallelDownloads = $parallel_downloads/" /etc/pacman.conf
-    log_success "Uncommented and set ParallelDownloads = $parallel_downloads"
-  elif grep -q "^ParallelDownloads" /etc/pacman.conf; then
+  # ParallelDownloads: only change if it doesn't match target value
+  # In --force mode, always update to the target value
+  local current_parallel
+  current_parallel=$(grep -E '^ParallelDownloads\s*=' /etc/pacman.conf 2>/dev/null | grep -o '[0-9]\+' | head -1)
+  if [ -z "$current_parallel" ]; then
+    if grep -q '^#ParallelDownloads' /etc/pacman.conf; then
+      sudo sed -i "s/^#ParallelDownloads.*/ParallelDownloads = $parallel_downloads/" /etc/pacman.conf
+      log_success "Set ParallelDownloads = $parallel_downloads"
+    else
+      sudo sed -i "/^\[options\]/a ParallelDownloads = $parallel_downloads" /etc/pacman.conf
+      log_success "Added ParallelDownloads = $parallel_downloads"
+    fi
+  elif [ "$current_parallel" != "$parallel_downloads" ] || [ "$force" = true ]; then
     sudo sed -i "s/^ParallelDownloads.*/ParallelDownloads = $parallel_downloads/" /etc/pacman.conf
-    log_success "Updated ParallelDownloads = $parallel_downloads"
+    log_success "Updated ParallelDownloads = $parallel_downloads (was $current_parallel)"
   else
-    sudo sed -i "/^\[options\]/a ParallelDownloads = $parallel_downloads" /etc/pacman.conf
-    log_success "Added ParallelDownloads = $parallel_downloads"
+    log_info "ParallelDownloads already set to $parallel_downloads"
   fi
 
-  if grep -q "^#Color" /etc/pacman.conf; then
+  # Color: only uncomment if commented
+  if grep -q '^#Color' /etc/pacman.conf; then
     sudo sed -i 's/^#Color/Color/' /etc/pacman.conf
     log_success "Uncommented Color setting"
+  elif grep -q '^Color' /etc/pacman.conf; then
+    log_info "Color already enabled"
   fi
 
-  if grep -q "^#VerbosePkgLists" /etc/pacman.conf; then
+  # VerbosePkgLists: only uncomment if commented
+  if grep -q '^#VerbosePkgLists' /etc/pacman.conf; then
     sudo sed -i 's/^#VerbosePkgLists/VerbosePkgLists/' /etc/pacman.conf
     log_success "Uncommented VerbosePkgLists setting"
+  elif grep -q '^VerbosePkgLists' /etc/pacman.conf; then
+    log_info "VerbosePkgLists already enabled"
   fi
 
-  if ! grep -q "^ILoveCandy" /etc/pacman.conf; then
+  # ILoveCandy: only add if not present (check both commented and uncommented)
+  if ! grep -q '^ILoveCandy' /etc/pacman.conf && ! grep -q '^#ILoveCandy' /etc/pacman.conf; then
     sudo sed -i '/^Color/a ILoveCandy' /etc/pacman.conf
     log_success "Added ILoveCandy setting"
+  else
+    log_info "ILoveCandy already configured"
   fi
 
-  if ! grep -q "^\[multilib\]" /etc/pacman.conf; then
+  # Multilib: only add if not present
+  if ! grep -q '^\[multilib\]' /etc/pacman.conf; then
     echo -e "\n[multilib]\nInclude = /etc/pacman.d/mirrorlist" | sudo tee -a /etc/pacman.conf >/dev/null
     log_success "Enabled multilib repository"
   else
-    log_success "Multilib repository already enabled"
+    log_info "Multilib repository already enabled"
   fi
 
   echo ""

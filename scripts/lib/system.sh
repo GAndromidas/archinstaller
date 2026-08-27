@@ -1,5 +1,9 @@
 #!/bin/bash
-set -uo pipefail
+set -euo pipefail
+
+# Ensure HOME is set before any path resolution
+: "${HOME:=/root}"
+export HOME
 
 # ============================================================================
 # System Detection Library - Hardware and System Information

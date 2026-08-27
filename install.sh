@@ -1,5 +1,5 @@
 #!/bin/bash
-set -uo pipefail
+set -euo pipefail
 
 # Installation log file
 INSTALL_LOG="$HOME/.archinstaller.log"
@@ -17,6 +17,7 @@ OPTIONS:
     -v, --verbose   Enable verbose output (show all package installation details)
     -q, --quiet     Quiet mode (minimal output)
     -d, --dry-run   Preview what will be installed without making changes
+    -f, --force     Re-apply all settings (re-run steps even if previously completed)
 
 DESCRIPTION:
     ArchInstaller transforms a fresh Arch Linux installation into a fully
@@ -81,8 +82,10 @@ EOF
 }
 
 
-# Clear terminal for clean interface
-clear
+# Clear terminal for clean interface (skip in non-interactive/dry-run/quiet modes)
+if [ -t 1 ] && [ "${DRY_RUN:-false}" = false ] && [ "${VERBOSE:-false}" = false ]; then
+  clear
+fi
 
 # Get's directory where this script is located (archinstaller root)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -108,20 +111,6 @@ source "$SCRIPTS_DIR/lib/dashboard.sh"
 
 # Install gum silently for enhanced UI experience
 # (deferred until after sudo authentication below — see the sudo -v block)
-install_gum_if_missing() {
-  if ! command -v gum >/dev/null 2>&1; then
-    if ! command -v pacman >/dev/null 2>&1; then
-      log_to_file "pacman not found, cannot install gum — falling back to basic UI"
-      return 1
-    fi
-    log_to_file "Installing gum for enhanced UI experience..."
-    if sudo pacman -S --noconfirm --needed gum >>"$INSTALL_LOG" 2>&1; then
-      log_to_file "Gum installed successfully"
-    else
-      log_to_file "Failed to install gum, falling back to basic UI"
-    fi
-  fi
-}
 
 # Initialize core library
 init_core
@@ -146,6 +135,9 @@ for arg in "$@"; do
       DRY_RUN=true
       VERBOSE=true
       ;;
+    --force|-f)
+      FORCE_REAPPLY=true
+      ;;
     *)
       echo "Unknown option: $arg"
       echo "Use --help for usage information"
@@ -157,6 +149,7 @@ export VERBOSE
 export DRY_RUN
 export INSTALL_LOG
 export START_TIME
+export FORCE_REAPPLY="${FORCE_REAPPLY:-false}"
 
 arch_ascii
 
@@ -198,11 +191,12 @@ check_system_requirements() {
     hardware_issues+=("No GPU detected - this may be a headless system")
   fi
 
-  local root_device=$(findmnt -n -o SOURCE / | cut -d'[' -f1 | cut -d'/' -f3)
+  local root_device
+  root_device=$(findmnt -n -o SOURCE / 2>/dev/null | cut -d'[' -f1 | cut -d'/' -f3)
   if [ -n "$root_device" ]; then
     if echo "$root_device" | grep -q "nvme"; then
       log_to_file "NVMe storage detected - NVMe optimizations will be applied"
-    elif [ -b "/dev/$root_device" ] && [ "$(cat /sys/block/${root_device}/queue/rotational 2>/dev/null)" = "0" ]; then
+    elif [ -b "/dev/$root_device" ] && [ -f "/sys/block/${root_device}/queue/rotational" ] && [ "$(cat /sys/block/${root_device}/queue/rotational 2>/dev/null)" = "0" ]; then
       log_to_file "SSD storage detected - SSD optimizations will be applied"
     else
       log_to_file "HDD storage detected - HDD optimizations will be applied"
@@ -449,7 +443,22 @@ fi
 if [ "$DRY_RUN" = false ]; then
   ui_info "Please enter your sudo password to begin the installation:"
   sudo -v || { ui_error "Sudo required. Exiting."; exit 1; }
-  # Now that sudo is authenticated, install gum if missing
+  # Now that sudo is authenticated, install gum silently for enhanced UI
+  # Suppress all pacman output so menu shows correctly with gum
+  install_gum_if_missing() {
+    if ! command -v gum >/dev/null 2>&1; then
+      if command -v pacman >/dev/null 2>&1; then
+        log_to_file "Installing gum silently for enhanced UI..."
+        sudo pacman -S --noconfirm --needed --quiet gum >>"$INSTALL_LOG" 2>&1 || \
+          sudo pacman -S --noconfirm --needed gum >>/dev/null 2>&1 || true
+        if command -v gum >/dev/null 2>&1; then
+          log_to_file "Gum installed successfully"
+        else
+          log_to_file "Failed to install gum — using basic UI"
+        fi
+      fi
+    fi
+  }
   install_gum_if_missing
 else
   ui_info "Dry-run mode: Skipping sudo authentication"
@@ -489,7 +498,11 @@ mark_step_complete() {
 }
 
 # Function to check if step was completed
+# Respects FORCE_REAPPLY: when set, always return false (re-run everything)
 is_step_complete() {
+  if [ "${FORCE_REAPPLY:-false}" = true ]; then
+    return 1
+  fi
   [ -f "$STATE_FILE" ] && grep -qE "^(COMPLETED: )?$1$" "$STATE_FILE"
 }
 

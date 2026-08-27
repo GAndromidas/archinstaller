@@ -1,8 +1,11 @@
 #!/bin/bash
-
 # yay.sh - Install yay AUR helper
 # This script installs yay, which is required for AUR package installation
-set -uo pipefail
+set -euo pipefail
+
+# Ensure HOME is set before any path resolution
+: "${HOME:=/root}"
+export HOME
 
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -81,8 +84,7 @@ install_yay() {
     return 1
   fi
 
-  # Clean up
-  ui_info "Cleaning up temporary files..."
+  # Clean up (trap will fire on RETURN, but call explicitly for clarity)
   cleanup_tempdir
   trap - RETURN
 }

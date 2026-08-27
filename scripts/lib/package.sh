@@ -1,5 +1,5 @@
 #!/bin/bash
-set -uo pipefail
+set -euo pipefail
 
 # ============================================================================
 # Package Management Library - Pacman, AUR, Flatpak operations
@@ -155,21 +155,21 @@ install_package_generic() {
             ui_info "Dry-run: Would install $pkg via $manager_name"
             INSTALLED_PACKAGES+=("$pkg")
         else
-            local error_output
+            local error_output=0
             case "$manager" in
                 pacman)
-                    error_output=$(sudo pacman -S --noconfirm --needed "$pkg" 2>&1)
+                    error_output=$(sudo pacman -S --noconfirm --needed "$pkg" 2>&1) || error_output=1
                     ;;
                 aur)
-                    error_output=$(yay -S --noconfirm --needed "$pkg" 2>&1)
+                    error_output=$(yay -S --noconfirm --needed "$pkg" 2>&1) || error_output=1
                     ;;
                 flatpak)
                     ensure_flathub_remote || { FAILED_PACKAGES+=("$pkg"); ((failed++) || true); continue; }
-                    error_output=$(sudo flatpak install --noninteractive -y --system flathub "$pkg" 2>&1)
+                    error_output=$(sudo flatpak install --noninteractive -y --system flathub "$pkg" 2>&1) || error_output=1
                     ;;
             esac
 
-            if [ $? -eq 0 ]; then
+            if [ "$error_output" = 0 ]; then
                 INSTALLED_PACKAGES+=("$pkg")
             else
                 ui_error "Failed to install $pkg"

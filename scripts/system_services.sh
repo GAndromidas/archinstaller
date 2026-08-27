@@ -1,5 +1,9 @@
 #!/bin/bash
-set -uo pipefail
+set -euo pipefail
+
+# Ensure HOME is set before any path resolution
+: "${HOME:=/root}"
+export HOME
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,29 +31,35 @@ configure_firewalld() {
   sudo systemctl start firewalld
   sudo systemctl enable firewalld
 
-  # Set default zone to drop — deny incoming, allow outgoing, explicit allow for services
-  sudo firewall-cmd --set-default-zone=drop
-  log_success "Default zone set to drop (incoming denied, outgoing allowed)"
+  # Set default zone to block — denies incoming connections (with ICMP response),
+  # allows all outgoing. Safe default that won't lock out the user.
+  sudo firewall-cmd --set-default-zone=block
+  log_success "Default zone set to block (incoming denied, outgoing allowed)"
 
-  # Allow SSH — check the PERMANENT config, since that's what we modify
-  # (runtime and permanent can diverge after zone changes/reloads)
+  # Allow SSH — check the permanent config before modifying
   if ! sudo firewall-cmd --permanent --list-services 2>/dev/null | grep -qw ssh; then
     sudo firewall-cmd --add-service=ssh --permanent
-    sudo firewall-cmd --reload
     log_success "SSH allowed through Firewalld."
   else
-    log_warning "SSH is already allowed. Skipping SSH service configuration."
+    log_info "SSH already allowed in Firewalld."
   fi
+
+  # Allow ping/ICMP — block zone still responds to ICMP, but be explicit
+  if ! sudo firewall-cmd --permanent --list-icmp-blocks 2>/dev/null | grep -qw echo-request; then
+    sudo firewall-cmd --add-icmp-block=echo-request --permanent
+    log_info "ICMP echo-request blocked (ping ignored). Set to allow if needed."
+  fi
+
+  # Reload to apply permanent rules
+  sudo firewall-cmd --reload
 
   # Check if KDE Connect is installed
   if pacman -Q kdeconnect &>/dev/null; then
-    # Allow specific ports for KDE Connect
+    # Allow KDE Connect ports (1714-1764 TCP/UDP)
     sudo firewall-cmd --add-port=1714-1764/udp --permanent
     sudo firewall-cmd --add-port=1714-1764/tcp --permanent
     sudo firewall-cmd --reload
     log_success "KDE Connect ports allowed through Firewalld."
-  else
-    log_warning "KDE Connect is not installed. Skipping KDE Connect service configuration."
   fi
 }
 

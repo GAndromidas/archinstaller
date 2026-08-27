@@ -30,6 +30,8 @@ Transform your minimal Arch Linux installation into a fully configured, optimize
 | **Security-First** | Comprehensive hardening enabled by default with firewall and fail2ban |
 | **Performance-Optimized** | Intelligent I/O scheduling and kernel tuning for optimal responsiveness |
 | **Reliable** | Resume functionality for interrupted installations with progress tracking |
+| **Idempotent** | Re-running on an already-configured system is safe — no duplicates, no broken configs |
+| **Update-Friendly** | `--force` re-applies updated defaults after you `git pull` the installer |
 
 ---
 
@@ -109,15 +111,24 @@ UFW/Firewalld:
   - SSH automatically allowed
   - KDE Connect ports opened when detected (1714-1764/tcp/udp)
   - EndeavourOS uses firewalld by default, Arch uses UFW
+  - Firewalld default zone: block (safer than drop, denies without ICMP responses)
+  - Idempotent: safe to re-run without duplicating rules
 
 # SSH Protection
 Fail2ban:
+  - Auto-detects firewall backend and uses the correct banaction:
+    * UFW        → banaction = ufw
+    * Firewalld  → banaction = firewallcmd-ipset (modern; replaces deprecated firewallcmd-allports)
+    * Neither    → banaction = iptables-multiport (fail2ban default)
+  - Drops configuration in /etc/fail2ban/jail.d/archinstaller.local (survives package updates)
   - Configured BEFORE service start (jails active from first boot)
   - sshd jail explicitly enabled — no silent no-op protection
   - 1-hour ban duration (increased from default 10min)
   - 3 retry limit (decreased from default 5)
   - systemd backend for better integration
-  - Automatic brute-force detection
+  - Daemon readiness verified with polling (not fixed sleep)
+  - Legacy jail.local (no jails enabled) auto-detected and migrated
+  - SSH jail validated as active before reporting success
 
 # User Security
 Sudo:
@@ -231,7 +242,23 @@ OPTIONS:
   -v, --verbose   Enable detailed output
   -q, --quiet     Minimal output mode
   -d, --dry-run   Preview changes only
+  -f, --force     Re-apply all settings (re-runs steps even if previously completed)
 ```
+
+#### Update Workflow
+
+When you update the installer (e.g., `git pull`), use `--force` to re-apply new defaults to an already-configured system:
+
+```bash
+git pull              # get latest changes
+./install.sh --force  # re-apply updated settings, skip completed steps
+```
+
+Without `--force`, the installer uses its built-in idempotency (state file at `~/.archinstaller.state`, config diff checks, `pacman --needed`) to skip already-applied steps safely. With `--force`, all main steps re-run to pick up the latest defaults.
+
+#### Resume from Interruption
+
+If the installer is interrupted (Ctrl+C, crash, reboot), just re-run it. It detects the state file and offers to resume, retry failed steps, or start fresh.
 
 ---
 
@@ -318,7 +345,7 @@ The installer includes 10 comprehensive steps for complete system setup:
 | Feature | Status | Configuration |
 |---------|--------|---------------|
 | **Firewall** | Active | UFW (Arch) or Firewalld (EndeavourOS) with secure policies |
-| **SSH Protection** | Active | Fail2ban with 1hr ban, 3 retries, systemd backend, sshd jail enabled |
+| **SSH Protection** | Active | Fail2ban with 1hr ban, 3 retries, systemd backend, sshd jail enabled; auto-detects firewall (ufw / firewallcmd-ipset / iptables-multiport) |
 | **Wake-on-LAN** | Desktop Only | Multi-adapter with smart selection, laptop detection |
 | **User Groups** | Active | wheel, video, storage, optical, scanner, lp, rfkill |
 | **Bootloader** | Active | GRUB/systemd-boot/Limine with kernel optimization |
@@ -436,6 +463,22 @@ Bootloader configuration changes are backed up automatically (`limine.conf.backu
 | **Documentation** | Complete |
 
 ### Recent Major Improvements
+
+#### Production Hardening & Idempotency
+- **🔁 Re-Apply After Updates**: New `--force` / `-f` flag re-runs all steps (state file bypassed, configs re-overwritten) so updating the installer and re-running actually applies new defaults
+- **🆔 Full Idempotency by Default**: Plain re-runs safely skip already-applied settings via `pacman --needed`, config diffs, drop-in existence checks, and `pacman -Q` pre-checks — no duplicates, no broken configs
+- **🔄 Resume from Interruption**: Detects `~/.archinstaller.state` on re-run; offers to resume, retry failed steps, or start fresh
+- **🛡️ Production-Grade Error Handling**: All scripts use `set -euo pipefail` with `HOME` guard for chroot/fresh-install safety
+- **⏱️ Reliable Polling**: `fail2ban` daemon readiness verified by polling, not fixed sleeps
+
+#### Fail2ban Auto-Detection
+- Detects firewall backend and uses the correct `banaction`:
+  - UFW → `ufw` (integrates with UFW rules)
+  - Firewalld → `firewallcmd-ipset` (modern; replaces deprecated `firewallcmd-allports`)
+  - Neither → `iptables-multiport` (fail2ban default)
+- `banaction` is read from `$FIREWALL_PREFERENCE` (set by distribution detection)
+- Drops config in `/etc/fail2ban/jail.d/archinstaller.local` (survives package updates)
+- Legacy `jail.local` (no jails enabled) is auto-detected and migrated
 
 #### Robustness & Consistency Overhaul
 - **🛡️ Safe Bootloader Configs**: Limine entries generated from all installed kernels with validation-before-install and automatic backup restore — no more unbootable configs

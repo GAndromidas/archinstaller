@@ -1,5 +1,9 @@
 #!/bin/bash
-set -uo pipefail
+set -euo pipefail
+
+# Ensure HOME is set before any path resolution
+: "${HOME:=/root}"
+export HOME
 
 # Get directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -41,9 +45,12 @@ setup_maintenance() {
     log_info "Flatpak not installed, skipping flatpak cleanup"
   fi
 
-  # Remove orphaned packages if any exist
-  if pacman -Qtdq &>/dev/null; then
-    run_step "Removing orphaned packages" sudo pacman -Rns $(pacman -Qtdq) --noconfirm
+  # Remove orphaned packages if any exist (safely handle empty list)
+  local orphans
+  orphans=$(pacman -Qtdq 2>/dev/null) || true
+  if [[ -n "$orphans" ]]; then
+    # shellcheck disable=SC2086
+    run_step "Removing orphaned packages" sudo pacman -Rns --noconfirm $orphans
   else
     log_info "No orphaned packages found"
   fi

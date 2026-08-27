@@ -1,5 +1,10 @@
 #!/bin/bash
-set -uo pipefail
+# wakeonlan_config.sh - Configure Wake-on-LAN
+set -euo pipefail
+
+# Ensure HOME is set before any path resolution
+: "${HOME:=/root}"
+export HOME
 
 # ============================================================================
 # Wake-on-LAN Configuration for ArchInstaller
@@ -22,7 +27,8 @@ is_laptop() {
     
     # Check DMI product type for laptop/chassis
     if command -v dmidecode &>/dev/null; then
-        local chassis_type=$(dmidecode -s chassis-type 2>/dev/null | tr '[:upper:]' '[:lower:]')
+        local chassis_type
+        chassis_type=$(sudo dmidecode -s chassis-type 2>/dev/null | tr '[:upper:]' '[:lower:]')
         case "$chassis_type" in
             "laptop"|"notebook"|"portable"|"sub notebook"|"convertible"|"detachable")
                 return 0

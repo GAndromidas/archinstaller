@@ -1,5 +1,9 @@
 #!/bin/bash
-set -uo pipefail
+set -euo pipefail
+
+# Ensure HOME is set before any path resolution
+: "${HOME:=/root}"
+export HOME
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIGS_DIR="$SCRIPT_DIR/../configs"
@@ -164,14 +168,23 @@ setup_shell() {
   fi
 
   # Copy ZSH configuration
+  # In --force mode, always overwrite to pick up changes
   if [ -f "$CONFIGS_DIR/.zshrc" ]; then
-    cp "$CONFIGS_DIR/.zshrc" "$HOME/" 2>/dev/null && log_success "ZSH configuration copied"
+    if [ "${FORCE_REAPPLY:-false}" = true ] || [ ! -f "$HOME/.zshrc" ] || ! diff -q "$CONFIGS_DIR/.zshrc" "$HOME/.zshrc" >/dev/null 2>&1; then
+      cp "$CONFIGS_DIR/.zshrc" "$HOME/" 2>/dev/null && log_success "ZSH configuration copied/updated"
+    else
+      log_info "ZSH configuration already matches — skipping copy"
+    fi
   fi
 
   # Copy Starship prompt configuration
   if [ -f "$CONFIGS_DIR/starship.toml" ]; then
     mkdir -p "$HOME/.config"
-    cp "$CONFIGS_DIR/starship.toml" "$HOME/.config/" 2>/dev/null && log_success "Starship prompt configuration copied"
+    if [ "${FORCE_REAPPLY:-false}" = true ] || [ ! -f "$HOME/.config/starship.toml" ] || ! diff -q "$CONFIGS_DIR/starship.toml" "$HOME/.config/starship.toml" >/dev/null 2>&1; then
+      cp "$CONFIGS_DIR/starship.toml" "$HOME/.config/" 2>/dev/null && log_success "Starship prompt configuration copied/updated"
+    else
+      log_info "Starship config already matches — skipping copy"
+    fi
   fi
 
   # Fastfetch setup
@@ -185,8 +198,12 @@ setup_shell() {
     # Copy safe config from configs directory
     if [ -f "$CONFIGS_DIR/config.jsonc" ]; then
       mkdir -p "$HOME/.config/fastfetch"
-      cp "$CONFIGS_DIR/config.jsonc" "$HOME/.config/fastfetch/config.jsonc"
-      log_success "fastfetch config copied from configs directory."
+      if [ "${FORCE_REAPPLY:-false}" = true ] || [ ! -f "$HOME/.config/fastfetch/config.jsonc" ] || ! diff -q "$CONFIGS_DIR/config.jsonc" "$HOME/.config/fastfetch/config.jsonc" >/dev/null 2>&1; then
+        cp "$CONFIGS_DIR/config.jsonc" "$HOME/.config/fastfetch/config.jsonc"
+        log_success "fastfetch config copied/updated from configs directory."
+      else
+        log_info "fastfetch config already matches — skipping copy"
+      fi
     else
       log_warning "config.jsonc not found in configs directory. Using generated config."
     fi

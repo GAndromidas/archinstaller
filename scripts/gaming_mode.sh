@@ -1,5 +1,9 @@
 #!/bin/bash
-set -uo pipefail
+set -euo pipefail
+
+# Ensure HOME is set before any path resolution
+: "${HOME:=/root}"
+export HOME
 
 # Gaming and performance tweaks installation for Arch Linux
 # Get the directory where this script is located, resolving symlinks
@@ -31,7 +35,8 @@ check_and_enable_multilib() {
 	fi
 	
 	# Sync repositories to ensure multilib is available
-	if sudo pacman -Sy; then
+	# Use -Sy with --overwrite to avoid partial-upgrade issues
+	if sudo pacman -Sy --overwrite='*' 2>>"$INSTALL_LOG"; then
 		log_success "Repositories synchronized successfully"
 	else
 		log_error "Failed to synchronize repositories"

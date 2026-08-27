@@ -1,5 +1,10 @@
 #!/bin/bash
-set -uo pipefail
+set -euo pipefail
+
+# Ensure HOME is set before any path resolution (required for fresh chroots, no-login environments)
+: "${HOME:=/root}"
+: "${USER:=$(whoami 2>/dev/null || echo root)}"
+export HOME USER
 
 # ============================================================================
 # SECTION 1: COLOR VARIABLES & BASIC FUNCTIONS
@@ -75,9 +80,7 @@ else
     :
 fi
 
-# Ensure critical variables are defined
-: "${USER:=$(whoami)}"
-: "${HOME:=/home/$USER}"
+# Ensure critical variables are defined (HOME/USER already set at top of file)
 : "${XDG_CURRENT_DESKTOP:=}"
 : "${INSTALL_LOG:=$HOME/.archinstaller.log}"
 
@@ -436,6 +439,27 @@ update_system_mirrors() {
   # installer's pacman calls for the database lock, and a backgrounded sudo
   # may prompt for a password with no way to enter it.
   ui_info "Syncing package mirrors..."
+
+  # Idempotency: only re-rank if mirrorlist is older than 7 days OR has fewer than 5 active servers
+  # --force always re-ranks to pick up fresh mirrors
+  local skip_mirror_update=false
+  if [ "${FORCE_REAPPLY:-false}" = true ]; then
+    log_info "FORCE mode: re-ranking mirrors regardless of age"
+    skip_mirror_update=false
+  elif [ -f /etc/pacman.d/mirrorlist ]; then
+    local mirror_age_days=$(( ( $(date +%s) - $(stat -c %Y /etc/pacman.d/mirrorlist 2>/dev/null || echo 0) ) / 86400 ))
+    local active_servers
+    active_servers=$(grep -cE '^Server\s*=' /etc/pacman.d/mirrorlist 2>/dev/null || echo 0)
+    if [ "$mirror_age_days" -lt 7 ] && [ "$active_servers" -ge 5 ]; then
+      log_info "Mirrorlist is recent (${mirror_age_days}d old, ${active_servers} servers) — skipping re-rank"
+      skip_mirror_update=true
+    fi
+  fi
+
+  if [ "$skip_mirror_update" = true ]; then
+    return 0
+  fi
+
   if sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist "$mirror_repo" >>"$INSTALL_LOG" 2>&1; then
     sudo pacman -Syy >>"$INSTALL_LOG" 2>&1
     ui_success "Mirrors updated successfully"

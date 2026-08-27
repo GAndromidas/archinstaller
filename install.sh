@@ -676,24 +676,8 @@ else
   fi
 fi
 
-# Step 7: Fail2ban Setup
-dashboard_step "Fail2ban Setup" 7
-if is_step_complete "fail2ban_setup"; then
-  dashboard_skip
-else
-  if dashboard_run "$SCRIPTS_DIR/fail2ban.sh"; then
-    mark_step_complete_with_progress "fail2ban_setup" "completed"
-    dashboard_ok
-  else
-    mark_step_complete_with_progress "fail2ban_setup" "failed"
-    dashboard_fail
-    log_error "Fail2ban setup failed"
-    ui_warn "Fail2ban setup failed but continuing installation (SSH security protection not applied)"
-  fi
-fi
-
-# Step 8: System Services
-dashboard_step "System Services" 8
+# Step 7: System Services (firewall FIRST, then services)
+dashboard_step "System Services" 7
 if is_step_complete "system_services"; then
   dashboard_skip
 else
@@ -705,6 +689,22 @@ else
     dashboard_fail
     log_error "System services failed"
     ui_warn "System services failed but continuing installation"
+  fi
+fi
+
+# Step 8: Fail2ban Setup (after firewall is configured)
+dashboard_step "Fail2ban Setup" 8
+if is_step_complete "fail2ban_setup"; then
+  dashboard_skip
+else
+  if dashboard_run "$SCRIPTS_DIR/fail2ban.sh"; then
+    mark_step_complete_with_progress "fail2ban_setup" "completed"
+    dashboard_ok
+  else
+    mark_step_complete_with_progress "fail2ban_setup" "failed"
+    dashboard_fail
+    log_error "Fail2ban setup failed"
+    ui_warn "Fail2ban setup failed but continuing installation (SSH security protection not applied)"
   fi
 fi
 

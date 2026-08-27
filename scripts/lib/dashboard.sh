@@ -21,6 +21,7 @@ DASHBOARD_ROW_OFFSET=0
 dashboard_init() {
     clear
     DASHBOARD_START_TIME=$(date +%s)
+    DASHBOARD_STEP_START=0
     DASHBOARD_STEP_TIMES=()
     DASHBOARD_STEP_NAMES=()
     DASHBOARD_STEP_STATUSES=()
@@ -99,6 +100,7 @@ dashboard_step() {
     DASHBOARD_STEP_NAMES[$num]="$name"
     DASHBOARD_STEP_TIMES[$num]=0
     DASHBOARD_STEP_STATUSES[$num]="running"
+    DASHBOARD_STEP_START=$(date +%s)
 
     local pct=$(( (num - 1) * 100 / total ))
 
@@ -144,8 +146,6 @@ dashboard_step() {
         "$num" "Running..."
 
     tput cup $((DASHBOARD_ROW_OFFSET + DASHBOARD_FRAME_END + 1)) 0
-
-    DASHBOARD_STEP_START=$(date +%s)
 }
 
 dashboard_run() {
@@ -166,6 +166,7 @@ dashboard_run() {
 dashboard_ok() {
     local elapsed=0
     [ "$DASHBOARD_STEP_START" -gt 0 ] && elapsed=$(($(date +%s) - DASHBOARD_STEP_START))
+    (( elapsed < 0 )) && elapsed=0
     local num=$DASHBOARD_CURRENT_STEP
     local w=$DASHBOARD_INNER_W
     DASHBOARD_STEP_STATUSES[$num]="ok"
@@ -187,6 +188,7 @@ dashboard_ok() {
 dashboard_fail() {
     local elapsed=0
     [ "$DASHBOARD_STEP_START" -gt 0 ] && elapsed=$(($(date +%s) - DASHBOARD_STEP_START))
+    (( elapsed < 0 )) && elapsed=0
     local num=$DASHBOARD_CURRENT_STEP
     local w=$DASHBOARD_INNER_W
     DASHBOARD_STEP_STATUSES[$num]="fail"

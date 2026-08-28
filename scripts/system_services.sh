@@ -1352,7 +1352,7 @@ detect_gaming_mode_presence() {
 # Configure AMD P-State for gaming performance
 configure_amd_pstate_gaming() {
   local pstate_conf="/etc/modprobe.d/amd-pstate.conf"
-  local pstate_service="/etc/systemd/system/amd-pstate-gaming.service"
+  local pstate_service="/etc/systemd/system/amd-pstate-schedutil.service"
   
   # Create gaming P-State configuration
   sudo tee "$pstate_conf" > /dev/null << EOF
@@ -1362,27 +1362,38 @@ configure_amd_pstate_gaming() {
 options amd_pstate=active
 EOF
   
-  # Create gaming-specific systemd service
+  # Detect available governors and pick the best balance
+  local available_governors
+  available_governors=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors 2>/dev/null || echo "")
+  local chosen_governor="powersave"
+  if echo "$available_governors" | grep -qw "schedutil"; then
+    chosen_governor="schedutil"
+  elif echo "$available_governors" | grep -qw "performance"; then
+    chosen_governor="powersave"
+  fi
+
+  # Create systemd service
   sudo tee "$pstate_service" > /dev/null << EOF
 [Unit]
-Description=Set AMD P-state gaming performance governor
+Description=Set CPU governor to $chosen_governor
 Wants=systemd-udev-settle.service
-After=amd-pstate-setup.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/cpupower frequency-set -g performance
+ExecStart=/usr/bin/cpupower frequency-set -g $chosen_governor
 RemainAfterExit=yes
 
 [Install]
 WantedBy=multi-user.target
 EOF
   
-  # Enable the gaming service
-  if sudo systemctl daemon-reload && sudo systemctl enable amd-pstate-gaming.service; then
-    log_success "AMD P-state gaming performance service enabled"
-  else
-    log_warning "Failed to enable AMD P-state gaming performance service"
+  # Enable the service (only if it was just created)
+  if [ -f "$pstate_service" ]; then
+    if sudo systemctl daemon-reload && sudo systemctl enable amd-pstate-schedutil.service; then
+      log_success "AMD P-state governor service enabled"
+    else
+      log_warning "Failed to enable AMD P-state schedutil governor service"
+    fi
   fi
   
   # Update initramfs if needed

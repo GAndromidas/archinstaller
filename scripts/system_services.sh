@@ -106,6 +106,12 @@ configure_user_groups() {
 }
 
 enable_services() {
+  # Ensure openssh is installed before trying to enable sshd
+  if ! pacman -Q openssh &>/dev/null; then
+    log_info "openssh not found — installing..."
+    sudo pacman -S --noconfirm --needed openssh >>"$INSTALL_LOG" 2>&1 || log_warning "Failed to install openssh"
+  fi
+
   # Server mode enables a minimal set of services, desktop mode adds extras.
   # Both paths continue to shared optimizations (memory, filesystem, storage, audio, kernel).
   if [[ "$INSTALL_MODE" == "server" ]]; then
@@ -147,8 +153,8 @@ enable_services() {
     sshd.service
   )
 
-  # Check and configure virt-manager guest integration
-  if command -v virsh &>/dev/null || pacman -Q libvirt-daemon &>/dev/null 2>&1 || pacman -Q virt-manager &>/dev/null 2>&1; then
+  # Check and configure virtualization guest integration (libvirt is used by virt-manager and gnome-boxes)
+  if command -v virsh &>/dev/null || pacman -Q libvirt-daemon &>/dev/null 2>&1 || pacman -Q virt-manager &>/dev/null 2>&1 || pacman -Q gnome-boxes &>/dev/null 2>&1; then
     # Add user to libvirt group and enable service
     if groups "$USER" | grep -qE '\blibvirt\b'; then
       log_info "User already in libvirt group"

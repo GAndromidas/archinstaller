@@ -5,6 +5,8 @@ pacman:
   packages:
     - name: android-tools
       description: "Android platform tools for device management"
+    - name: bleachbit
+      description: "System cleaner and privacy tool"
     - name: bat
       description: "Cat clone with syntax highlighting"
     - name: btop
@@ -65,6 +67,8 @@ essential:
   default:
     - name: filezilla
       description: "FTP client for file transfers"
+    - name: gnome-boxes
+      description: "Virtualization GUI using QEMU/KVM"
     - name: kdenlive
       description: "Video editor for KDE"
     - name: libreoffice-fresh

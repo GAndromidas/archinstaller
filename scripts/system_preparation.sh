@@ -9,18 +9,29 @@ source "$SCRIPT_DIR/common.sh"
 detect_network_speed() {
   step "Detecting network speed and optimizing download settings"
 
-  # Test download speed using a small 1MB file from Arch mirrors
+  # Test download speed using a range request on a large file.
+  # The core.db file (~130KB) is too small to measure on fast connections,
+  # so we grab just the first 5MB of the latest Firefox package instead.
+  # The URL is detected dynamically to avoid breakage when versions change.
   local speed_bytes=0
   if command -v curl >/dev/null; then
-    speed_bytes=$(curl -s -o /dev/null -w "%{speed_bytes}" \
-      --connect-timeout 5 --max-time 10 \
-      "https://geo.mirror.pkgbuild.com/core/os/x86_64/core.db" 2>/dev/null || echo "0")
+    local mirror_url="https://geo.mirror.pkgbuild.com/extra/os/x86_64/"
+    local firefox_file
+    firefox_file=$(curl -sL "$mirror_url" 2>/dev/null | grep -oP 'href="firefox-[0-9][^"]*\.pkg\.tar\.zst"' | head -1 | sed 's/href="//;s/"//')
+
+    if [ -n "$firefox_file" ]; then
+      local test_url="${mirror_url}${firefox_file}"
+      speed_bytes=$(curl -s -o /dev/null -w "%{speed_download}" \
+        -r 0-5242879 \
+        --connect-timeout 5 --max-time 10 \
+        "$test_url" 2>/dev/null || echo "0")
+    fi
   fi
 
-  # Convert to MB/s
+  # Convert to MB/s (curl returns a float like "1572864.00", use awk for safe conversion)
   local speed_mbps=0
-  if [ "$speed_bytes" -gt 0 ] 2>/dev/null; then
-    speed_mbps=$((speed_bytes / 1024 / 1024))
+  if [ -n "$speed_bytes" ] && [[ "$speed_bytes" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+    speed_mbps=$(awk "BEGIN {printf \"%d\", $speed_bytes / 1024 / 1024}")
   fi
 
   # Set ParallelDownloads based on speed tier

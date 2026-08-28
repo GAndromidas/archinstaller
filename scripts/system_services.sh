@@ -214,6 +214,9 @@ enable_services() {
 }
 
 # Configure Plymouth boot splash
+# Hook ordering per ArchWiki:
+#   systemd: base → systemd → plymouth → (encrypt/sd-encrypt)
+#   base:    base → udev → plymouth → (encrypt)
 configure_plymouth() {
   # Skip for server mode (no graphical boot needed)
   if [[ "$INSTALL_MODE" == "server" ]]; then
@@ -237,9 +240,9 @@ configure_plymouth() {
     theme="xora"
   fi
 
-  # Set the Plymouth theme
+  # Set the Plymouth theme (also creates initramfs hook directory entries)
   if command -v plymouth-set-default-theme &>/dev/null; then
-    sudo plymouth-set-default-theme "$theme" >>"$INSTALL_LOG" 2>&1 && \
+    sudo plymouth-set-default-theme -R "$theme" >>"$INSTALL_LOG" 2>&1 && \
       log_success "Plymouth theme set to: $theme" || \
       log_warning "Failed to set Plymouth theme"
   fi
@@ -248,23 +251,54 @@ configure_plymouth() {
   local mkinitcpio_conf="/etc/mkinitcpio.conf"
   if [[ -f "$mkinitcpio_conf" ]]; then
     if ! grep -q "plymouth" "$mkinitcpio_conf"; then
-      # Add plymouth hook after base or systemd
       if grep -q "^HOOKS=.*systemd" "$mkinitcpio_conf"; then
+        # systemd hook: add plymouth after systemd
         sudo sed -i 's/\(HOOKS=.*systemd\)/\1 plymouth/' "$mkinitcpio_conf"
         log_success "Added plymouth hook after systemd in mkinitcpio"
-      elif grep -q "^HOOKS=.*base" "$mkinitcpio_conf"; then
-        sudo sed -i 's/\(HOOKS=.*base\)/\1 plymouth/' "$mkinitcpio_conf"
-        log_success "Added plymouth hook after base in mkinitcpio"
+      elif grep -q "^HOOKS=.*udev" "$mkinitcpio_conf"; then
+        # base hook: add plymouth after udev (udev MUST come before plymouth)
+        sudo sed -i 's/\(HOOKS=.*udev\)/\1 plymouth/' "$mkinitcpio_conf"
+        log_success "Added plymouth hook after udev in mkinitcpio"
       fi
     else
       log_info "Plymouth hook already present in mkinitcpio"
     fi
 
-    # Add udev hook before plymouth if not present (required for Plymouth)
-    if ! grep -q "udev" "$mkinitcpio_conf"; then
-      if grep -q "plymouth" "$mkinitcpio_conf"; then
-        sudo sed -i 's/\(HOOKS=.*\) plymouth/\1 udev plymouth/' "$mkinitcpio_conf"
-        log_success "Added udev hook before plymouth in mkinitcpio"
+    # Verify plymouth is positioned correctly (after udev/systemd, before encrypt)
+    if grep -q "plymouth" "$mkinitcpio_conf"; then
+      local hooks_line
+      hooks_line=$(grep "^HOOKS=" "$mkinitcpio_conf")
+      local plymouth_pos=0 udev_pos=0 systemd_pos=0 encrypt_pos=0 sdencrypt_pos=0
+      local pos=0
+      for hook in $hooks_line; do
+        ((pos++))
+        case "$hook" in
+          udev)       udev_pos=$pos ;;
+          systemd)    systemd_pos=$pos ;;
+          plymouth)   plymouth_pos=$pos ;;
+          encrypt)    encrypt_pos=$pos ;;
+          sd-encrypt) sdencrypt_pos=$pos ;;
+        esac
+      done
+      # Fix ordering: plymouth must be after udev/systemd and before encrypt/sd-encrypt
+      if [[ "$udev_pos" -gt 0 && "$plymouth_pos" -lt "$udev_pos" ]]; then
+        log_warning "Plymouth is before udev in mkinitcpio — rearranging hooks"
+        sudo sed -i 's/plymouth //' "$mkinitcpio_conf"
+        sudo sed -i 's/\(HOOKS=.*udev\)/\1 plymouth/' "$mkinitcpio_conf"
+      elif [[ "$systemd_pos" -gt 0 && "$plymouth_pos" -lt "$systemd_pos" ]]; then
+        log_warning "Plymouth is before systemd in mkinitcpio — rearranging hooks"
+        sudo sed -i 's/plymouth //' "$mkinitcpio_conf"
+        sudo sed -i 's/\(HOOKS=.*systemd\)/\1 plymouth/' "$mkinitcpio_conf"
+      fi
+      # Ensure plymouth comes before encrypt/sd-encrypt if present
+      if [[ "$encrypt_pos" -gt 0 && "$plymouth_pos" -gt "$encrypt_pos" ]]; then
+        log_warning "Plymouth is after encrypt — rearranging hooks"
+        sudo sed -i 's/plymouth //' "$mkinitcpio_conf"
+        sudo sed -i 's/\(HOOKS=.*encrypt\)/\1 plymouth/' "$mkinitcpio_conf"
+      elif [[ "$sdencrypt_pos" -gt 0 && "$plymouth_pos" -gt "$sdencrypt_pos" ]]; then
+        log_warning "Plymouth is after sd-encrypt — rearranging hooks"
+        sudo sed -i 's/plymouth //' "$mkinitcpio_conf"
+        sudo sed -i 's/\(HOOKS=.*sd-encrypt\)/\1 plymouth/' "$mkinitcpio_conf"
       fi
     fi
 

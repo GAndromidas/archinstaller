@@ -104,38 +104,65 @@ configure_uki_cmdline() {
   local params
   params=$(get_kernel_params)
 
+  local needs_update=true
   if [[ -f "$cmdline_file" ]]; then
     local current_params
     current_params=$(sudo cat "$cmdline_file" 2>/dev/null || echo "")
-
-    # Check if already configured correctly
-    if [[ "$current_params" == *"$params"* ]] || [[ "$params" == *"$current_params"* ]]; then
-      log_info "UKI cmdline already configured: $current_params"
-      return 0
+    if [[ "$current_params" == "$params" ]]; then
+      log_info "UKI cmdline already configured"
+      needs_update=false
+    else
+      sudo cp "$cmdline_file" "${cmdline_file}.backup.$(date +%Y%m%d_%H%M%S)"
+      log_info "Backed up existing UKI cmdline"
     fi
-
-    # Backup and update
-    sudo cp "$cmdline_file" "${cmdline_file}.backup.$(date +%Y%m%d_%H%M%S)"
-    log_info "Backed up existing UKI cmdline"
   fi
 
-  echo "$params" | sudo tee "$cmdline_file" >/dev/null
-  log_success "UKI cmdline written: $params"
+  if [[ "$needs_update" == true ]]; then
+    echo "$params" | sudo tee "$cmdline_file" >/dev/null
+    log_success "UKI cmdline written: $params"
+  fi
 
   # Add --splash to mkinitcpio preset if Plymouth is installed (ArchWiki: UKI + Plymouth)
+  # Per ArchWiki: add --splash=<bmp> to *PRESET*_options= lines
   if pacman -Qi plymouth &>/dev/null 2>&1; then
     local splash_bmp="/usr/share/systemd/bootctl/splash-arch.bmp"
     if [[ -f "$splash_bmp" ]] && [[ -d /etc/mkinitcpio.d ]]; then
       local preset
       for preset in /etc/mkinitcpio.d/*.preset; do
         [[ -f "$preset" ]] || continue
-        if ! grep -q '\-\-splash' "$preset" 2>/dev/null; then
-          sudo sed -i "s|\(default_options=.*\)|\1 --splash=${splash_bmp}|" "$preset" 2>/dev/null && \
+        if grep -q '\-\-splash' "$preset" 2>/dev/null; then
+          continue
+        fi
+        # Handle uncommented default_options lines
+        if grep -q '^default_options=' "$preset" 2>/dev/null; then
+          sudo sed -i "s|^default_options=.*|& --splash=${splash_bmp}|" "$preset" 2>/dev/null && \
             log_info "Added --splash to $preset" || \
             log_warning "Failed to add --splash to $preset"
+        # Handle commented-out default_options (uncomment and add --splash)
+        elif grep -q '^#default_options=' "$preset" 2>/dev/null; then
+          sudo sed -i "s|^#default_options=.*|default_options=\"--splash=${splash_bmp}\"|" "$preset" 2>/dev/null && \
+            log_info "Uncommented default_options with --splash in $preset" || \
+            log_warning "Failed to update $preset"
+        # No default_options line at all — add one
+        else
+          echo "default_options=\"--splash=${splash_bmp}\"" | sudo tee -a "$preset" >/dev/null 2>&1 && \
+            log_info "Added default_options with --splash to $preset" || \
+            log_warning "Failed to add default_options to $preset"
         fi
       done
+    elif [[ ! -f "$splash_bmp" ]]; then
+      log_warning "Splash bitmap not found at $splash_bmp — Plymouth splash may not display during early boot"
     fi
+  fi
+
+  # Ensure /boot/efi/EFI/Linux directory exists for UKI output
+  local esp_mount
+  esp_mount=$(findmnt -n -o TARGET /boot/efi 2>/dev/null || findmnt -n -o TARGET /boot 2>/dev/null || echo "/boot")
+  local uki_dir="${esp_mount}/EFI/Linux"
+  if [[ ! -d "$uki_dir" ]]; then
+    sudo mkdir -p "$uki_dir" 2>/dev/null && \
+      log_info "Created UKI output directory: $uki_dir" || \
+      log_warning "Failed to create $uki_dir"
   fi
 
   # Regenerate UKI images if mkinitcpio presets exist
@@ -155,8 +182,17 @@ configure_uki_cmdline() {
 
 # --- systemd-boot ---
 configure_boot() {
+  # Detect UKI system: either already has UKI .efi files, or mkinitcpio presets configure UKI output
+  local is_uki=false
   if is_uki_system; then
-    log_info "UKI system — configuring /etc/kernel.cmdline"
+    is_uki=true
+  elif grep -qr "^\s*default_uki=" /etc/mkinitcpio.d/ 2>/dev/null; then
+    is_uki=true
+    log_info "UKI output configured in mkinitcpio presets"
+  fi
+
+  if [[ "$is_uki" == true ]]; then
+    log_info "UKI system — configuring /etc/kernel.cmdline and preset options"
     configure_uki_cmdline
     ui_info "UKI system detected — kernel parameters configured via /etc/kernel.cmdline"
     return 0

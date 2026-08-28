@@ -245,7 +245,12 @@ dashboard_finish() {
         esac
     done
 
-    local wall_time=$(( $(date +%s) - DASHBOARD_START_TIME ))
+    local now
+    now=$(date +%s)
+    local wall_time=0
+    if [[ "$DASHBOARD_START_TIME" -gt 0 ]]; then
+        wall_time=$(( now - DASHBOARD_START_TIME ))
+    fi
     (( wall_time < 0 )) && wall_time=0
     local cols
     cols=$(tput cols 2>/dev/null || echo 80)

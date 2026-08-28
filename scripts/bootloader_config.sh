@@ -122,6 +122,22 @@ configure_uki_cmdline() {
   echo "$params" | sudo tee "$cmdline_file" >/dev/null
   log_success "UKI cmdline written: $params"
 
+  # Add --splash to mkinitcpio preset if Plymouth is installed (ArchWiki: UKI + Plymouth)
+  if pacman -Qi plymouth &>/dev/null 2>&1; then
+    local splash_bmp="/usr/share/systemd/bootctl/splash-arch.bmp"
+    if [[ -f "$splash_bmp" ]] && [[ -d /etc/mkinitcpio.d ]]; then
+      local preset
+      for preset in /etc/mkinitcpio.d/*.preset; do
+        [[ -f "$preset" ]] || continue
+        if ! grep -q '\-\-splash' "$preset" 2>/dev/null; then
+          sudo sed -i "s|\(default_options=.*\)|\1 --splash=${splash_bmp}|" "$preset" 2>/dev/null && \
+            log_info "Added --splash to $preset" || \
+            log_warning "Failed to add --splash to $preset"
+        fi
+      done
+    fi
+  fi
+
   # Regenerate UKI images if mkinitcpio presets exist
   if [[ -d /etc/mkinitcpio.d ]]; then
     ui_info "Regenerating UKI images..."

@@ -664,9 +664,9 @@ prompt_reboot() {
   # Completed steps
   local completed_steps=0
   local failed_steps=0
-  if [ -f "$STATE_FILE" ]; then
-    completed_steps=$(grep -c "^COMPLETE:" "$STATE_FILE" 2>/dev/null || echo 0)
-    failed_steps=$(grep -c "^FAILED:" "$STATE_FILE" 2>/dev/null || echo 0)
+  if [ -f "$STATE_FILE" ] && [ -s "$STATE_FILE" ]; then
+    completed_steps=$(grep -c "^COMPLETED:" "$STATE_FILE" 2>/dev/null) || completed_steps=0
+    failed_steps=$(grep -c "^FAILED:" "$STATE_FILE" 2>/dev/null) || failed_steps=0
   fi
   echo -e "  ${THEME_TEXT}Steps:${RESET}           ${THEME_SUCCESS}${completed_steps} completed${RESET}${THEME_MUTED}, ${failed_steps} failed${RESET}"
 

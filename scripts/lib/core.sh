@@ -47,8 +47,8 @@ if [ -z "${GUM_PRIMARY:-}" ]; then
 fi
 
 # Global variables
-export INSTALL_LOG="${INSTALL_LOG:-$HOME/.archinstaller.log}"
-STATE_FILE="${STATE_FILE:-$HOME/.archinstaller.state}"
+export INSTALL_LOG="${INSTALL_LOG:-/tmp/archinstaller.log}"
+STATE_FILE="${STATE_FILE:-/tmp/archinstaller.state}"
 ERRORS=()
 INSTALLED_PACKAGES=()
 FAILED_PACKAGES=()

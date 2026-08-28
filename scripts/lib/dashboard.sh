@@ -294,7 +294,7 @@ dashboard_finish() {
     echo ""
     echo -e "${THEME_MUTED}  $(printf '─%.0s' $(seq 1 $w))${RESET}"
     echo ""
-    echo -e "${THEME_TEXT}    ${success} completed, ${fail} failed, ${skip} skipped  |  Total: $(format_time $wall_time)${RESET}"
+    echo -e "${THEME_TEXT}    ${success} completed, ${fail} failed, ${skip} skipped${RESET}  |  ${THEME_SECONDARY}Total: $(format_time $wall_time)${RESET}"
     echo ""
 
     log_to_file "Installation finished. $success completed, $fail failed, $skip skipped in $(format_time $wall_time)"

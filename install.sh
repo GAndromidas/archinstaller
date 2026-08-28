@@ -2,7 +2,7 @@
 set -uo pipefail
 
 # Installation log file
-INSTALL_LOG="$HOME/.archinstaller.log"
+INSTALL_LOG="/tmp/archinstaller.log"
 
 # Function to show help
 show_help() {
@@ -70,8 +70,8 @@ EXAMPLES:
     ./install.sh --help         Show this help message
 
 LOG FILES:
-    Installation log: ~/.archinstaller.log
-    Progress tracking: ~/.archinstaller.state
+    Installation log: /tmp/archinstaller.log
+    Progress tracking: /tmp/archinstaller.state
 
 MORE INFO:
     https://github.com/GAndromidas/archinstaller
@@ -90,8 +90,7 @@ SCRIPTS_DIR="$SCRIPT_DIR/scripts"
 CONFIGS_DIR="$SCRIPT_DIR/configs"
 
 # State tracking for error recovery
-STATE_FILE="$HOME/.archinstaller.state"
-mkdir -p "$(dirname "$STATE_FILE")"
+STATE_FILE="/tmp/archinstaller.state"
 
 # Source new modular libraries
 source "$SCRIPTS_DIR/lib/core.sh"
@@ -752,7 +751,5 @@ if [ "$DRY_RUN" = true ]; then
   ui_info "To perform the actual installation, run: ./install.sh"
   echo ""
 fi
-
-log_performance "Total installation time"
 
 prompt_reboot

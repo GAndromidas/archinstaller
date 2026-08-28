@@ -79,7 +79,7 @@ fi
 : "${HOME:=/home/$USER}"
 : "${USER:=$(whoami)}"
 : "${XDG_CURRENT_DESKTOP:=}"
-: "${INSTALL_LOG:=$HOME/.archinstaller.log}"
+: "${INSTALL_LOG:=/tmp/archinstaller.log}"
 
 # Source library modules (provides log_*, ui_*, step, run_step, package, system functions)
 for __lib_module in core ui system package config; do
@@ -756,69 +756,85 @@ gum_confirm() {
 }
 
 prompt_reboot() {
-  simple_banner "Reboot System"
-  echo -e "${THEME_TEXT}Congratulations! Your Arch Linux system is now fully configured!${RESET}"
+  simple_banner "Installation Complete"
+
+  echo -e "${THEME_SUCCESS}Congratulations! Your Arch Linux system is now fully configured!${RESET}"
   echo ""
-  echo -e "${THEME_TEXT}What happens after reboot:${RESET}"
-  echo "  - Boot screen will appear"
-  echo "  - Performance optimizations will be enabled"
-  echo "  - Gaming tools will be available (if installed)"
+  echo -e "${THEME_HEADER}── Post-Install Summary ──${RESET}"
   echo ""
+
+  # Installation mode
+  local mode="Standard"
+  [ "$INSTALL_MODE" = "minimal" ] && mode="Minimal"
+  [ "$INSTALL_MODE" = "server" ] && mode="Server"
+  echo -e "  ${THEME_TEXT}Mode:${RESET}            ${THEME_SUCCESS}${mode}${RESET}"
+
+  # Package count
+  if command -v pacman &>/dev/null; then
+    local pkg_count
+    pkg_count=$(pacman -Q 2>/dev/null | wc -l)
+    echo -e "  ${THEME_TEXT}Packages:${RESET}        ${THEME_SUCCESS}${pkg_count} installed${RESET}"
+  fi
+
+  # Services enabled
+  local svc_count
+  svc_count=$(systemctl list-unit-files --state=enabled --type=service --no-pager 2>/dev/null | grep -c "\.service" || echo 0)
+  echo -e "  ${THEME_TEXT}Services:${RESET}        ${THEME_SUCCESS}${svc_count} enabled${RESET}"
+
+  # Firewall
+  if command -v ufw &>/dev/null && sudo ufw status 2>/dev/null | grep -q "active"; then
+    echo -e "  ${THEME_TEXT}Firewall:${RESET}        ${THEME_SUCCESS}UFW (active)${RESET}"
+  elif command -v firewall-cmd &>/dev/null && sudo firewall-cmd --state 2>/dev/null | grep -q "running"; then
+    echo -e "  ${THEME_TEXT}Firewall:${RESET}        ${THEME_SUCCESS}Firewalld (active)${RESET}"
+  else
+    echo -e "  ${THEME_TEXT}Firewall:${RESET}        ${THEME_MUTED}not configured${RESET}"
+  fi
+
+  # Fail2ban
+  if systemctl is-active --quiet fail2ban 2>/dev/null; then
+    echo -e "  ${THEME_TEXT}Fail2ban:${RESET}        ${THEME_SUCCESS}active${RESET}"
+  fi
+
+  # Shell
+  echo -e "  ${THEME_TEXT}Shell:${RESET}           ${THEME_SUCCESS}Zsh + Starship${RESET}"
+
+  # Completed steps
+  local completed_steps=0
+  local failed_steps=0
+  if [ -f "$STATE_FILE" ]; then
+    completed_steps=$(grep -c "^COMPLETE:" "$STATE_FILE" 2>/dev/null || echo 0)
+    failed_steps=$(grep -c "^FAILED:" "$STATE_FILE" 2>/dev/null || echo 0)
+  fi
+  echo -e "  ${THEME_TEXT}Steps:${RESET}           ${THEME_SUCCESS}${completed_steps} completed${RESET}${THEME_MUTED}, ${failed_steps} failed${RESET}"
+
+  # Log file
+  echo ""
+  echo -e "  ${THEME_TEXT}Log file:${RESET}        ${THEME_MUTED}/tmp/archinstaller.log${RESET}"
+  echo ""
+
   echo -e "${THEME_WARN}It is strongly recommended to reboot now to apply all changes.${RESET}"
   echo ""
 
-  # Use gum menu for reboot confirmation
+  # Reboot confirmation
   if command -v gum >/dev/null 2>&1; then
-    echo ""
-    gum style --foreground "$GUM_WARN" "Ready to reboot your system?"
-    echo ""
     if gum confirm --default=true --prompt.foreground "$GUM_PRIMARY" --selected.background "$GUM_PRIMARY" "Reboot now?"; then
-      echo ""
-      echo -e "${THEME_TEXT}Rebooting your system...${RESET}"
-      echo -e "${THEME_HEADER}Thank you for using Arch Installer!${RESET}"
-      echo ""
       sudo reboot
+      exit 0
     else
       echo ""
-      echo -e "${THEME_TEXT}Reboot skipped. You can reboot manually at any time using:${RESET}"
-      echo -e "${THEME_SECONDARY}   sudo reboot${RESET}"
-      echo -e "${THEME_TEXT}   Or simply restart your computer.${RESET}"
+      echo -e "${THEME_TEXT}Reboot skipped. You can reboot manually with:${RESET}"
+      echo -e "${THEME_SECONDARY}  sudo reboot${RESET}"
     fi
   else
-    # Fallback to text prompt if gum is not available
-    while true; do
-      read -r -p "$(echo -e "${THEME_WARN}Reboot now? [Y/n]: ${RESET}")" reboot_ans
-      reboot_ans=${reboot_ans,,}
-      case "$reboot_ans" in
-        ""|y|yes)
-          echo ""
-          echo -e "${THEME_TEXT}Rebooting your system...${RESET}"
-          echo -e "${THEME_HEADER}Thank you for using Arch Installer!${RESET}"
-          echo ""
-          sudo reboot
-          break
-          ;;
-        n|no)
-          echo ""
-          echo -e "${THEME_TEXT}Reboot skipped. You can reboot manually at any time using:${RESET}"
-          echo -e "${THEME_SECONDARY}   sudo reboot${RESET}"
-          echo -e "${THEME_TEXT}   Or simply restart your computer.${RESET}"
-          break
-          ;;
-      esac
-    done
-  fi
-
-  echo ""
-  # Cleanup if no errors occurred
-  if [ ${#ERRORS[@]} -eq 0 ]; then
-    # Optional cleanup that doesn't destroy the repo
-    if gum_confirm "Do you want to clean up temporary logs?" "This will remove the installation log and state file."; then
-      echo -e "${THEME_TEXT}Cleaning up temporary files...${RESET}"
-      rm -f "$STATE_FILE" "$INSTALL_LOG" 2>/dev/null || true
-      echo -e "${THEME_SUCCESS}✓ Temporary files cleaned up${RESET}"
+    read -r -p "$(echo -e "${THEME_WARN}Reboot now? [Y/n]: ${RESET}")" reboot_ans
+    reboot_ans=${reboot_ans,,}
+    if [[ "$reboot_ans" =~ ^(y|yes|"")$ ]]; then
+      sudo reboot
+      exit 0
     else
-      echo -e "${THEME_TEXT}Skipping cleanup.${RESET}"
+      echo ""
+      echo -e "${THEME_TEXT}Reboot skipped. You can reboot manually with:${RESET}"
+      echo -e "${THEME_SECONDARY}  sudo reboot${RESET}"
     fi
   fi
 }

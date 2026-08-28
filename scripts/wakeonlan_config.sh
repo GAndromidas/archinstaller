@@ -118,7 +118,7 @@ enable_wol_interface() {
     log_info "Enabling Wake-on-LAN on interface: $iface"
 
     # Enable WoL via ethtool
-    if ! sudo ethtool -s "$iface" wol g; then
+    if ! sudo ethtool -s "$iface" wol g 2>>"$INSTALL_LOG"; then
         log_error "Failed to enable Wake-on-LAN on $iface via ethtool"
         ui_error "Failed to enable Wake-on-LAN on $iface"
         return 1
@@ -139,13 +139,16 @@ enable_wol_interface() {
     current_wol=$(sudo ethtool "$iface" 2>/dev/null | sed -n 's/^Wake-on: //p')
     if [[ "$current_wol" == *g* ]]; then
         log_success "Verified WoL is active on $iface (Wake-on: $current_wol)"
-        ui_success "Wake-on-LAN enabled on $iface"
     else
         log_warning "WoL set but verification shows Wake-on: $current_wol"
     fi
 
     # Create systemd service for persistence
-    create_wol_service "$iface"
+    if ! create_wol_service "$iface"; then
+        log_error "Failed to create persistent WoL service for $iface"
+        return 1
+    fi
+
     return 0
 }
 
@@ -178,15 +181,34 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 EOF
 
+    # Verify service file was created
+    if [ ! -f "$service_file" ]; then
+        log_error "Failed to create service file: $service_file"
+        ui_error "Failed to create WoL service file for $iface"
+        return 1
+    fi
+
     # Reload systemd and enable service
     sudo systemctl daemon-reload
-    if sudo systemctl enable "wol-$iface.service"; then
+    if sudo systemctl enable "wol-$iface.service" >>"$INSTALL_LOG" 2>&1; then
         log_success "Systemd service enabled for WoL on $iface"
-        ui_success "Persistent Wake-on-LAN service created for $iface"
     else
         log_error "Failed to enable systemd service for WoL on $iface"
-        ui_error "Failed to create persistent WoL service for $iface"
+        ui_error "Failed to enable persistent WoL service for $iface"
+        return 1
     fi
+
+    # Verify service is actually enabled
+    if systemctl is-enabled --quiet "wol-$iface.service" 2>/dev/null; then
+        log_success "Verified WoL service is enabled for $iface"
+        ui_success "Persistent Wake-on-LAN service created and enabled for $iface"
+    else
+        log_error "WoL service reports enabled but verification failed for $iface"
+        ui_error "WoL service verification failed for $iface"
+        return 1
+    fi
+
+    return 0
 }
 
 # Function to get MAC address of interface
@@ -361,6 +383,7 @@ configure_wakeonlan() {
     
     # Configure selected interfaces
     local success_count=0
+    local fail_count=0
     if [[ "$selection" == "ALL" ]]; then
         # Configure all interfaces
         for iface in "${interfaces[@]}"; do
@@ -376,9 +399,12 @@ configure_wakeonlan() {
                         ui_info "MAC address for $iface: $mac_addr"
                         ui_info "Use this MAC address to send Wake-on-LAN packets"
                     fi
+                else
+                    fail_count=$((fail_count + 1))
                 fi
             else
                 ui_warn "Interface $iface does not support Wake-on-LAN"
+                fail_count=$((fail_count + 1))
             fi
         done
     else
@@ -395,9 +421,12 @@ configure_wakeonlan() {
                     ui_success "MAC address for $selection: $mac_addr"
                     ui_info "Use this MAC address to send Wake-on-LAN packets"
                 fi
+            else
+                fail_count=$((fail_count + 1))
             fi
         else
             ui_warn "Interface $selection does not support Wake-on-LAN"
+            fail_count=$((fail_count + 1))
         fi
     fi
     
@@ -408,11 +437,16 @@ configure_wakeonlan() {
         # Show final status
         echo ""
         show_wol_status
+        return 0
     else
-        ui_warn "No interfaces were configured with Wake-on-LAN"
+        if [ "$fail_count" -gt 0 ]; then
+            ui_error "Wake-on-LAN configuration failed on all $fail_count interface(s)"
+            return 1
+        else
+            ui_warn "No interfaces were configured with Wake-on-LAN"
+            return 0
+        fi
     fi
-    
-    return 0
 }
 
 # Function to disable Wake-on-LAN (for cleanup)

@@ -120,11 +120,20 @@ enable_services() {
     for svc in "${services[@]}"; do
       echo -e "  - $svc"
     done
-    # Enable all services in a single systemctl call (faster than one-by-one)
-    if sudo systemctl enable --now "${services[@]}" >>"$INSTALL_LOG" 2>&1; then
+    # Enable each service individually to prevent one failure from blocking all others
+    local server_failed=()
+    for svc in "${services[@]}"; do
+      if sudo systemctl enable --now "$svc" >>"$INSTALL_LOG" 2>&1; then
+        log_success "$svc enabled successfully"
+      else
+        log_warning "Failed to enable $svc"
+        server_failed+=("$svc")
+      fi
+    done
+    if [ ${#server_failed[@]} -eq 0 ]; then
       log_success "All essential services enabled successfully."
     else
-      log_error "Some services failed to enable"
+      log_warning "Some services failed to enable: ${server_failed[*]}"
     fi
     
     # Continue to shared optimizations (memory, filesystem, storage, audio, kernel)
@@ -154,11 +163,19 @@ enable_services() {
   fi
 
   # Conditionally add rustdesk.service if installed
-  if pacman -Q rustdesk-bin &>/dev/null || pacman -Q rustdesk &>/dev/null; then
+  if pacman -Qi rustdesk-bin &>/dev/null || pacman -Qi rustdesk &>/dev/null || systemctl list-unit-files rustdesk.service &>/dev/null; then
     services+=(rustdesk.service)
     log_success "rustdesk.service will be enabled."
   else
     log_warning "rustdesk is not installed. Skipping rustdesk.service."
+  fi
+
+  # Conditionally add power-profiles-daemon.service if installed
+  if pacman -Qi power-profiles-daemon &>/dev/null && ! pacman -Qi tlp &>/dev/null && ! pacman -Qi auto-cpufreq &>/dev/null; then
+    services+=(power-profiles-daemon.service)
+    log_success "power-profiles-daemon.service will be enabled."
+  elif pacman -Qi power-profiles-daemon &>/dev/null; then
+    log_warning "power-profiles-daemon installed but conflicting power manager (tlp/auto-cpufreq) detected. Skipping."
   fi
 
   # Check if Timeshift is already installed and install timeshift-autosnap if needed
@@ -184,16 +201,25 @@ enable_services() {
   for svc in "${services[@]}"; do
     echo -e "  - $svc"
   done
-  # Enable all services in a single systemctl call (faster than one-by-one)
-  if sudo systemctl enable --now "${services[@]}" >>"$INSTALL_LOG" 2>&1; then
-    log_success "All essential services enabled successfully."
+  # Enable each service individually to prevent one failure from blocking all others
+  local failed_services=()
+  for svc in "${services[@]}"; do
+    if sudo systemctl enable --now "$svc" >>"$INSTALL_LOG" 2>&1; then
+      log_success "$svc enabled successfully"
+    else
+      log_warning "Failed to enable $svc"
+      failed_services+=("$svc")
+    fi
+  done
+  if [ ${#failed_services[@]} -eq 0 ]; then
+    log_success "All services enabled successfully."
   else
-    log_error "Some services failed to enable"
+    log_warning "Some services failed to enable: ${failed_services[*]}"
   fi
 
   # Verify services started correctly
   log_info "Verifying service status..."
-  local failed_services=()
+  local verify_failed=()
   for svc in "${services[@]}"; do
     if systemctl is-active --quiet "$svc" 2>/dev/null; then
       log_success "$svc is active"
@@ -201,14 +227,14 @@ enable_services() {
       log_warning "$svc is enabled but not running (may require reboot)"
     else
       log_warning "$svc failed to start or enable"
-      failed_services+=("$svc")
+      verify_failed+=("$svc")
     fi
   done
 
-  if [ ${#failed_services[@]} -eq 0 ]; then
+  if [ ${#verify_failed[@]} -eq 0 ]; then
     log_success "All services verified successfully"
   else
-    log_warning "Some services may need attention: ${failed_services[*]}"
+    log_warning "Some services may need attention: ${verify_failed[*]}"
   fi
   fi
 }

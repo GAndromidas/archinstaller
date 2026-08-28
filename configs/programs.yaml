@@ -37,8 +37,8 @@ pacman:
       description: "Additional Noto fonts"
     - name: plymouth
       description: "Graphical boot splash screen"
-    - name: plymouth-theme-bgrt
-      description: "UEFI boot splash theme (AGESA/BIOS logo)"
+    - name: power-profiles-daemon
+      description: "Power profile management daemon"
     - name: samba
       description: "SMB/CIFS file and print server"
     - name: sl

@@ -35,6 +35,8 @@ pacman:
       description: "Network discovery and security auditing"
     - name: noto-fonts-extra
       description: "Additional Noto fonts"
+    - name: plymouth
+      description: "Graphical boot splash screen"
     - name: samba
       description: "SMB/CIFS file and print server"
     - name: sl

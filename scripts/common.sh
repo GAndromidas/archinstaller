@@ -29,11 +29,8 @@ TERM_WIDTH=$(tput cols 2>/dev/null || echo 80)
 TERM_HEIGHT=$(tput lines 2>/dev/null || echo 24)
 
 # Global arrays and variables
-ERRORS=()                   # Collects error messages for summary
 CURRENT_STEP=1              # Tracks current step for progress display
-INSTALLED_PACKAGES=()       # Tracks installed packages
 REMOVED_PACKAGES=()         # Tracks removed packages
-FAILED_PACKAGES=()          # Tracks packages that failed to install
 
 # Timing and progress tracking
 STEP_TIMES=()               # Tracks time for each step
@@ -79,7 +76,6 @@ fi
 : "${HOME:=/home/$USER}"
 : "${USER:=$(whoami)}"
 : "${XDG_CURRENT_DESKTOP:=}"
-: "${INSTALL_LOG:=/tmp/archinstaller.log}"
 
 # Source library modules (provides log_*, ui_*, step, run_step, package, system functions)
 for __lib_module in core ui system package config; do
@@ -121,70 +117,6 @@ validate_config_file() {
         log_info "Backed up $config_file to $backup_file"
     fi
     
-    return 0
-}
-
-# Check if configuration value exists and is valid
-validate_config_value() {
-    local config_file="$1"
-    local key="$2"
-    local expected_pattern="${3:-.*}"
-    
-    if [ ! -f "$config_file" ]; then
-        return 1
-    fi
-    
-    # Check if key exists and matches expected pattern
-    if grep -q "^${key}=" "$config_file" 2>/dev/null; then
-        local value=$(grep "^${key}=" "$config_file" | cut -d'=' -f2-)
-        if [[ "$value" =~ $expected_pattern ]]; then
-            return 0
-        fi
-    fi
-    
-    return 1
-}
-
-# Atomic file write with validation
-atomic_write() {
-    local content="$1"
-    local target_file="$2"
-    local temp_file="${target_file}.tmp.$$"
-    local backup_dir="/tmp/archinstaller_backups"
-    
-    # Validate target directory exists
-    local target_dir=$(dirname "$target_file")
-    if [ ! -d "$target_dir" ]; then
-        log_error "Target directory $target_dir does not exist"
-        return 1
-    fi
-    
-    # Create backup if target exists
-    if [ -f "$target_file" ]; then
-        validate_config_file "$target_file" "$backup_dir"
-    fi
-    
-    # Write to temporary file first
-    if ! echo "$content" > "$temp_file"; then
-        log_error "Failed to write to temporary file $temp_file"
-        return 1
-    fi
-    
-    # Validate temporary file
-    if [ ! -s "$temp_file" ]; then
-        log_error "Temporary file $temp_file is empty"
-        rm -f "$temp_file"
-        return 1
-    fi
-    
-    # Atomic move to target
-    if ! sudo mv "$temp_file" "$target_file"; then
-        log_error "Failed to move $temp_file to $target_file"
-        rm -f "$temp_file"
-        return 1
-    fi
-    
-    log_success "Successfully wrote configuration to $target_file"
     return 0
 }
 
@@ -230,6 +162,49 @@ check_system_compatibility() {
     return 0
 }
 
+# Atomic file write with validation
+atomic_write() {
+    local content="$1"
+    local target_file="$2"
+    local temp_file="${target_file}.tmp.$$"
+    local backup_dir="/tmp/archinstaller_backups"
+    
+    # Validate target directory exists
+    local target_dir=$(dirname "$target_file")
+    if [ ! -d "$target_dir" ]; then
+        log_error "Target directory $target_dir does not exist"
+        return 1
+    fi
+    
+    # Create backup if target exists
+    if [ -f "$target_file" ]; then
+        validate_config_file "$target_file" "$backup_dir"
+    fi
+    
+    # Write to temporary file first
+    if ! echo "$content" > "$temp_file"; then
+        log_error "Failed to write to temporary file $temp_file"
+        return 1
+    fi
+    
+    # Validate temporary file
+    if [ ! -s "$temp_file" ]; then
+        log_error "Temporary file $temp_file is empty"
+        rm -f "$temp_file"
+        return 1
+    fi
+    
+    # Atomic move to target
+    if ! sudo mv "$temp_file" "$target_file"; then
+        log_error "Failed to move $temp_file to $target_file"
+        rm -f "$temp_file"
+        return 1
+    fi
+    
+    log_success "Successfully wrote configuration to $target_file"
+    return 0
+}
+
 # ============================================================================
 # SECTION 4: TERMINAL OUTPUT & UI FUNCTIONS
 # ============================================================================
@@ -252,36 +227,6 @@ format_time() {
 }
 
 # Timing functions for progress estimation
-start_step_timer() {
-  STEP_START_TIME=$(date +%s)
-  if [ "$INSTALLATION_START_TIME" -eq 0 ]; then
-    INSTALLATION_START_TIME=$STEP_START_TIME
-  fi
-}
-
-end_step_timer() {
-  local step_name="${1:-Step $CURRENT_STEP}"
-  local end_time=$(date +%s)
-  local duration=$((end_time - STEP_START_TIME))
-  STEP_TIMES+=("$duration")
-
-  # Calculate average time per step
-  local total_time=0
-  for time in "${STEP_TIMES[@]}"; do
-    total_time=$((total_time + time))
-  done
-
-  local avg_time=$((total_time / ${#STEP_TIMES[@]}))
-  local remaining_steps=$((TOTAL_STEPS - CURRENT_STEP))
-  local estimated_remaining=$((remaining_steps * avg_time))
-
-  if [ "$remaining_steps" -gt 0 ]; then
-    ui_info "Step completed in $(format_time $duration). Estimated remaining time: $(format_time $estimated_remaining)"
-  fi
-}
-
-# Enhanced step header with time estimation
-
 # Unified styling functions for consistent UI across all scripts
 print_unified_step_header() {
   local step_num="$1"
@@ -305,44 +250,6 @@ print_unified_step_header() {
   fi
 }
 
-print_unified_substep() {
-  local description="$1"
-
-  if supports_gum; then
-    gum style --margin "0 2" --foreground "$GUM_WARN" "> $description"
-  else
-    echo -e "${THEME_SECONDARY}> $description${RESET}"
-  fi
-}
-
-print_unified_success() {
-  local message="$1"
-
-  if supports_gum; then
-    gum style --margin "0 4" --foreground "$GUM_SUCCESS" "✓ $message"
-  else
-    echo -e "${THEME_SUCCESS}✓ $message${RESET}"
-  fi
-}
-
-print_unified_error() {
-  local message="$1"
-
-  if supports_gum; then
-    gum style --margin "0 4" --foreground "$GUM_ERROR" "✗ $message"
-  else
-    echo -e "${THEME_ERROR}✗ $message${RESET}"
-  fi
-}
-
-# Utility/Helper Functions
-
-# ============================================================================
-# SECTION 4: PROGRESS & TIMING FUNCTIONS
-# ============================================================================
-# Utility/Helper Functions
-
-
 # ============================================================================
 # SECTION 5: UI STYLING FUNCTIONS (gum-based)
 # ============================================================================
@@ -364,15 +271,6 @@ print_header() {
   fi
 }
 
-print_step_header() {
-  local step_num="$1"; local total="$2"; local title="$3"
-  if supports_gum; then
-    echo ""
-    gum style --border normal --margin "1 0" --padding "0 2" --foreground "$GUM_HEADER" --border-foreground "$GUM_BORDER" "Step ${step_num}/${total}: ${title}"
-  else
-    echo -e "${THEME_BORDER}Step ${step_num}/${total}: ${title}${RESET}"
-  fi
-}
 arch_ascii() {
   echo -e "${THEME_PRIMARY}"
   cat << "EOF"
@@ -664,47 +562,12 @@ install_packages_quietly() {
   install_package_generic "pacman" "$@"
 }
 
-# Batch install helper for multiple package groups
-install_package_groups() {
-  local groups=("$@")
-  local all_packages=()
-
-  for group in "${groups[@]}"; do
-    case "$group" in
-      "helpers")
-        all_packages+=("${HELPER_UTILS[@]}")
-        ;;
-      "zsh")
-        all_packages+=(zsh zsh-autosuggestions zsh-syntax-highlighting)
-        ;;
-      "starship")
-        all_packages+=(starship)
-        ;;
-      # Add more groups as needed
-    esac
-  done
-
-  # Remove duplicates before batch install
-  if [ "${#all_packages[@]}" -gt 0 ]; then
-    # Use associative array to filter duplicates
-    declare -A pkg_map
-    for pkg in "${all_packages[@]}"; do
-      pkg_map["$pkg"]=1
-    done
-    local unique_pkgs=()
-    for pkg in "${!pkg_map[@]}"; do
-      unique_pkgs+=("$pkg")
-    done
-    install_packages_quietly "${unique_pkgs[@]}"
-  fi
-}
-
-# Function for user confirmation with gum (or fallback)
-# Usage: gum_confirm "Your question?" "Optional description."
-
 # ============================================================================
 # SECTION 11: PACKAGE INSTALLATION FUNCTIONS
 # ============================================================================
+
+# Function for user confirmation with gum (or fallback)
+# Usage: gum_confirm "Your question?" "Optional description."
 gum_confirm() {
     local question="$1"
     local description="${2:-}" # Default to empty string if not provided
@@ -844,36 +707,6 @@ prompt_reboot() {
 # ============================================================================
 # SECTION 12: CONFIRMATION & USER INTERACTION
 # ============================================================================
-preload_package_lists() {
-  step "Preloading package lists for faster installation"
-  sudo pacman -Sy --noconfirm >>"$INSTALL_LOG" 2>&1
-  if command -v yay >/dev/null; then
-    yay -Sy --noconfirm >>"$INSTALL_LOG" 2>&1
-  else
-    log_warning "yay not available for AUR package list update"
-  fi
-}
-
-# Optimized system update
-fast_system_update() {
-  step "Performing optimized system update"
-  sudo pacman -Syu --noconfirm
-  if command -v yay >/dev/null; then
-    yay -Syu --noconfirm
-  else
-    log_warning "yay not available for AUR update"
-  fi
-}
-
-# Function to collect errors from custom scripts
-collect_custom_script_errors() {
-  local script_name="$1"
-  local script_errors=("$@")
-  shift
-  for error in "${script_errors[@]}"; do
-    ERRORS+=("$script_name: $error")
-  done
-}
 
 # Function: install_aur_quietly
 # Description: Install packages via AUR helper (wrapper for generic installer)

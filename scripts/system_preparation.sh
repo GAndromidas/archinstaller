@@ -185,10 +185,6 @@ install_all_packages() {
   echo ""
 }
 
-update_system() {
-  run_step "System update" sudo pacman -Syu --noconfirm
-}
-
 set_sudo_pwfeedback() {
   if ! sudo grep -q '^Defaults.*pwfeedback' /etc/sudoers /etc/sudoers.d/* 2>/dev/null; then
     run_step "Enabling sudo password feedback" bash -c "echo 'Defaults env_reset,pwfeedback' | sudo EDITOR='tee -a' visudo"

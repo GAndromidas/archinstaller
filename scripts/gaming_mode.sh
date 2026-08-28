@@ -10,7 +10,6 @@ CONFIGS_DIR="$ARCHINSTALLER_ROOT/configs"
 GAMING_YAML="$CONFIGS_DIR/gaming_mode.yaml"
 
 source "$SCRIPT_DIR/common.sh"
-source "$SCRIPT_DIR/lib/config.sh"
 
 # ===== Globals =====
 GAMING_ERRORS=()
@@ -120,7 +119,7 @@ main() {
 	local description="This includes popular tools like Discord, Steam, Wine, GameMode, MangoHud, Goverlay, Heroic Games Launcher, and more."
 	
 	# Use the same robust gum_confirm pattern as other scripts
-	if ! gum_confirm "Enable Gaming Mode?" "$description"; then
+	if ! ui_confirm "Enable Gaming Mode?" "$description"; then
 		ui_info "Gaming Mode skipped."
 		return 0
 	fi

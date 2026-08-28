@@ -181,60 +181,11 @@ command_exists() {
 }
 fi
 
-# Validate file operation
-if ! declare -f validate_file_operation >/dev/null 2>&1; then
-validate_file_operation() {
-    local operation="${1:?Operation type required}"
-    local file="${2:?File path required}"
-    local description="${3:-File operation}"
-
-    if [[ "$operation" == "read" ]] && [ ! -f "$file" ]; then
-        log_error "File $file does not exist. Cannot perform: $description"
-        return 1
-    fi
-
-    if [[ "$operation" == "write" ]] && [ ! -d "$(dirname "$file")" ]; then
-        log_error "Directory $(dirname "$file") does not exist. Cannot perform: $description"
-        return 1
-    fi
-
-    if [[ "$operation" == "write" ]] && [ ! -w "$(dirname "$file")" ]; then
-        log_error "No write permission for $(dirname "$file"). Cannot perform: $description"
-        return 1
-    fi
-
-    return 0
-}
-fi
-
-# Performance tracking
-if ! declare -f log_performance >/dev/null 2>&1; then
-log_performance() {
-    local step_name="$1"
-    local current_time=$(date +%s)
-    local elapsed=$((current_time - START_TIME))
-    local minutes=$((elapsed / 60))
-    local seconds=$((elapsed % 60))
-    log_info "$step_name completed in ${minutes}m ${seconds}s (${elapsed}s)"
-}
-fi
-
 # Check if running as root
 if ! declare -f check_root >/dev/null 2>&1; then
 check_root() {
     if [ "$EUID" -ne 0 ]; then
         log_error "This operation requires root privileges"
-        return 1
-    fi
-    return 0
-}
-fi
-
-# Check if system is Arch Linux
-if ! declare -f check_arch >/dev/null 2>&1; then
-check_arch() {
-    if [ ! -f /etc/arch-release ]; then
-        log_error "This script is designed for Arch Linux only"
         return 1
     fi
     return 0

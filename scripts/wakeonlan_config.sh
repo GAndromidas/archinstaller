@@ -13,36 +13,6 @@ source "$SCRIPT_DIR/common.sh"
 # Color binding for prompt
 BOLD="${THEME_TEXT_BOLD}"
 
-# Function to detect if system is a laptop
-is_laptop() {
-    # Check for battery presence
-    if [ -d /sys/class/power_supply/BAT0 ] || [ -d /sys/class/power_supply/BAT1 ]; then
-        return 0
-    fi
-    
-    # Check DMI product type for laptop/chassis
-    if command -v dmidecode &>/dev/null; then
-        local chassis_type=$(dmidecode -s chassis-type 2>/dev/null | tr '[:upper:]' '[:lower:]')
-        case "$chassis_type" in
-            "laptop"|"notebook"|"portable"|"sub notebook"|"convertible"|"detachable")
-                return 0
-                ;;
-        esac
-    fi
-    
-    # Check system product name for common laptop indicators
-    if [ -f /sys/devices/virtual/dmi/id/product_name ]; then
-        local product_name=$(cat /sys/devices/virtual/dmi/id/product_name 2>/dev/null | tr '[:upper:]' '[:lower:]')
-        case "$product_name" in
-            *laptop*|*notebook*|*book*|*ultrabook*|*macbook*|*thinkpad*|*latitude*|*precision*)
-                return 0
-                ;;
-        esac
-    fi
-    
-    return 1
-}
-
 # Function to test internet connectivity on interface
 test_interface_connectivity() {
     local iface="$1"

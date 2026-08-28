@@ -287,27 +287,3 @@ update_system() {
     fi
 }
 fi
-
-# Preload package lists for faster installation
-if ! declare -f preload_package_lists >/dev/null 2>&1; then
-preload_package_lists() {
-    ui_info "Preloading package lists..."
-    # Database is already synced from system_preparation.sh — just update yay if available
-    if command -v yay >/dev/null; then
-        yay -Sy --noconfirm >>"$INSTALL_LOG" 2>&1
-    fi
-}
-fi
-
-# Enable multilib repository
-if ! declare -f enable_multilib >/dev/null 2>&1; then
-enable_multilib() {
-    if ! grep -q "^\[multilib\]" /etc/pacman.conf; then
-        echo -e "\n[multilib]\nInclude = /etc/pacman.d/mirrorlist" | sudo tee -a /etc/pacman.conf >/dev/null
-        ui_success "Enabled multilib repository"
-        # Database sync will happen on next pacman -S call
-    else
-        ui_info "Multilib repository already enabled"
-    fi
-}
-fi

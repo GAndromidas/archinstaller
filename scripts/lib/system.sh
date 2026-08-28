@@ -244,36 +244,3 @@ is_uki_system() {
     [[ "$result" == "true" ]]
 }
 fi
-
-# Find limine.conf file location
-find_limine_config() {
-    local limine_config=""
-    for limine_loc in "/boot/limine/limine.conf" "/boot/limine.conf" "/boot/EFI/limine/limine.conf" "/boot/EFI/arch-limine/limine.conf" "/efi/limine/limine.conf"; do
-        if sudo test -f "$limine_loc" 2>/dev/null || [ -f "$limine_loc" ]; then
-            echo "$limine_loc"
-            return 0
-        fi
-    done
-    return 1
-}
-
-# Get system information summary
-get_system_info() {
-    local cpu=$(detect_cpu_vendor)
-    local ram=$(get_ram_gb)
-    local gpu=$(detect_gpu)
-    local laptop
-    is_laptop && laptop="Yes" || laptop="No"
-    local bootloader=$(detect_bootloader)
-    local btrfs
-    is_btrfs_system && btrfs="Yes" || btrfs="No"
-    
-    cat << EOF
-CPU: $cpu
-RAM: ${ram} GB
-GPU: $gpu
-Laptop: $laptop
-Bootloader: $bootloader
-Btrfs: $btrfs
-EOF
-}

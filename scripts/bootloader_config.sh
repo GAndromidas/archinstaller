@@ -9,16 +9,146 @@ BOOTLOADER=$(detect_bootloader)
 IS_BTRFS=$(is_btrfs_system && echo "true" || echo "false")
 
 # ============================================================================
+# UNIFIED KERNEL PARAMETERS
+# ============================================================================
+
+# Build consistent kernel parameters across all bootloaders
+# Usage: get_kernel_params [--cmdline-only]
+#   --cmdline-only: Output only the parameters (no root= prefix)
+get_kernel_params() {
+  local cmdline_only=false
+  [[ "${1:-}" == "--cmdline-only" ]] && cmdline_only=true
+
+  local params=""
+
+  # Base parameters (all systems)
+  params="quiet loglevel=3 nowatchdog"
+
+  # Plymouth splash (hide boot text, show progress)
+  if command -v plymouth-set-default-theme &>/dev/null || pacman -Qi plymouth &>/dev/null 2>&1; then
+    params="$params splash vt.global_cursor_default=0"
+  fi
+
+  # GPU-specific parameters
+  local gpu_vendor=""
+  if lspci 2>/dev/null | grep -qiE 'vga.*nvidia|3d.*nvidia|display.*nvidia'; then
+    gpu_vendor="nvidia"
+  elif lspci 2>/dev/null | grep -qiE 'vga.*amd|3d.*amd|display.*amd|vga.*radeon|3d.*radeon'; then
+    gpu_vendor="amd"
+  elif lspci 2>/dev/null | grep -qiE 'vga.*intel|display.*intel'; then
+    gpu_vendor="intel"
+  fi
+
+  case "$gpu_vendor" in
+    nvidia)
+      # NVIDIA: Required for Wayland and modern drivers
+      params="$params nvidia_drm.modeset=1 nvidia_drm.fbdev=1"
+      # Laptop power management for Ampere+ GPUs
+      if is_laptop 2>/dev/null; then
+        params="$params NVreg_DynamicPowerManagement=0x03"
+        params="$params NVreg_PreserveVideoMemoryAllocations=1"
+        params="$params NVreg_TemporaryFilePath=/var/tmp"
+      fi
+      ;;
+    amd)
+      # AMD: amdgpu is the default driver, no extra params needed by default
+      # Only add for older GCN 1-2 GPUs that need force-loading
+      if lspci 2>/dev/null | grep -qiE 'vga.*amd.*oland|vga.*amd.*tonga|vga.*amd.*fiji|vga.*amd.*polaris'; then
+        params="$params radeon.si_support=0 amdgpu.si_support=1"
+        params="$params radeon.cik_support=0 amdgpu.cik_support=1"
+      fi
+      # AMD P-State for CPUs with CPPC support (Ryzen 5000+ / Zen 3+)
+      if grep -qi "amd_pstate" /proc/cpuinfo 2>/dev/null || [ -d /sys/devices/system/cpu/amd_pstate ]; then
+        params="$params amd_pstate=active"
+      fi
+      ;;
+    intel)
+      # Intel: Enable GuC/HuC firmware for Gen 9.5+ (11th gen+)
+      local intel_gen=$(lspci 2>/dev/null | grep -i 'vga.*intel\|display.*intel' | grep -oP '\[\K[0-9a-f]+' | head -1)
+      # If we can detect a recent Intel GPU, enable GuC
+      if [[ -n "$intel_gen" ]]; then
+        params="$params i915.enable_guc=3"
+      fi
+      ;;
+  esac
+
+  # Filesystem-specific root flags
+  local root_fstype=$(findmnt -n -o FSTYPE / 2>/dev/null || echo "")
+  case "$root_fstype" in
+    btrfs)
+      local root_subvol=$(findmnt -n -o OPTIONS / 2>/dev/null | grep -o 'subvol=[^,]*' | cut -d= -f2 || echo "/@")
+      params="$params rootflags=subvol=$root_subvol"
+      ;;
+    ext4)
+      params="$params rootflags=relatime"
+      ;;
+  esac
+
+  if [[ "$cmdline_only" == true ]]; then
+    echo "$params"
+    return 0
+  fi
+
+  # Full cmdline with root device
+  local root_uuid=$(findmnt -n -o UUID / 2>/dev/null || echo "")
+  if [[ -n "$root_uuid" ]]; then
+    echo "root=UUID=$root_uuid rw $params"
+  else
+    echo "$params"
+  fi
+}
+
+# Write kernel parameters to UKI /etc/kernel/cmdline
+configure_uki_cmdline() {
+  local cmdline_file="/etc/kernel/cmdline"
+  local params
+  params=$(get_kernel_params)
+
+  if [[ -f "$cmdline_file" ]]; then
+    local current_params
+    current_params=$(sudo cat "$cmdline_file" 2>/dev/null || echo "")
+
+    # Check if already configured correctly
+    if [[ "$current_params" == *"$params"* ]] || [[ "$params" == *"$current_params"* ]]; then
+      log_info "UKI cmdline already configured: $current_params"
+      return 0
+    fi
+
+    # Backup and update
+    sudo cp "$cmdline_file" "${cmdline_file}.backup.$(date +%Y%m%d_%H%M%S)"
+    log_info "Backed up existing UKI cmdline"
+  fi
+
+  echo "$params" | sudo tee "$cmdline_file" >/dev/null
+  log_success "UKI cmdline written: $params"
+
+  # Regenerate UKI images if mkinitcpio presets exist
+  if [[ -d /etc/mkinitcpio.d ]]; then
+    ui_info "Regenerating UKI images..."
+    if sudo mkinitcpio -P >>"$INSTALL_LOG" 2>&1; then
+      log_success "UKI images regenerated"
+    else
+      log_warning "UKI image regeneration had issues — check mkinitcpio presets"
+    fi
+  fi
+}
+
+# ============================================================================
 # BOOTLOADER-SPECIFIC KERNEL PARAMETERS
 # ============================================================================
 
 # --- systemd-boot ---
 configure_boot() {
   if is_uki_system; then
-    log_info "UKI system — systemd-boot auto-discovers UKI images; no entries/loader.conf needed"
-    ui_info "UKI system detected — boot configuration managed via mkinitcpio presets"
+    log_info "UKI system — configuring /etc/kernel.cmdline"
+    configure_uki_cmdline
+    ui_info "UKI system detected — kernel parameters configured via /etc/kernel.cmdline"
     return 0
   fi
+
+  # Get unified kernel parameters for non-UKI systemd-boot
+  local kernel_params
+  kernel_params=$(get_kernel_params --cmdline-only)
 
   local entries_dir
   entries_dir=$(find_systemd_boot_entries_dir)
@@ -37,7 +167,46 @@ configure_boot() {
     log_warning "loader.conf not found. Skipping loader.conf configuration for systemd-boot."
   fi
 
+  # Update kernel options in all entries with unified params
+  run_step "Updating kernel options with unified parameters" update_systemd_boot_options "$kernel_params"
+
   run_step "Checking kernel options consistency" check_kernel_options_consistency
+}
+
+# Update kernel options in systemd-boot entries
+update_systemd_boot_options() {
+  local new_params="$1"
+  local entries_dir
+  entries_dir=$(find_systemd_boot_entries_dir)
+
+  if [ -z "$entries_dir" ]; then
+    return 0
+  fi
+
+  local updated=0
+  for entry in "$entries_dir"/*.conf; do
+    [ -f "$entry" ] || continue
+    [[ "$(basename "$entry")" == *fallback* ]] && continue
+
+    # Read existing root device from options line
+    local existing_root=""
+    if grep -q "^options " "$entry"; then
+      existing_root=$(grep "^options " "$entry" | sed 's/^options //' | grep -oP 'root=UUID=\S+')
+    fi
+
+    # Build new options line
+    local new_options="${existing_root} rw ${new_params}"
+
+    # Update or add options line
+    if grep -q "^options " "$entry"; then
+      sudo sed -i "s|^options .*|options $new_options|" "$entry"
+    else
+      echo "options $new_options" | sudo tee -a "$entry" >/dev/null
+    fi
+    ((updated++))
+  done
+
+  [[ $updated -gt 0 ]] && log_success "Updated kernel options in $updated systemd-boot entries"
 }
 
 # Check kernel options consistency and only sync if necessary
@@ -327,10 +496,15 @@ configure_grub() {
     step "Configuring GRUB"
 
     if is_uki_system; then
-      log_info "UKI system — kernel parameters baked into UKI image"
+      log_info "UKI system — configuring /etc/kernel/cmdline"
+      configure_uki_cmdline
       ui_info "UKI system detected — kernel parameters configured via /etc/kernel/cmdline"
       return 0
     fi
+
+    # Get unified kernel parameters (without root= prefix for GRUB)
+    local kernel_params
+    kernel_params=$(get_kernel_params --cmdline-only)
 
     # Traditional system: configure GRUB
     set_grub_config "GRUB_TIMEOUT" "3"
@@ -345,6 +519,11 @@ configure_grub() {
     set_grub_config "GRUB_DISABLE_SUBMENU" "notlinux"
     set_grub_config "GRUB_GFXMODE" "auto"
     set_grub_config "GRUB_GFXPAYLOAD_LINUX" "keep"
+
+    # Set kernel parameters (quiet, splash, nvidia, etc.)
+    set_grub_config "GRUB_CMDLINE_LINUX_DEFAULT" "$kernel_params"
+    set_grub_config "GRUB_CMDLINE_LINUX" ""
+    ui_info "Kernel parameters: $kernel_params"
 
     local KERNELS=($(ls /boot/vmlinuz-* 2>/dev/null | sed 's|/boot/vmlinuz-||g'))
     if [[ ${#KERNELS[@]} -eq 0 ]]; then
@@ -396,8 +575,9 @@ configure_limine_basic() {
   step "Configuring Limine bootloader"
 
   if is_uki_system; then
-    log_info "UKI system — kernel parameters baked into UKI image"
-    ui_info "UKI system detected — kernel parameters configured via /etc/kernel/cmdline"
+    log_info "UKI system — configuring /etc/kernel.cmdline"
+    configure_uki_cmdline
+    ui_info "UKI system detected — kernel parameters configured via /etc/kernel.cmdline"
     return 0
   fi
 
@@ -410,6 +590,10 @@ configure_limine_basic() {
     sudo cp "$limine_config" "${limine_config}.backup.$(date +%Y%m%d_%H%M%S)"
   fi
 
+  # Get unified kernel parameters
+  local cmdline
+  cmdline=$(get_kernel_params)
+
   local root_uuid=""
   root_uuid=$(findmnt -n -o UUID / 2>/dev/null || echo "")
 
@@ -417,19 +601,6 @@ configure_limine_basic() {
     log_error "Could not determine root UUID"
     return 1
   fi
-
-  local cmdline="root=UUID=$root_uuid rw nowatchdog"
-
-  local root_fstype=$(findmnt -n -o FSTYPE / 2>/dev/null || echo "")
-  case "$root_fstype" in
-    btrfs)
-      local root_subvol=$(findmnt -n -o OPTIONS / | grep -o 'subvol=[^,]*' | cut -d= -f2 || echo "/@")
-      cmdline="$cmdline rootflags=subvol=$root_subvol"
-      ;;
-    ext4)
-      cmdline="$cmdline rootflags=relatime"
-      ;;
-  esac
 
   local limine_tmp=$(mktemp)
   trap 'rm -f "$limine_tmp"' RETURN

@@ -20,6 +20,9 @@ setup_firewall_and_services() {
 
   # Then handle services
   run_step "Enabling system services" enable_services
+
+  # Configure Plymouth boot splash
+  run_step "Configuring Plymouth boot splash" configure_plymouth
 }
 
 configure_firewalld() {
@@ -208,6 +211,73 @@ enable_services() {
     log_warning "Some services may need attention: ${failed_services[*]}"
   fi
   fi
+}
+
+# Configure Plymouth boot splash
+configure_plymouth() {
+  # Skip for server mode (no graphical boot needed)
+  if [[ "$INSTALL_MODE" == "server" ]]; then
+    log_info "Server mode — skipping Plymouth configuration"
+    return 0
+  fi
+
+  # Check if Plymouth is installed
+  if ! pacman -Qi plymouth &>/dev/null 2>&1; then
+    log_info "Plymouth not installed — skipping configuration"
+    return 0
+  fi
+
+  ui_info "Configuring Plymouth boot splash..."
+
+  # Set theme: prefer bgrt (UEFI), fallback to spinner
+  local theme="spinner"
+  if pacman -Qi plymouth-theme-bgrt &>/dev/null 2>&1; then
+    theme="bgrt"
+  elif pacman -Qi xora &>/dev/null 2>&1; then
+    theme="xora"
+  fi
+
+  # Set the Plymouth theme
+  if command -v plymouth-set-default-theme &>/dev/null; then
+    sudo plymouth-set-default-theme "$theme" >>"$INSTALL_LOG" 2>&1 && \
+      log_success "Plymouth theme set to: $theme" || \
+      log_warning "Failed to set Plymouth theme"
+  fi
+
+  # Add plymouth hook to mkinitcpio if not present
+  local mkinitcpio_conf="/etc/mkinitcpio.conf"
+  if [[ -f "$mkinitcpio_conf" ]]; then
+    if ! grep -q "plymouth" "$mkinitcpio_conf"; then
+      # Add plymouth hook after base or systemd
+      if grep -q "^HOOKS=.*systemd" "$mkinitcpio_conf"; then
+        sudo sed -i 's/\(HOOKS=.*systemd\)/\1 plymouth/' "$mkinitcpio_conf"
+        log_success "Added plymouth hook after systemd in mkinitcpio"
+      elif grep -q "^HOOKS=.*base" "$mkinitcpio_conf"; then
+        sudo sed -i 's/\(HOOKS=.*base\)/\1 plymouth/' "$mkinitcpio_conf"
+        log_success "Added plymouth hook after base in mkinitcpio"
+      fi
+    else
+      log_info "Plymouth hook already present in mkinitcpio"
+    fi
+
+    # Add udev hook before plymouth if not present (required for Plymouth)
+    if ! grep -q "udev" "$mkinitcpio_conf"; then
+      if grep -q "plymouth" "$mkinitcpio_conf"; then
+        sudo sed -i 's/\(HOOKS=.*\) plymouth/\1 udev plymouth/' "$mkinitcpio_conf"
+        log_success "Added udev hook before plymouth in mkinitcpio"
+      fi
+    fi
+
+    # Regenerate initramfs
+    ui_info "Regenerating initramfs with Plymouth hooks..."
+    if sudo mkinitcpio -P >>"$INSTALL_LOG" 2>&1; then
+      log_success "Initramfs regenerated with Plymouth support"
+    else
+      log_warning "Initramfs regeneration had issues"
+    fi
+  fi
+
+  log_success "Plymouth boot splash configured"
 }
 
 detect_and_install_gpu_drivers() {
@@ -818,41 +888,6 @@ detect_kernel_type() {
   esac
 }
 
-# Function to detect desktop environment version
-detect_de_version() {
-  step "Detecting desktop environment version"
-
-  case "${XDG_CURRENT_DESKTOP:-}" in
-    *GNOME*)
-      if command -v gnome-shell >/dev/null 2>&1; then
-        local gnome_version=$(gnome-shell --version | grep -oP '\d+' | head -1)
-        log_success "GNOME version: $gnome_version"
-        if [ "$gnome_version" -ge 45 ]; then
-          log_info "Modern GNOME version detected (45+)"
-        fi
-      fi
-      ;;
-    *KDE*|*Plasma*)
-      if command -v plasmashell >/dev/null 2>&1; then
-        local plasma_version=$(plasmashell --version 2>/dev/null | grep -oP '\d+' | head -1)
-        log_success "KDE Plasma version: $plasma_version"
-        if [ "$plasma_version" -ge 6 ]; then
-          log_info "KDE Plasma 6 detected (Qt6-based)"
-        else
-          log_error "KDE Plasma 5 detected - not supported. Please upgrade to Plasma 6"
-          log_info "Arch Linux recommends using the latest Plasma 6 for bleeding edge support"
-        fi
-      fi
-      ;;
-    *COSMIC*)
-      log_success "Cosmic Desktop detected (alpha/beta)"
-      ;;
-    *)
-      log_info "Desktop environment: ${XDG_CURRENT_DESKTOP:-Unknown}"
-      ;;
-  esac
-}
-
 # Function to check battery status
 check_battery_status() {
   step "Checking battery status"
@@ -892,77 +927,6 @@ check_battery_status() {
     fi
   else
     log_info "No battery detected (desktop system or AC only)"
-  fi
-}
-
-# Function to detect bluetooth hardware using hardware detection methods only
-detect_bluetooth_hardware() {
-  step "Detecting Bluetooth hardware"
-
-  local bluetooth_detected=false
-  local detection_methods=()
-  
-  # Method 1: Check sysfs (kernel-level detection)
-  if [ -d /sys/class/bluetooth ] && [ "$(ls /sys/class/bluetooth 2>/dev/null | wc -l)" -gt 0 ]; then
-    bluetooth_detected=true
-    detection_methods+=("kernel sysfs")
-  fi
-  
-  # Method 2: USB devices (external dongles, built-in USB controllers)
-  if command -v lsusb >/dev/null 2>&1; then
-    if lsusb 2>/dev/null | grep -iE "(bluetooth|broadcom|intel|realtek).*bluetooth" >>"$INSTALL_LOG" 2>&1; then
-      bluetooth_detected=true
-      detection_methods+=("USB device")
-    fi
-  fi
-  
-  # Method 3: PCI devices (internal cards, PCIe adapters)
-  if command -v lspci >/dev/null 2>&1; then
-    if lspci 2>/dev/null | grep -iE "(bluetooth|broadcom|intel|realtek).*bluetooth" >>"$INSTALL_LOG" 2>&1; then
-      bluetooth_detected=true
-      detection_methods+=("PCI device")
-    fi
-  fi
-  
-  # Method 4: Check for bluetooth kernel modules
-  if lsmod 2>/dev/null | grep -iE "(btusb|bluetooth)" >>"$INSTALL_LOG" 2>&1; then
-    bluetooth_detected=true
-    detection_methods+=("kernel module")
-  fi
-  
-  # Method 5: Check for bluetooth adapters in /dev
-  if [ -e /dev/rfkill ] || find /dev -name "*bluetooth*" 2>/dev/null | head -1 | grep -q .; then
-    bluetooth_detected=true
-    detection_methods+=("device node")
-  fi
-
-  if [ "$bluetooth_detected" = true ]; then
-    local detection_info=$(IFS=', '; echo "${detection_methods[*]}")
-    log_success "Bluetooth hardware detected (${detection_info})"
-    
-    # Check if bluetooth service is enabled
-    if ! systemctl is-enabled bluetooth.service &>/dev/null; then
-      log_info "Bluetooth hardware present - service will be enabled"
-    else
-      log_info "Bluetooth service already enabled"
-    fi
-  else
-    # Professional red UI message for no Bluetooth
-    if supports_gum; then
-      echo ""
-      gum style --foreground "$GUM_ERROR" --border thick --padding "1 2" \
-        "  No Bluetooth hardware detected in your system" \
-        "  Check if Bluetooth adapter is properly connected" \
-        "  Bluetooth packages installed but service will not be started"
-      echo ""
-    else
-      echo ""
-      echo -e "${THEME_ERROR}  No Bluetooth hardware detected in your system${RESET}"
-      echo -e "${THEME_ERROR}  Check if Bluetooth adapter is properly connected${RESET}"
-      echo -e "${THEME_ERROR}  Bluetooth packages installed but service will not be started${RESET}"
-      echo ""
-    fi
-    log_warning "No Bluetooth hardware detected - service will not be started"
   fi
 }
 
@@ -1219,7 +1183,7 @@ configure_smart_amd_pstate() {
 
   # Robust gaming mode detection
   local gaming_mode_detected=false
-  gaming_mode_detected=$(detect_gaming_mode_presence)
+  detect_gaming_mode_presence && gaming_mode_detected=true
   
   log_info "AMD CPU detected with P-State support - configuring driver"
   

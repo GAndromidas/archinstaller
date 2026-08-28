@@ -8,7 +8,6 @@ ARCHINSTALLER_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIGS_DIR="$ARCHINSTALLER_ROOT/configs"
 
 source "$SCRIPT_DIR/common.sh"
-source "$SCRIPT_DIR/lib/config.sh"
 
 export SUDO_ASKPASS= # Force sudo to prompt in terminal, not via GUI
 
@@ -174,7 +173,7 @@ configure_server_applications() {
 
 	# Interactively install Portainer
 	if command -v docker >/dev/null; then
-		if gum_confirm "Install Portainer for Docker management?"; then
+		if ui_confirm "Install Portainer for Docker management?"; then
 			step "Installing Portainer"
 			if sudo docker volume create portainer_data >>"$INSTALL_LOG" 2>&1; then
 				log_success "Created Docker volume for Portainer data."
@@ -201,7 +200,7 @@ configure_server_applications() {
 
 	# Interactively install Watchtower
 	if command -v docker >/dev/null; then
-		if gum_confirm "Install Watchtower for automatic container updates?"; then
+		if ui_confirm "Install Watchtower for automatic container updates?"; then
 			step "Installing Watchtower"
 			# Stop and remove existing container to ensure a clean start
 			sudo docker stop watchtower >>"$INSTALL_LOG" 2>&1 || true

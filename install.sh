@@ -716,9 +716,14 @@ if is_step_complete "wakeonlan_config"; then
 else
   # Source first to define configure_wakeonlan, then call it
   source "$SCRIPTS_DIR/wakeonlan_config.sh" >> "$INSTALL_LOG"
-  if configure_wakeonlan >> "$INSTALL_LOG"; then
+  wol_exit=0
+  configure_wakeonlan >> "$INSTALL_LOG" || wol_exit=$?
+  if [ "$wol_exit" -eq 0 ]; then
     mark_step_complete_with_progress "wakeonlan_config" "completed"
     dashboard_ok
+  elif [ "$wol_exit" -eq 2 ]; then
+    mark_step_complete_with_progress "wakeonlan_config" "completed"
+    dashboard_warn
   else
     mark_step_complete_with_progress "wakeonlan_config" "failed"
     dashboard_fail

@@ -403,8 +403,7 @@ configure_wakeonlan() {
                     fail_count=$((fail_count + 1))
                 fi
             else
-                ui_warn "Interface $iface does not support Wake-on-LAN"
-                fail_count=$((fail_count + 1))
+                ui_warn "Interface $iface does not support Wake-on-LAN (VM or virtual interface)"
             fi
         done
     else
@@ -425,8 +424,7 @@ configure_wakeonlan() {
                 fail_count=$((fail_count + 1))
             fi
         else
-            ui_warn "Interface $selection does not support Wake-on-LAN"
-            fail_count=$((fail_count + 1))
+            ui_warn "Interface $selection does not support Wake-on-LAN (VM or virtual interface)"
         fi
     fi
     
@@ -438,14 +436,12 @@ configure_wakeonlan() {
         echo ""
         show_wol_status
         return 0
+    elif [ "$fail_count" -gt 0 ]; then
+        ui_error "Wake-on-LAN configuration failed on $fail_count interface(s)"
+        return 1
     else
-        if [ "$fail_count" -gt 0 ]; then
-            ui_error "Wake-on-LAN configuration failed on all $fail_count interface(s)"
-            return 1
-        else
-            ui_warn "No interfaces were configured with Wake-on-LAN"
-            return 0
-        fi
+        ui_warn "No interfaces support Wake-on-LAN (VM or virtual interfaces detected)"
+        return 2
     fi
 }
 

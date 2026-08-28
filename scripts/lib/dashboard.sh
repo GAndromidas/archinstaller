@@ -230,11 +230,34 @@ dashboard_skip() {
     tput cup $((DASHBOARD_ROW_OFFSET + DASHBOARD_FRAME_END + 1)) 0
 }
 
+dashboard_warn() {
+    local msg="${1:-Warning}"
+    local elapsed=0
+    [ "$DASHBOARD_STEP_START" -gt 0 ] && elapsed=$(($(date +%s) - DASHBOARD_STEP_START))
+    (( elapsed < 0 )) && elapsed=0
+    local num=$DASHBOARD_CURRENT_STEP
+    local w=$DASHBOARD_INNER_W
+    DASHBOARD_STEP_STATUSES[$num]="warn"
+    DASHBOARD_STEP_TIMES[$num]=$elapsed
+
+    local time_str="$(format_time $elapsed)"
+    local step_row="${DASHBOARD_STEP_ROWS[$num]}"
+    local name="${DASHBOARD_STEP_NAMES[$num]}"
+
+    local name_w=$((w - 17))
+    tput cup $((DASHBOARD_ROW_OFFSET + step_row)) 0
+    tput el
+    printf "${THEME_BORDER}  │${RESET}  %2d  ${THEME_WARN}⚠${RESET} %-${name_w}s ${THEME_MUTED}%6s${RESET}  ${THEME_BORDER}│${RESET}" \
+        "$num" "$name" "$time_str"
+
+    tput cup $((DASHBOARD_ROW_OFFSET + DASHBOARD_FRAME_END + 1)) 0
+}
+
 dashboard_finish() {
     clear
 
     local total=${TOTAL_STEPS:-11}
-    local success=0 fail=0 skip=0
+    local success=0 fail=0 skip=0 warn=0
 
     for ((i = 1; i <= total; i++)); do
         [[ -v DASHBOARD_STEP_STATUSES[$i] ]] || continue
@@ -242,6 +265,7 @@ dashboard_finish() {
             ok)   ((success++)) ;;
             fail) ((fail++)) ;;
             skip) ((skip++)) ;;
+            warn) ((warn++)) ;;
         esac
     done
 
@@ -283,6 +307,7 @@ dashboard_finish() {
             ok)   icon="✓"; color="$THEME_SUCCESS" ;;
             fail) icon="✗"; color="$THEME_ERROR" ;;
             skip) icon="◇"; color="$THEME_MUTED" ;;
+            warn) icon="⚠"; color="$THEME_WARN" ;;
             *)    icon="?"; color="$THEME_MUTED" ;;
         esac
         local time_str
@@ -299,8 +324,8 @@ dashboard_finish() {
     echo ""
     echo -e "${THEME_MUTED}  $(printf '─%.0s' $(seq 1 $w))${RESET}"
     echo ""
-    echo -e "${THEME_TEXT}    ${success} completed, ${fail} failed, ${skip} skipped${RESET}  |  ${THEME_SECONDARY}Total: $(format_time $wall_time)${RESET}"
+    echo -e "${THEME_TEXT}    ${success} completed, ${fail} failed, ${warn} warnings, ${skip} skipped${RESET}  |  ${THEME_SECONDARY}Total: $(format_time $wall_time)${RESET}"
     echo ""
 
-    log_to_file "Installation finished. $success completed, $fail failed, $skip skipped in $(format_time $wall_time)"
+    log_to_file "Installation finished. $success completed, $fail failed, $warn warnings, $skip skipped in $(format_time $wall_time)"
 }

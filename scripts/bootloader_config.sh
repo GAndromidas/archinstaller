@@ -768,6 +768,19 @@ set_loader_config() {
     done
 
     if [ -z "$loader_config" ]; then
+        log_warning "loader.conf not found in standard paths, trying derived path..."
+        if [ -n "$entries_dir" ]; then
+          local derived_conf="$(dirname "$entries_dir")/loader.conf"
+          if sudo test -f "$derived_conf" 2>/dev/null; then
+            loader_config="$derived_conf"
+          else
+            loader_config="$derived_conf"
+            log_info "Will create loader.conf at derived path: $loader_config"
+          fi
+        fi
+    fi
+
+    if [ -z "$loader_config" ]; then
         log_warning "loader.conf not found or not accessible, cannot set configuration for key '$key'"
         return 1
     fi
@@ -791,10 +804,36 @@ set_loader_config() {
 ${key} ${value}"
     fi
 
-    if ! atomic_write "$new_content" "$loader_config"; then
-        log_error "Failed to write configuration to $loader_config for key '$key'"
+    # Ensure directory exists
+    local target_dir=$(dirname "$loader_config")
+    if [ ! -d "$target_dir" ]; then
+        sudo mkdir -p "$target_dir" 2>/dev/null || {
+            log_error "Failed to create directory $target_dir"
+            return 1
+        }
+    fi
+
+    # Write to file atomically
+    local temp_file="${loader_config}.tmp.$$"
+    if ! echo "$new_content" > "$temp_file" 2>/dev/null; then
+        log_error "Failed to write to temporary file $temp_file"
+        rm -f "$temp_file"
         return 1
     fi
+
+    if [ ! -s "$temp_file" ]; then
+        log_error "Temporary file $temp_file is empty"
+        rm -f "$temp_file"
+        return 1
+    fi
+
+    if ! sudo mv "$temp_file" "$loader_config"; then
+        log_error "Failed to move $temp_file to $loader_config"
+        rm -f "$temp_file"
+        return 1
+    fi
+
+    log_success "Successfully wrote configuration to $loader_config for key '$key'"
     return 0
 }
 

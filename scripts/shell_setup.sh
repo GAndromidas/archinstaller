@@ -141,20 +141,20 @@ setup_shell() {
     return 1
   fi
 
-  # Copy ZSH configuration BEFORE Oh-My-Zsh install so OMZ's KEEP_ZSHRC=yes
-  # preserves our custom config instead of generating a default one
-  local src_zshrc="$CONFIGS_DIR/.zshrc"
-  local dst_zshrc="$HOME/.zshrc"
+  # Copy Starship prompt configuration
+  local src_starship="$CONFIGS_DIR/starship.toml"
+  local dst_starship="$HOME/.config/starship.toml"
 
-  if [ -f "$src_zshrc" ]; then
-    log_info "Copying .zshrc: $src_zshrc -> $dst_zshrc"
-    if cp "$src_zshrc" "$dst_zshrc"; then
-      log_success "ZSH configuration copied to $dst_zshrc"
+  if [ -f "$src_starship" ]; then
+    mkdir -p "$HOME/.config"
+    log_info "Copying starship.toml: $src_starship -> $dst_starship"
+    if cp "$src_starship" "$dst_starship"; then
+      log_success "Starship prompt configuration copied to $dst_starship"
     else
-      log_error "Failed to copy .zshrc" "cp exit code: $?"
+      log_error "Failed to copy starship.toml" "cp exit code: $?"
     fi
   else
-    log_warning "Source .zshrc not found at $src_zshrc"
+    log_warning "Source starship.toml not found at $src_starship"
   fi
 
   # Install Oh-My-Zsh
@@ -172,28 +172,27 @@ setup_shell() {
     log_info "Oh-My-Zsh already installed"
   fi
 
+  # Overwrite .zshrc AFTER Oh-My-Zsh so our config always wins
+  local src_zshrc="$CONFIGS_DIR/.zshrc"
+  local dst_zshrc="$HOME/.zshrc"
+
+  if [ -f "$src_zshrc" ]; then
+    log_info "Copying .zshrc: $src_zshrc -> $dst_zshrc"
+    if cp "$src_zshrc" "$dst_zshrc"; then
+      log_success "ZSH configuration copied to $dst_zshrc"
+    else
+      log_error "Failed to copy .zshrc" "cp exit code: $?"
+    fi
+  else
+    log_warning "Source .zshrc not found at $src_zshrc"
+  fi
+
   # Change default shell to ZSH
   log_info "Setting ZSH as default shell..."
   if sudo chsh -s "$(command -v zsh)" "$USER" 2>/dev/null; then
     log_success "Default shell changed to ZSH"
   else
     log_warning "Failed to change default shell. You may need to do this manually."
-  fi
-
-  # Copy Starship prompt configuration
-  local src_starship="$CONFIGS_DIR/starship.toml"
-  local dst_starship="$HOME/.config/starship.toml"
-
-  if [ -f "$src_starship" ]; then
-    mkdir -p "$HOME/.config"
-    log_info "Copying starship.toml: $src_starship -> $dst_starship"
-    if cp "$src_starship" "$dst_starship"; then
-      log_success "Starship prompt configuration copied to $dst_starship"
-    else
-      log_error "Failed to copy starship.toml" "cp exit code: $?"
-    fi
-  else
-    log_warning "Source starship.toml not found at $src_starship"
   fi
 
 }

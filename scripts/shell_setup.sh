@@ -137,8 +137,10 @@ setup_shell() {
 
   # Copy ZSH configuration BEFORE Oh-My-Zsh install so OMZ's KEEP_ZSHRC=yes
   # preserves our custom config instead of generating a default one
-  if [ -f "$CONFIGS_DIR/.zshrc" ] && [ ! -f "$HOME/.zshrc" ]; then
-    cp "$CONFIGS_DIR/.zshrc" "$HOME/" 2>/dev/null && log_success "ZSH configuration copied"
+  if [ -f "$CONFIGS_DIR/.zshrc" ]; then
+    # Always copy our custom config, overwriting any default generated one.
+    # Only log success/failure, do not warn about existing file.
+    cp "$CONFIGS_DIR/.zshrc" "$HOME/" 2>/dev/null && log_success "ZSH configuration copied" || log_error "Failed to copy .zshrc"
   fi
 
   # Install Oh-My-Zsh

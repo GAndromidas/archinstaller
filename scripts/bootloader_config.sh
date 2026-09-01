@@ -761,22 +761,41 @@ set_loader_config() {
     local value="$2"
     local loader_config=""
     for f in "/boot/loader/loader.conf" "/efi/loader/loader.conf" "/boot/efi/loader/loader.conf"; do
-      if [ -f "$f" ]; then
+      if sudo test -f "$f" 2>/dev/null; then # Use sudo test for file existence
         loader_config="$f"
         break
       fi
     done
 
     if [ -z "$loader_config" ]; then
-        log_warning "loader.conf not found, cannot set configuration"
+        log_warning "loader.conf not found or not accessible, cannot set configuration for key '$key'"
         return 1
     fi
 
-    if grep -q "^[#]*${key}[[:space:]]" "$loader_config" 2>/dev/null; then
-        sudo sed -i "s/^[#]*${key}[[:space:]].*/${key} ${value}/" "$loader_config"
-    else
-        echo "${key} ${value}" | sudo tee -a "$loader_config" >/dev/null
+    local current_content
+    current_content=$(sudo cat "$loader_config" 2>/dev/null)
+    if [ $? -ne 0 ]; then
+        log_error "Failed to read $loader_config for key '$key'"
+        return 1
     fi
+
+    local new_content
+
+    # Check if the key exists, potentially commented out
+    if echo "$current_content" | grep -qE "^[#]*${key}[[:space:]]"; then
+        # Replace existing or uncomment and replace
+        new_content=$(echo "$current_content" | sudo sed "s/^[#]*${key}[[:space:]].*/${key} ${value}/")
+    else
+        # Append new key-value pair if not found
+        new_content="${current_content}
+${key} ${value}"
+    fi
+
+    if ! atomic_write "$new_content" "$loader_config"; then
+        log_error "Failed to write configuration to $loader_config for key '$key'"
+        return 1
+    fi
+    return 0
 }
 
 # ============================================================================

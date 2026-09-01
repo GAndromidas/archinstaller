@@ -56,6 +56,14 @@ install_pacman_packages() {
 	fi
 	ui_info "Installing ${#pacman_gaming_programs[@]} pacman packages for gaming..."
 
+	# Dry-run: preview the gaming packages without modifying the system
+	if [ "${DRY_RUN:-false}" = true ]; then
+		ui_info "Dry-run: would install these gaming packages via Pacman:"
+		printf '  %s\n' "${pacman_gaming_programs[@]}"
+		GAMING_INSTALLED+=("${pacman_gaming_programs[@]}")
+		return
+	fi
+
 	# Try batch install first
 	printf '%b' "${THEME_TEXT}Attempting batch installation...${RESET}\n"
 	# We capture stderr to a variable to print if it fails

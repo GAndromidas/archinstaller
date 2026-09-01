@@ -127,6 +127,13 @@ flatpak_install_batch() {
 
     ui_info "Installing $total Flatpak applications..."
 
+    if [ "${DRY_RUN:-false}" = true ]; then
+        ui_info "Dry-run: would install these Flatpak applications:"
+        printf '  %s\n' "${packages[@]}"
+        INSTALLED_PACKAGES+=("${packages[@]}")
+        return 0
+    fi
+
     # Try batch install first (flatpak supports multiple app IDs)
     local output
     if output=$(sudo flatpak install -y --noninteractive flathub "${packages[@]}" 2>&1); then
@@ -181,20 +188,20 @@ install_package_generic() {
             ui_info "Dry-run: Would install $pkg via $manager_name"
             INSTALLED_PACKAGES+=("$pkg")
         else
-            local error_output
+            local error_output install_result=1
             case "$manager" in
                 pacman)
-                    error_output=$(sudo pacman -S --noconfirm --needed "$pkg" 2>&1)
+                    error_output=$(sudo pacman -S --noconfirm --needed "$pkg" 2>&1) && install_result=0
                     ;;
                 aur)
-                    error_output=$(yay -S --noconfirm --needed "$pkg" 2>&1)
+                    error_output=$(yay -S --noconfirm --needed "$pkg" 2>&1) && install_result=0
                     ;;
                 flatpak)
-                    error_output=$(sudo flatpak install -y --noninteractive flathub "$pkg" 2>&1)
+                    error_output=$(sudo flatpak install -y --noninteractive flathub "$pkg" 2>&1) && install_result=0
                     ;;
             esac
 
-            if [ $? -eq 0 ]; then
+            if [ "$install_result" -eq 0 ]; then
                 INSTALLED_PACKAGES+=("$pkg")
             else
                 ui_error "Failed to install $pkg"

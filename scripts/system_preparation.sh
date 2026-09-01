@@ -5,61 +5,10 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
-# Function to detect network speed and optimize downloads
-detect_network_speed() {
-  step "Detecting network speed and optimizing download settings"
-
-  # Test download speed using a range request on a large file.
-  # The core.db file (~130KB) is too small to measure on fast connections,
-  # so we grab just the first 5MB of the latest Firefox package instead.
-  # The URL is detected dynamically to avoid breakage when versions change.
-  local speed_bytes=0
-  if command -v curl >/dev/null; then
-    local mirror_url="https://geo.mirror.pkgbuild.com/extra/os/x86_64/"
-    local firefox_file
-    firefox_file=$(curl -sL "$mirror_url" 2>/dev/null | grep -oP 'href="firefox-[0-9][^"]*\.pkg\.tar\.zst"' | head -1 | sed 's/href="//;s/"//')
-
-    if [ -n "$firefox_file" ]; then
-      local test_url="${mirror_url}${firefox_file}"
-      speed_bytes=$(curl -s -o /dev/null -w "%{speed_download}" \
-        -r 0-5242879 \
-        --connect-timeout 5 --max-time 10 \
-        "$test_url" 2>/dev/null || echo "0")
-    fi
-  fi
-
-  # Convert to MB/s (curl returns a float like "1572864.00", use awk for safe conversion)
-  local speed_mbps=0
-  if [ -n "$speed_bytes" ] && [[ "$speed_bytes" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-    speed_mbps=$(awk "BEGIN {printf \"%d\", $speed_bytes / 1024 / 1024}")
-  fi
-
-  # Set ParallelDownloads based on speed tier
-  local parallel_downloads
-  if [ "$speed_mbps" -ge 50 ]; then
-    # Very fast connection (50+ MB/s): max parallel downloads
-    parallel_downloads=20
-    log_success "Network: Very fast (${speed_mbps} MB/s) - ParallelDownloads = $parallel_downloads"
-  elif [ "$speed_mbps" -ge 20 ]; then
-    # Fast connection (20-50 MB/s)
-    parallel_downloads=15
-    log_success "Network: Fast (${speed_mbps} MB/s) - ParallelDownloads = $parallel_downloads"
-  elif [ "$speed_mbps" -ge 5 ]; then
-    # Moderate connection (5-20 MB/s)
-    parallel_downloads=10
-    log_success "Network: Moderate (${speed_mbps} MB/s) - ParallelDownloads = $parallel_downloads"
-  elif [ "$speed_mbps" -ge 1 ]; then
-    # Slow connection (1-5 MB/s)
-    parallel_downloads=5
-    log_warning "Network: Slow (${speed_mbps} MB/s) - ParallelDownloads = $parallel_downloads"
-  else
-    # Very slow or speed test failed
-    parallel_downloads=5
-    log_warning "Network: Speed unknown or very slow - ParallelDownloads = $parallel_downloads (safe default)"
-  fi
-
-  export PACMAN_PARALLEL="$parallel_downloads"
-}
+# NOTE: Network-speed testing was removed. A single-stream curl test is a poor
+# proxy for pacman throughput (it often times out on slow links and adds
+# unnecessary install latency). ParallelDownloads is set to a fixed value (10)
+# in configure_pacman(), which is a sensible default for slow and fast links.
 
 check_prerequisites() {
   step "Checking system prerequisites"
@@ -89,7 +38,8 @@ configure_pacman() {
   # Ensure mirrorlist exists before any pacman operation
   generate_default_mirrorlist
 
-  local parallel_downloads="${PACMAN_PARALLEL:-10}"
+  # Fixed parallel download count — a good default for both slow and fast links.
+  local parallel_downloads=10
 
   if grep -q "^#ParallelDownloads" /etc/pacman.conf; then
     sudo sed -i "s/^#ParallelDownloads.*/ParallelDownloads = $parallel_downloads/" /etc/pacman.conf
@@ -149,6 +99,13 @@ install_all_packages() {
 
   step "Installing all packages"
   echo -e "${THEME_TEXT}Installing ${#packages_to_install[@]} helper utilities + ${#all_packages[@]} total packages via Pacman...${RESET}"
+
+  if [ "${DRY_RUN:-false}" = true ]; then
+    ui_info "Dry-run: would install these packages via Pacman:"
+    printf '  %s\n' "${all_packages[@]}"
+    INSTALLED_PACKAGES+=("${all_packages[@]}")
+    return 0
+  fi
 
   printf '%b' "${THEME_TEXT}Attempting batch installation...${RESET}\n"
   if sudo pacman -S --noconfirm --needed "${all_packages[@]}" >>"$INSTALL_LOG" 2>&1; then
@@ -324,16 +281,21 @@ generate_locales() {
 }
 
 # Execute system preparation — optimized order:
-# 1. Prerequisites + network speed detection
-# 2. Configure pacman (ParallelDownloads, multilib, color)
-# 3. Update mirrors FIRST so all subsequent downloads are fast
-# 4. Sync databases once (after mirror update)
-# 5. Full system update (single -y, not -yy)
-# 6. Install packages (benefits from fast mirrors + parallel downloads)
-# 7. Remaining setup tasks
+# 1. Prerequisites
+# 2. Configure pacman (ParallelDownloads=10, multilib, color)
+# 3. Install the mirror ranking tool (rate-mirrors) so the ranking below works
+# 4. Update mirrors FIRST so all subsequent downloads are fast
+# 5. Sync databases once (after mirror update)
+# 6. Full system update (single -y, not -yy)
+# 7. Install packages (benefits from fast mirrors + parallel downloads)
+# 8. Remaining setup tasks
 check_prerequisites
-detect_network_speed
 configure_pacman
+# Install the mirror ranking tool (rate-mirrors) so ranking below works. It is
+# also part of HELPER_UTILS, so this just ensures it exists before ranking.
+if [ "${DRY_RUN:-false}" != true ]; then
+  run_step "Installing mirror ranking tool" sudo pacman -S --noconfirm --needed rate-mirrors
+fi
 update_system_mirrors
 run_step "Syncing package databases" sudo pacman -Syy
 update_system

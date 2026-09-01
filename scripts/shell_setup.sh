@@ -158,13 +158,13 @@ setup_shell() {
     log_warning "Failed to change default shell. You may need to do this manually."
   fi
 
-  # Copy ZSH configuration
-  if [ -f "$CONFIGS_DIR/.zshrc" ]; then
+  # Copy ZSH configuration (only if the user doesn't already have one)
+  if [ -f "$CONFIGS_DIR/.zshrc" ] && [ ! -f "$HOME/.zshrc" ]; then
     cp "$CONFIGS_DIR/.zshrc" "$HOME/" 2>/dev/null && log_success "ZSH configuration copied"
   fi
 
-  # Copy Starship prompt configuration
-  if [ -f "$CONFIGS_DIR/starship.toml" ]; then
+  # Copy Starship prompt configuration (only if the user doesn't already have one)
+  if [ -f "$CONFIGS_DIR/starship.toml" ] && [ ! -f "$HOME/.config/starship.toml" ]; then
     mkdir -p "$HOME/.config"
     cp "$CONFIGS_DIR/starship.toml" "$HOME/.config/" 2>/dev/null && log_success "Starship prompt configuration copied"
   fi
@@ -172,18 +172,15 @@ setup_shell() {
   # Fastfetch setup
   if command -v fastfetch >/dev/null; then
     if [ -f "$HOME/.config/fastfetch/config.jsonc" ]; then
-      log_warning "fastfetch config already exists. Skipping generation."
+      log_warning "fastfetch config already exists. Skipping."
     else
       run_step "Creating fastfetch config" bash -c 'fastfetch --gen-config'
-    fi
-
-    # Copy safe config from configs directory
-    if [ -f "$CONFIGS_DIR/config.jsonc" ]; then
-      mkdir -p "$HOME/.config/fastfetch"
-      cp "$CONFIGS_DIR/config.jsonc" "$HOME/.config/fastfetch/config.jsonc"
-      log_success "fastfetch config copied from configs directory."
-    else
-      log_warning "config.jsonc not found in configs directory. Using generated config."
+      # Copy safe config from configs directory (only if still missing after generation)
+      if [ -f "$CONFIGS_DIR/config.jsonc" ] && [ ! -f "$HOME/.config/fastfetch/config.jsonc" ]; then
+        mkdir -p "$HOME/.config/fastfetch"
+        cp "$CONFIGS_DIR/config.jsonc" "$HOME/.config/fastfetch/config.jsonc"
+        log_success "fastfetch config copied from configs directory."
+      fi
     fi
   else
     log_warning "fastfetch not installed. Skipping config setup."

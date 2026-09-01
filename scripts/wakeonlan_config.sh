@@ -254,6 +254,9 @@ show_wol_status() {
 }
 
 # Function to prompt user for interface selection
+# UI output goes to stderr so it is visible on the terminal even when the
+# function is called from a context where stdout is redirected to the log.
+# Only the final selection is echoed to stdout.
 prompt_interface_selection() {
     local interfaces=("$@")
     local active_iface
@@ -262,8 +265,8 @@ prompt_interface_selection() {
     # Find active interface (with internet)
     active_iface=$(get_active_ethernet_interface)
     
-    ui_info "Multiple ethernet interfaces detected:"
-    echo ""
+    ui_info "Multiple ethernet interfaces detected:" >&2
+    echo "" >&2
     
     # Build choices array
     local i=1
@@ -277,47 +280,47 @@ prompt_interface_selection() {
             status="${THEME_WARN}[No Internet]${RESET}"
         fi
         
-        echo -e "${THEME_TEXT}$i)${RESET} $iface $status"
-        echo -e "   MAC: ${mac_addr:-N/A}"
-        echo ""
+        echo -e "${THEME_TEXT}$i)${RESET} $iface $status" >&2
+        echo -e "   MAC: ${mac_addr:-N/A}" >&2
+        echo "" >&2
         choices+=("$iface")
         i=$((i + 1))
     done
     
-    echo -e "${THEME_TEXT}a)${RESET} Configure ALL interfaces"
-    echo -e "${THEME_TEXT}s)${RESET} Skip Wake-on-LAN configuration"
-    echo ""
+    echo -e "${THEME_TEXT}a)${RESET} Configure ALL interfaces" >&2
+    echo -e "${THEME_TEXT}s)${RESET} Skip Wake-on-LAN configuration" >&2
+    echo "" >&2
     
     while true; do
-        echo -ne "${THEME_TEXT_BOLD}Select option [1-${#interfaces[@]}, a, s]:${RESET} "
+        echo -ne "${THEME_TEXT_BOLD}Select option [1-${#interfaces[@]}, a, s]:${RESET} " >&2
         read -r choice
         
         case "$choice" in
             [0-9]*)
                 if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le ${#interfaces[@]} ]; then
                     local selected_iface="${choices[$((choice-1))]}"
-                    echo ""
-                    ui_info "Selected interface: $selected_iface"
+                    echo "" >&2
+                    ui_info "Selected interface: $selected_iface" >&2
                     echo "$selected_iface"
                     return 0
                 else
-                    ui_error "Invalid selection. Please try again."
+                    ui_error "Invalid selection. Please try again." >&2
                 fi
                 ;;
             a|A)
-                echo ""
-                ui_info "Configuring ALL ethernet interfaces"
+                echo "" >&2
+                ui_info "Configuring ALL ethernet interfaces" >&2
                 echo "ALL"
                 return 0
                 ;;
             s|S)
-                echo ""
-                ui_info "Wake-on-LAN configuration skipped"
+                echo "" >&2
+                ui_info "Wake-on-LAN configuration skipped" >&2
                 echo "SKIP"
                 return 0
                 ;;
             *)
-                ui_error "Invalid option. Please try again."
+                ui_error "Invalid option. Please try again." >&2
                 ;;
         esac
     done

@@ -38,7 +38,7 @@ FEATURES:
     - Storage optimization (NVMe/SSD/HDD with I/O scheduling)
     - Desktop environment detection and optimization (KDE Plasma 6+, GNOME 46+, Cosmic)
     - Security hardening (UFW/Firewalld + Fail2ban with SSH protection)
-    - Advanced performance tuning (CachyOS-inspired optimizations)
+    - Advanced performance tuning
     - Smart AMD P-State system with gaming mode detection
     - Wake-on-LAN configuration for ethernet devices (desktops only)
     - Zsh shell with Oh-My-Zsh and Starship prompt
@@ -84,7 +84,7 @@ EOF
 # Clear terminal for clean interface
 clear
 
-# Get's directory where this script is located (archinstaller root)
+# Gets the directory where this script is located (archinstaller root)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$SCRIPT_DIR/scripts"
 CONFIGS_DIR="$SCRIPT_DIR/configs"
@@ -176,11 +176,15 @@ check_system_requirements() {
   fi
 
   if lspci | grep -qi vga; then
-    local gpu_vendor=$(lspci | grep -i vga | head -1 | awk '{print $1}' | cut -d: -f2)
-    case "$gpu_vendor" in
-      *"Intel"*) log_to_file "Intel GPU detected - mesa drivers will be configured" ;;
-      *"AMD"*)   log_to_file "AMD GPU detected - open-source drivers will be configured" ;;
-      *)         log_to_file "Unknown GPU detected - generic drivers will be used" ;;
+    # Match the GPU vendor by name from the full lspci line (the PCI bus
+    # address in field 1 is not the vendor).
+    local gpu_info
+    gpu_info=$(lspci | grep -iE 'vga|3d controller|display controller' | head -1)
+    case "$gpu_info" in
+      *NVIDIA*)         log_to_file "NVIDIA GPU detected - proprietary drivers will be configured" ;;
+      *"AMD"*|*Radeon*|*ATI*) log_to_file "AMD GPU detected - open-source drivers will be configured" ;;
+      *Intel*)          log_to_file "Intel GPU detected - mesa drivers will be configured" ;;
+      *)                log_to_file "Unknown GPU detected - generic drivers will be used" ;;
     esac
   else
     hardware_issues+=("No GPU detected - this may be a headless system")
@@ -447,40 +451,16 @@ fi
 if [ "$DRY_RUN" = false ]; then
   while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
   SUDO_KEEPALIVE_PID=$!
-  # Enhanced trap with error handling
-  trap 'cleanup_on_error $? $LINENO; save_log_on_exit' EXIT INT TERM ERR
+  # Trap on exit/interrupt/termination (ERR is intentionally omitted: with
+  # `set -u`/`pipefail` and no `errexit`, an ERR trap is never triggered here)
+  trap 'cleanup_on_error $? $LINENO; save_log_on_exit' EXIT INT TERM
 else
-  trap 'cleanup_on_error $? $LINENO; save_log_on_exit' EXIT INT TERM ERR
+  trap 'cleanup_on_error $? $LINENO; save_log_on_exit' EXIT INT TERM
 fi
 
-# Function to mark step as completed with atomic append
-mark_step_complete() {
-  local step_name="$1"
-  
-  # Validate step name
-  if [ -z "$step_name" ]; then
-    log_error "mark_step_complete: step_name cannot be empty"
-    return 1
-  fi
-  
-  # Atomic append with file locking to prevent corruption
-  (
-    flock -x 200
-    echo "$step_name" >> "$STATE_FILE"
-  ) 200>>"$STATE_FILE" 2>/dev/null || {
-    log_error "Failed to update state file for step: $step_name"
-    return 1
-  }
-}
-
-# Function to check if step was completed
-is_step_complete() {
-  [ -f "$STATE_FILE" ] && grep -qE "^COMPLETED: ${1}$|^${1}$" "$STATE_FILE"
-}
-
-
-# Enhanced step completion with status tracking and error recovery
-# Tracks both completed and failed steps with detailed progress reporting
+# Function to mark step as completed with atomic append and status tracking
+# Tracks both completed and failed steps with detailed progress reporting.
+# Uses file locking to prevent state-file corruption on concurrent access.
 mark_step_complete_with_progress() {
   local step_name="$1"
   local status="${2:-completed}"
@@ -491,12 +471,23 @@ mark_step_complete_with_progress() {
     return 1
   fi
 
-  # Write status to state file with consistent format for parsing
-  if [ "$status" = "completed" ]; then
-    echo "COMPLETED: $step_name" >> "$STATE_FILE"
-  else
-    echo "FAILED: $step_name" >> "$STATE_FILE"
-  fi
+  # Write status to state file with consistent format (atomic, flock-guarded)
+  (
+    flock -x 200
+    if [ "$status" = "completed" ]; then
+      echo "COMPLETED: $step_name" >> "$STATE_FILE"
+    else
+      echo "FAILED: $step_name" >> "$STATE_FILE"
+    fi
+  ) 200>>"$STATE_FILE" 2>/dev/null || {
+    log_error "Failed to update state file for step: $step_name"
+    return 1
+  }
+}
+
+# Function to check if step was completed
+is_step_complete() {
+  [ -f "$STATE_FILE" ] && grep -qE "^COMPLETED: ${1}$|^${1}$" "$STATE_FILE"
 }
 
 # Enhanced error handling and rollback functions
@@ -714,10 +705,12 @@ dashboard_step "Wake-on-LAN Configuration" 9
 if is_step_complete "wakeonlan_config"; then
   dashboard_skip
 else
-  # Source first to define configure_wakeonlan, then call it
+  # Source first to define configure_wakeonlan, then call it.
+  # The Wake-on-LAN step is interactive (interface selection), so its output
+  # is shown on the terminal. Diagnostic output is also logged via tee.
   source "$SCRIPTS_DIR/wakeonlan_config.sh" >> "$INSTALL_LOG"
   wol_exit=0
-  configure_wakeonlan >> "$INSTALL_LOG" || wol_exit=$?
+  configure_wakeonlan 2>&1 | tee -a "$INSTALL_LOG" >/dev/tty || wol_exit=${PIPESTATUS[0]}
   if [ "$wol_exit" -eq 0 ]; then
     mark_step_complete_with_progress "wakeonlan_config" "completed"
     dashboard_ok

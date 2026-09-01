@@ -44,7 +44,7 @@ install_yay() {
 
   local orig_dir; orig_dir=$(pwd)
   local cleanup_tempdir
-  cleanup_tempdir() { cd "$orig_dir" 2>/dev/null; rm -rf "$temp_dir"; }
+  cleanup_tempdir() { cd "$orig_dir" 2>/dev/null || true; rm -rf "$temp_dir"; }
   trap cleanup_tempdir RETURN
 
   cd "$temp_dir" || { log_error "Failed to change to temporary directory"; return 1; }
@@ -92,7 +92,7 @@ install_yay() {
 YAYEOF
   log_success "yay configured with BatchInstall=true for faster AUR builds"
 
-  # Import GPG keys for makepkg (prevents常见 AUR build failures)
+  # Import GPG keys for makepkg (reduces AUR build key errors; failures are non-fatal)
   ui_info "Importing GPG keys..."
   gpg --keyserver keyserver.ubuntu.com --recv-keys 0xEA33F3A8DE0F8D6E 2>/dev/null || true
 

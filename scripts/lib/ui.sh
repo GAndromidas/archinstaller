@@ -156,18 +156,23 @@ ui_confirm() {
 
         return $result
     else
-        echo ""
+        # Fallback when gum is unavailable. Interactive prompts are written to
+        # /dev/tty so they remain visible even when called from a step subshell
+        # whose stdout/stderr are redirected to the install log.
+        local tty="/dev/tty"
+        echo "" > "$tty"
         if [ -n "$description" ]; then
-            echo -e "${THEME_WARN}${description}${RESET}"
+            echo -e "${THEME_WARN}${description}${RESET}" > "$tty"
         fi
         local response
         while true; do
-            read -r -p "$(echo -e "${THEME_SECONDARY}${question} [Y/n]: ${RESET}")" response
+            printf '%b' "${THEME_SECONDARY}${question} [Y/n]: ${RESET}" > "$tty"
+            read -r response < "$tty" || response=""
             response=${response,,}
             case "$response" in
                 ""|y|yes) return 0 ;;
                 n|no) return 1 ;;
-                *) echo -e "\n${THEME_ERROR}Please answer Y (yes) or N (no).${RESET}\n" ;;
+                *) printf '\n%b\n' "${THEME_ERROR}Please answer Y (yes) or N (no).${RESET}" > "$tty" ;;
             esac
         done
     fi
@@ -185,31 +190,6 @@ ui_spinner() {
     else
         echo -e "${THEME_TEXT}$message...${RESET}"
         "${command[@]}"
-    fi
-}
-
-# Progress bar for batch operations
-# Usage: ui_progress total current "message"
-ui_progress() {
-    local total="$1"
-    local current="$2"
-    local message="$3"
-
-    if supports_gum; then
-        local percent=$((current * 100 / total))
-        gum format --template "progress" \
-            --field "value:$percent" \
-            --field "message:$message" \
-            <<< "$message"
-    else
-        local bar_width=40
-        local filled=$((current * bar_width / total))
-        local empty=$((bar_width - filled))
-        printf "\r${THEME_SECONDARY}%s${RESET} [%s%s] %d/%d" \
-            "$message" \
-            "$(printf '#%.0s' $(seq 1 $filled))" \
-            "$(printf ' %.0s' $(seq 1 $empty))" \
-            "$current" "$total"
     fi
 }
 

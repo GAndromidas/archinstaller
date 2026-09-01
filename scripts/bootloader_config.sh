@@ -4,9 +4,8 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
-# --- Bootloader and Btrfs detection ---
+# --- Bootloader detection ---
 BOOTLOADER=$(detect_bootloader)
-IS_BTRFS=$(is_btrfs_system && echo "true" || echo "false")
 
 # ============================================================================
 # UNIFIED KERNEL PARAMETERS

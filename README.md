@@ -68,7 +68,7 @@ Laptop Features:
 | **systemd-boot** | EFI support, kernel fallback | Automatic entry management |
 | **Limine** | Modern UEFI, fast boot support | Simple configuration |
 
-#### Advanced Performance Optimization (CachyOS-Inspired)
+#### Advanced Performance Optimization
 
 - **Smart Memory Management**: Dynamic swappiness based on system RAM (<4GB: 60, 4-8GB: 30, 8-16GB: 10, 16GB+: 1)
 - **Intelligent Storage Optimization**: Automatic I/O scheduler detection (NVMe: none, SSD: mq-deadline, HDD: bfq)
@@ -423,7 +423,7 @@ The installer includes automatic laptop detection and optimizations:
 | **Core Functionality** | Production Ready |
 | **Hardware Detection** | Stable |
 | **Smart AMD P-State** | Implemented |
-| **Advanced Optimizations** | CachyOS-Inspired |
+| **Advanced Optimizations** | Implemented |
 | **Dashboard UI** | Professional Wizard-Style |
 | **Gaming Mode** | Tested |
 | **Server Mode** | Production Ready |

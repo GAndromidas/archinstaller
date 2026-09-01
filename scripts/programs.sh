@@ -228,6 +228,14 @@ install_pacman_packages() {
 	fi
 	ui_info "Installing ${#essential_programs[@]} pacman packages..."
 
+	# Dry-run: preview the packages without modifying the system
+	if [ "${DRY_RUN:-false}" = true ]; then
+		ui_info "Dry-run: would install these packages via Pacman:"
+		printf '  %s\n' "${essential_programs[@]}"
+		PROGRAMS_INSTALLED+=("${essential_programs[@]}")
+		return
+	fi
+
 	# Try batch install first for speed
 	printf '%b' "${THEME_TEXT}Attempting batch installation...${RESET}\n"
 	if sudo pacman -S --noconfirm --needed "${essential_programs[@]}" >>"$INSTALL_LOG" 2>&1; then
@@ -246,6 +254,16 @@ install_aur_packages() {
 	if ! command -v yay >/dev/null; then ui_warn "yay is not installed. Skipping AUR packages."; return; fi
 	if [[ ${#yay_programs[@]} -eq 0 ]]; then ui_info "No AUR packages to install."; return; fi
 	ui_info "Installing ${#yay_programs[@]} AUR packages with yay..."
+
+	# Dry-run: preview the AUR packages without modifying the system
+	if [ "${DRY_RUN:-false}" = true ]; then
+		ui_info "Dry-run: would install these AUR packages with yay:"
+		printf '  %s\n' "${yay_programs[@]}"
+		for pkg in "${yay_programs[@]}"; do
+			PROGRAMS_INSTALLED+=("$pkg (AUR)")
+		done
+		return
+	fi
 
 	# Try batch install first
 	printf '%b' "${THEME_TEXT}Attempting batch installation...${RESET}\n"
@@ -277,24 +295,6 @@ remove_pacman_packages() {
 	for pkg in "${specific_remove_programs[@]}"; do
 		if pacman_remove "$pkg"; then PROGRAMS_REMOVED+=("$pkg"); else PROGRAMS_ERRORS+=("$pkg (removal)"); fi
 	done
-}
-
-print_programs_summary() {
-	echo ""
-	ui_header "Programs Installation Summary"
-	if [[ ${#PROGRAMS_INSTALLED[@]} -gt 0 ]]; then
-		echo -e "${THEME_SUCCESS}Installed:${RESET}"
-		printf "  - %s\n" "${PROGRAMS_INSTALLED[@]}"
-	fi
-	if [[ ${#PROGRAMS_REMOVED[@]} -gt 0 ]]; then
-		echo -e "${THEME_WARN}Removed:${RESET}"
-		printf "  - %s\n" "${PROGRAMS_REMOVED[@]}"
-	fi
-	if [[ ${#PROGRAMS_ERRORS[@]} -gt 0 ]]; then
-		echo -e "${THEME_ERROR}Errors:${RESET}"
-		printf "  - %s\n" "${PROGRAMS_ERRORS[@]}"
-	fi
-	echo ""
 }
 
 # ===== Main Execution =====

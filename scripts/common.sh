@@ -593,16 +593,20 @@ gum_confirm() {
 
         return $result
     else
-        # Fallback to traditional read prompt
-        echo ""
+        # Fallback when gum is unavailable. Interactive prompts are written to
+        # /dev/tty so they remain visible even when called from a step subshell
+        # whose stdout/stderr are redirected to the install log.
+        local tty="/dev/tty"
+        echo "" > "$tty"
         if [ -n "$description" ]; then
-            echo -e "${THEME_WARN}${description}${RESET}"
+            echo -e "${THEME_WARN}${description}${RESET}" > "$tty"
         fi
 
         local response
         while true; do
-            read -r -p "$(echo -e "${THEME_SECONDARY}${question} [Y/n]: ${RESET}")" response
-            response=${response,,} # tolower
+            printf '%b' "${THEME_SECONDARY}${question} [Y/n]: ${RESET}" > "$tty"
+            read -r response < "$tty" || response=""
+            response=${response,,}
             case "$response" in
                 ""|y|yes)
                     return 0 # Yes
@@ -611,7 +615,7 @@ gum_confirm() {
                     return 1 # No
                     ;;
                 *)
-                    echo -e "\n${THEME_ERROR}Please answer Y (yes) or N (no).${RESET}\n"
+                    printf '\n%b\n' "${THEME_ERROR}Please answer Y (yes) or N (no).${RESET}" > "$tty"
                     ;;
             esac
         done

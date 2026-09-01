@@ -372,8 +372,19 @@ detect_and_install_gpu_drivers() {
     install_packages_quietly vulkan-intel lib32-vulkan-intel
     log_success "Intel drivers and Vulkan support installed"
     log_info "Intel GPU will use i915 or xe driver after reboot"
+  elif lspci | grep -Eiq 'qxl|virtio.*gpu|vmware svga|cirrus|bochs'; then
+    # Virtualized GPU (QXL / virtio-gpu / VMware / Cirrus / Bochs) — no 3D
+    # acceleration required. Install the appropriate lightweight driver and
+    # the base Vulkan software rasterizer for VM/dev-testing compatibility.
+    echo -e "${THEME_TEXT}Virtualized GPU detected. Installing lightweight VM graphics drivers...${RESET}"
+    local vm_packages=(xf86-video-qxl xf86-video-vmware xf86-video-fbdev vulkan-swrast lib32-vulkan-swrast)
+    install_packages_quietly "${vm_packages[@]}"
+    log_success "VM graphics drivers installed"
+    log_info "Virtualized/VM GPU detected — using guest drivers (QXL/VirtIO/VMware)"
   else
-    echo -e "${THEME_WARN}No AMD, Intel, or NVIDIA GPU detected. Using basic Mesa drivers already installed.${RESET}"
+    echo -e "${THEME_WARN}No recognizable GPU detected. Using basic Mesa drivers already installed.${RESET}"
+    # In a VM without the above device IDs, still try the software rasterizer
+    install_packages_quietly vulkan-swrast lib32-vulkan-swrast
   fi
 
   # Verify GPU driver is loaded
@@ -450,7 +461,9 @@ should_skip_acpi() {
   
   # 1. Skip only for very old pre-Zen AMD CPUs (pre-2017)
   if [ "$cpu_vendor" = "amd" ]; then
-    if [ "$cpu_family" -lt "23" ]; then  # Family 23+ is Zen 2 and newer
+    # Family 23+ is Zen 2 and newer. Guard against non-numeric values
+    # (e.g. non-x86 or unusual /proc/cpuinfo output) to avoid comparison errors.
+    if [[ "$cpu_family" =~ ^[0-9]+$ ]] && [ "$cpu_family" -lt "23" ]; then
       log_info "Legacy AMD CPU detected (family $cpu_family) - using minimal ACPI"
       echo "minimal"
       return 0
@@ -460,7 +473,7 @@ should_skip_acpi() {
   # 2. Skip for very old Intel CPUs (pre-2015)
   if [ "$cpu_vendor" = "intel" ]; then
     local cpu_model_num=$(echo "$cpu_model" | grep -o '[0-9]\{3,4\}' | head -1)
-    if [ -n "$cpu_model_num" ] && [ "$cpu_model_num" -lt "4000" ]; then
+    if [[ -n "$cpu_model_num" && "$cpu_model_num" =~ ^[0-9]+$ ]] && [ "$cpu_model_num" -lt "4000" ]; then
       log_info "Legacy Intel CPU detected (model $cpu_model_num) - using minimal ACPI"
       echo "minimal"
       return 0
@@ -880,10 +893,10 @@ detect_storage_type() {
 # Set I/O scheduler based on storage type
 # NVMe devices - use none (multi-queue)
 ACTION=="add|change", KERNEL=="nvme[0-9]n[0-9]", ATTR{queue/scheduler}="none"
-# SSD devices - use mq-deadline
-ACTION=="add|change", KERNEL=="sd[a-z]", ATTR{queue/rotational}=="0", ATTR{queue/scheduler}="mq-deadline"
-# HDD devices - use bfq
-ACTION=="add|change", KERNEL=="sd[a-z]", ATTR{queue/rotational}=="1", ATTR{queue/scheduler}="bfq"
+# SSD/rotational=0 devices - use mq-deadline (sd*, virtio vd*, Xen xvd*)
+ACTION=="add|change", KERNEL=="sd[a-z]|vd[a-z]|xvd[a-z]", ATTR{queue/rotational}=="0", ATTR{queue/scheduler}="mq-deadline"
+# HDD/rotational=1 devices - use bfq (sd*, virtio vd*, Xen xvd*)
+ACTION=="add|change", KERNEL=="sd[a-z]|vd[a-z]|xvd[a-z]", ATTR{queue/rotational}=="1", ATTR{queue/scheduler}="bfq"
 EOF
 
   log_success "I/O scheduler optimizations applied and made persistent"
@@ -980,7 +993,10 @@ check_battery_status() {
             exit 1
           fi
         else
-          read -r -p "Continue on battery power? [y/N]: " response
+          # Prompt is written to /dev/tty because dashboard_run redirects this
+          # step's stdout/stderr to the install log.
+          printf 'Continue on battery power? [y/N]: ' > /dev/tty
+          read -r response < /dev/tty || response=""
           response=${response,,}
           if [[ "$response" != "y" && "$response" != "yes" ]]; then
             log_error "Installation cancelled - please connect AC adapter"
@@ -1038,7 +1054,12 @@ setup_lenovo_optimizations() {
       log_info "Installing ThinkPad-specific tools..."
       install_packages_quietly acpi_call
       install_aur_quietly thinkfan
-      install_aur_quietly tlp
+      # tlp conflicts with power-profiles-daemon; only install if it is not present
+      if ! pacman -Q power-profiles-daemon &>/dev/null && ! pacman -Q auto-cpufreq &>/dev/null; then
+        install_packages_quietly tlp
+      else
+        log_warning "Skipping tlp: power-profiles-daemon/auto-cpufreq already detected"
+      fi
     fi
   else
     # Install ACPI with smart compatibility handling
@@ -1106,9 +1127,6 @@ setup_dell_optimizations() {
       log_info "Installing Dell XPS optimizations..."
       install_aur_quietly dell-xps-firmware
     fi
-    
-    # Install Dell Command Center alternative
-    install_aur_quietly dell-command-center
   fi
 
   # Configure Dell function keys
@@ -1510,7 +1528,10 @@ setup_laptop_optimizations() {
     
     echo ""
     echo -e "${THEME_TEXT}Tip: Set AUTO_LAPTOP_OPTS=true to enable optimizations automatically${RESET}"
-    read -r -p "Enable laptop optimizations? [Y/n]: " response
+    # Prompt is written to /dev/tty because dashboard_run redirects this step's
+    # stdout/stderr to the install log.
+    printf '%b' "${THEME_SECONDARY}Enable laptop optimizations? [Y/n]: ${RESET}" > /dev/tty
+    read -r response < /dev/tty || response=""
     response=${response,,}
     if [[ "$response" != "n" && "$response" != "no" ]]; then
       enable_laptop_opts=true
@@ -1572,7 +1593,7 @@ setup_laptop_optimizations() {
   show_laptop_summary
 }
 
-# Apply advanced system optimizations (CachyOS-style)
+# Apply advanced system optimizations
 setup_advanced_optimizations() {
   step "Applying advanced system optimizations"
   
@@ -1635,6 +1656,7 @@ show_laptop_summary() {
 
 # Execute all service and maintenance steps
 setup_firewall_and_services
+detect_and_install_gpu_drivers
 check_battery_status
 detect_memory_size
 detect_filesystem_type

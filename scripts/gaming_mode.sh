@@ -95,17 +95,26 @@ install_flatpak_packages() {
 
 # ===== Configuration Functions =====
 configure_mangohud() {
+	if ! command -v mangohud >/dev/null; then
+		log_warning "MangoHud not installed, skipping config."
+		return
+	fi
+
 	step "Configuring MangoHud"
-	local mangohud_config_dir="$HOME/.config/MangoHud"
-	local mangohud_config_source="$CONFIGS_DIR/MangoHud.conf"
 
-	mkdir -p "$mangohud_config_dir"
+	local src="$CONFIGS_DIR/MangoHud.conf"
+	local dst="$HOME/.config/MangoHud/MangoHud.conf"
 
-	if [ -f "$mangohud_config_source" ]; then
-		cp "$mangohud_config_source" "$mangohud_config_dir/MangoHud.conf"
-		log_success "MangoHud configuration copied successfully."
+	mkdir -p "$HOME/.config/MangoHud"
+
+	if [ -f "$src" ]; then
+		if cp "$src" "$dst"; then
+			log_success "MangoHud config copied to $dst"
+		else
+			log_error "Failed to copy MangoHud.conf" "cp exit code: $?"
+		fi
 	else
-		log_warning "MangoHud configuration file not found at $mangohud_config_source"
+		log_warning "Source MangoHud.conf not found at $src"
 	fi
 }
 

@@ -297,6 +297,34 @@ remove_pacman_packages() {
 	done
 }
 
+configure_fastfetch() {
+	if ! command -v fastfetch >/dev/null; then
+		log_warning "fastfetch not installed, skipping config setup."
+		return
+	fi
+
+	step "Configuring fastfetch"
+
+	# Generate default config first so the directory exists
+	if [ ! -d "$HOME/.config/fastfetch" ]; then
+		bash -c 'fastfetch --gen-config' >>"$INSTALL_LOG" 2>&1 || true
+	fi
+
+	local src_ff="$CONFIGS_DIR/config.jsonc"
+	local dst_ff="$HOME/.config/fastfetch/config.jsonc"
+
+	if [ -f "$src_ff" ]; then
+		mkdir -p "$HOME/.config/fastfetch"
+		if cp "$src_ff" "$dst_ff"; then
+			log_success "fastfetch config copied to $dst_ff"
+		else
+			log_error "Failed to copy fastfetch config" "cp exit code: $?"
+		fi
+	else
+		log_warning "Source config.jsonc not found at $src_ff"
+	fi
+}
+
 # ===== Main Execution =====
 main() {
 	load_package_lists_from_yaml
@@ -307,6 +335,7 @@ main() {
 	install_pacman_packages
 	install_aur_packages
 	install_flatpak_packages
+	configure_fastfetch
 
 	if [[ "$INSTALL_MODE" == "server" ]]; then
 		configure_server_applications

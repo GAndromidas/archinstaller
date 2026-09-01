@@ -135,12 +135,26 @@ get_desktop_version() {
 setup_shell() {
   step "Setting up ZSH shell environment"
 
+  # Ensure $HOME exists (should always be true, but guard against weird subshell envs)
+  if [ ! -d "$HOME" ]; then
+    log_error "\$HOME directory does not exist: $HOME"
+    return 1
+  fi
+
   # Copy ZSH configuration BEFORE Oh-My-Zsh install so OMZ's KEEP_ZSHRC=yes
   # preserves our custom config instead of generating a default one
-  if [ -f "$CONFIGS_DIR/.zshrc" ]; then
-    # Always copy our custom config, overwriting any default generated one.
-    # Only log success/failure, do not warn about existing file.
-    cp "$CONFIGS_DIR/.zshrc" "$HOME/" 2>/dev/null && log_success "ZSH configuration copied" || log_error "Failed to copy .zshrc"
+  local src_zshrc="$CONFIGS_DIR/.zshrc"
+  local dst_zshrc="$HOME/.zshrc"
+
+  if [ -f "$src_zshrc" ]; then
+    log_info "Copying .zshrc: $src_zshrc -> $dst_zshrc"
+    if cp "$src_zshrc" "$dst_zshrc"; then
+      log_success "ZSH configuration copied to $dst_zshrc"
+    else
+      log_error "Failed to copy .zshrc" "cp exit code: $?"
+    fi
+  else
+    log_warning "Source .zshrc not found at $src_zshrc"
   fi
 
   # Install Oh-My-Zsh
@@ -166,27 +180,22 @@ setup_shell() {
     log_warning "Failed to change default shell. You may need to do this manually."
   fi
 
-  # Copy Starship prompt configuration (always copy repo version)
-  if [ -f "$CONFIGS_DIR/starship.toml" ]; then
-    mkdir -p "$HOME/.config"
-    cp "$CONFIGS_DIR/starship.toml" "$HOME/.config/starship.toml" && log_success "Starship prompt configuration copied"
-  fi
+  # Copy Starship prompt configuration
+  local src_starship="$CONFIGS_DIR/starship.toml"
+  local dst_starship="$HOME/.config/starship.toml"
 
-  # Fastfetch setup
-  if command -v fastfetch >/dev/null; then
-    if [ -f "$HOME/.config/fastfetch/config.jsonc" ]; then
-      log_warning "fastfetch config already exists. Skipping."
+  if [ -f "$src_starship" ]; then
+    mkdir -p "$HOME/.config"
+    log_info "Copying starship.toml: $src_starship -> $dst_starship"
+    if cp "$src_starship" "$dst_starship"; then
+      log_success "Starship prompt configuration copied to $dst_starship"
     else
-      run_step "Creating fastfetch config" bash -c 'fastfetch --gen-config'
-    fi
-    # Always copy our custom config to replace the default generated one
-    if [ -f "$CONFIGS_DIR/config.jsonc" ]; then
-      mkdir -p "$HOME/.config/fastfetch"
-      cp "$CONFIGS_DIR/config.jsonc" "$HOME/.config/fastfetch/config.jsonc" && log_success "fastfetch config copied from configs directory."
+      log_error "Failed to copy starship.toml" "cp exit code: $?"
     fi
   else
-    log_warning "fastfetch not installed. Skipping config setup."
+    log_warning "Source starship.toml not found at $src_starship"
   fi
+
 }
 
 # Main execution

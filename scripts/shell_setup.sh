@@ -135,6 +135,12 @@ get_desktop_version() {
 setup_shell() {
   step "Setting up ZSH shell environment"
 
+  # Copy ZSH configuration BEFORE Oh-My-Zsh install so OMZ's KEEP_ZSHRC=yes
+  # preserves our custom config instead of generating a default one
+  if [ -f "$CONFIGS_DIR/.zshrc" ] && [ ! -f "$HOME/.zshrc" ]; then
+    cp "$CONFIGS_DIR/.zshrc" "$HOME/" 2>/dev/null && log_success "ZSH configuration copied"
+  fi
+
   # Install Oh-My-Zsh
   if [ ! -d "$HOME/.oh-my-zsh" ]; then
     log_info "Installing Oh-My-Zsh framework..."
@@ -158,15 +164,10 @@ setup_shell() {
     log_warning "Failed to change default shell. You may need to do this manually."
   fi
 
-  # Copy ZSH configuration (only if the user doesn't already have one)
-  if [ -f "$CONFIGS_DIR/.zshrc" ] && [ ! -f "$HOME/.zshrc" ]; then
-    cp "$CONFIGS_DIR/.zshrc" "$HOME/" 2>/dev/null && log_success "ZSH configuration copied"
-  fi
-
-  # Copy Starship prompt configuration (only if the user doesn't already have one)
-  if [ -f "$CONFIGS_DIR/starship.toml" ] && [ ! -f "$HOME/.config/starship.toml" ]; then
+  # Copy Starship prompt configuration (always copy repo version)
+  if [ -f "$CONFIGS_DIR/starship.toml" ]; then
     mkdir -p "$HOME/.config"
-    cp "$CONFIGS_DIR/starship.toml" "$HOME/.config/" 2>/dev/null && log_success "Starship prompt configuration copied"
+    cp "$CONFIGS_DIR/starship.toml" "$HOME/.config/starship.toml" && log_success "Starship prompt configuration copied"
   fi
 
   # Fastfetch setup
@@ -175,12 +176,11 @@ setup_shell() {
       log_warning "fastfetch config already exists. Skipping."
     else
       run_step "Creating fastfetch config" bash -c 'fastfetch --gen-config'
-      # Copy safe config from configs directory (only if still missing after generation)
-      if [ -f "$CONFIGS_DIR/config.jsonc" ] && [ ! -f "$HOME/.config/fastfetch/config.jsonc" ]; then
-        mkdir -p "$HOME/.config/fastfetch"
-        cp "$CONFIGS_DIR/config.jsonc" "$HOME/.config/fastfetch/config.jsonc"
-        log_success "fastfetch config copied from configs directory."
-      fi
+    fi
+    # Always copy our custom config to replace the default generated one
+    if [ -f "$CONFIGS_DIR/config.jsonc" ]; then
+      mkdir -p "$HOME/.config/fastfetch"
+      cp "$CONFIGS_DIR/config.jsonc" "$HOME/.config/fastfetch/config.jsonc" && log_success "fastfetch config copied from configs directory."
     fi
   else
     log_warning "fastfetch not installed. Skipping config setup."

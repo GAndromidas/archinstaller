@@ -1,491 +1,209 @@
 <div align="center">
 
-# Archinstaller
+# 🏗️ Archinstaller
 
+**Turn a fresh Arch Linux base into a fully configured, optimized system — automatically.**
+
+[![Platform](https://img.shields.io/badge/Platform-Arch%20Linux-1793E1?style=for-the-badge&logo=arch-linux)](https://archlinux.org/)
 [![GitHub release](https://img.shields.io/github/release/GAndromidas/archinstaller.svg?style=for-the-badge&logo=github)](https://github.com/GAndromidas/archinstaller/releases)
 [![Last Commit](https://img.shields.io/github/last-commit/GAndromidas/archinstaller.svg?style=for-the-badge&logo=git)](https://github.com/GAndromidas/archinstaller/commits/main)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge&logo=open-source-initiative)](LICENSE)
-[![Arch Linux](https://img.shields.io/badge/Platform-Arch%20Linux-1793E1?style=for-the-badge&logo=arch-linux)](https://archlinux.org/)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/GAndromidas/archinstaller.svg?style=for-the-badge&logo=star)](https://github.com/GAndromidas/archinstaller/stargazers)
 
-**Arch Linux Post-Installation Automation**
-
-Transform your minimal Arch Linux installation into a fully configured, optimized system with intelligent hardware detection and tailored optimizations.
-
-[Quick Start](#-quick-start) · [Features](#-key-features) · [Installation Modes](#-installation-modes) · [Configuration](#-customization)
+[Quick Start](#quick-start) · [Features](#features) · [Modes](#installation-modes) · [Customization](#customization) · [Troubleshooting](#troubleshooting)
 
 </div>
 
 ---
 
-## Overview
+## What is this?
 
-**Archinstaller** is a sophisticated post-installation automation tool that intelligently configures Arch Linux based on your hardware. It applies targeted optimizations rather than one-size-fits-all settings, ensuring optimal performance for your specific configuration.
+Archinstaller is a **post-installation automation tool** for Arch Linux. It detects your hardware (CPU, GPU, storage, desktop environment) and applies **targeted optimizations** instead of one-size-fits-all settings — then sets up your shell, programs, firewall, and services through a clean, wizard-style dashboard.
 
-### Core Philosophy
-
-| Philosophy | Description |
-|------------|-------------|
-| **Hardware-Aware** | Detects CPU, GPU, storage, and desktop environment for tailored optimizations |
-| **Security-First** | Comprehensive hardening enabled by default with firewall and fail2ban |
-| **Performance-Optimized** | Intelligent I/O scheduling and kernel tuning for optimal responsiveness |
-| **Reliable** | Resume functionality for interrupted installations with progress tracking |
+It's designed around the Arch philosophy: **simple, transparent, and under your control.** The whole 10-step process can resume after an interruption, and every action is logged.
 
 ---
 
-## Key Features
+## ✨ Features
 
-### System Intelligence & Automation
+### System Intelligence
+- **Hardware-aware detection** — CPU vendor, GPU type, storage type (NVMe/SSD/HDD), laptop vs desktop
+- **Bootloader detection** — automatically configures GRUB, systemd-boot, or Limine
+- **VM-friendly** — virtualized GPUs (QXL/virtio/VMware) get the right lightweight drivers for testing in gnome-boxes & friends
+- **Desktop detection** — KDE Plasma 6+, GNOME 46+, and Cosmic get tailored packages & tweaks
 
-#### Hardware Detection
-```yaml
-CPU Detection:
-  Intel: intel-ucode + microcode updates
-  AMD: amd-ucode + microcode updates
-  
-GPU Detection:
-  AMD: Open-source drivers + Vulkan
-  Intel: Integrated graphics + VA-API
-  NVIDIA: GPU detection with driver configuration
-  
-Storage Optimization:
-  NVMe: none scheduler + trim optimizations
-  SSD: mq-deadline scheduler + wear leveling
-  HDD: bfq scheduler + readahead settings
-  
-Laptop Features:
-  Manufacturer-specific optimizations (15+ brands)
-  Gaming laptop detection + gaming features
-  Power management + thermal throttling
-  Battery optimization + suspend/resume
-  Function keys + hotkeys support
-```
+### Performance
+- **I/O scheduling** tuned per storage type (NVMe: `none`, SSD: `mq-deadline`, HDD: `bfq`) with persistent udev rules
+- **Smart memory management** — swappiness adjusted to your RAM
+- **Fixed fast downloads** — pacman `ParallelDownloads = 10`
+- **Automatic microcode** — `intel-ucode` / `amd-ucode` for your CPU
+- **Kernel headers** installed for every kernel you've got
+- **Laptop optimizations** for 15+ manufacturers (power, thermals, function keys)
 
-#### Bootloader Detection & Configuration
-| Bootloader | Features | Integration |
-|------------|----------|-------------|
-| **GRUB** | Timeout optimization, boot menu management | Automatic configuration |
-| **systemd-boot** | EFI support, kernel fallback | Automatic entry management |
-| **Limine** | Modern UEFI, fast boot support | Simple configuration |
+### Security (on by default)
+- **Firewall** — UFW on Arch, firewalld on EndeavourOS (deny-incoming by default)
+- **Fail2ban** — SSH brute-force protection reading from the systemd journal, with the ban action matched to your firewall
+- **SSH allowed automatically**; KDE Connect ports opened when detected
+- **User groups** — `wheel`, `video`, `storage`, `optical`, `scanner`, `lp`, `rfkill`
 
-#### Advanced Performance Optimization
-
-- **Smart Memory Management**: Dynamic swappiness based on system RAM (<4GB: 60, 4-8GB: 30, 8-16GB: 10, 16GB+: 1)
-- **Intelligent Storage Optimization**: Automatic I/O scheduler detection (NVMe: none, SSD: mq-deadline, HDD: bfq)
-- **Advanced Kernel Tuning**: Process scheduling, network stack optimization, filesystem-specific tuning
-- **Hardware-Aware Configuration**: NVMe detection, zRAM monitoring, virtualization awareness
-- **Transparent Hugepages**: Disabled for desktop systems to improve performance
-- **Persistent Settings**: All optimizations survive reboots via udev rules and systemd services
-- **GPU Driver Detection**: Automatic installation of AMD/Intel drivers with Vulkan support
-
-#### Performance Optimization
-- **I/O Scheduling**: Automatic selection based on storage type (NVMe: none, SSD: mq-deadline, HDD: bfq)
-- **Memory Management**: Dynamic swappiness based on total RAM
-- **Parallel Downloads**: Dynamic ParallelDownloads based on available RAM (4-16 concurrent)
-- **Package Management**: Single pacman sync, batch Flatpak installs, yay BatchInstall
-
-### Desktop Environment Integration
-| Environment | Optimizations | Features |
-|-------------|---------------|----------|
-| **KDE Plasma 6+** | DE-specific packages (bluedevil, dolphin, kate, okular, etc.) | KDE Connect integration, plasma-firewall, system monitor |
-| **GNOME 46+** | DE-specific packages (adw-gtk-theme, gnome-tweaks, seahorse, etc.) | Extension manager, dark theme, modern tweaks |
-| **Cosmic** | DE-specific packages (transmission-gtk) | Cosmic Tweaks via Flatpak |
-
-### Security & Stability
-
-#### Security Hardening (Enabled by Default)
-```bash
-# Firewall Configuration
-UFW/Firewalld:
-  - Secure-by-default policies (deny incoming, allow outgoing)
-  - SSH automatically allowed
-  - KDE Connect ports opened when detected (1714-1764/tcp/udp)
-  - EndeavourOS uses firewalld by default, Arch uses UFW
-
-# SSH Protection
-Fail2ban:
-  - 1-hour ban duration (increased from default 10min)
-  - 3 retry limit (decreased from default 5)
-  - Auto-detects ufw or firewalld backend for proper integration
-  - Automatic brute-force detection
-
-# User Security
-Sudo:
-  - Password feedback enabled
-  - User added to groups: wheel, video, storage, optical, scanner, lp, rfkill
-  - Hardware access permissions configured
-```
-
-### System Services Configuration
-
-The system services step includes comprehensive service management:
-
-| Service Type | Services Enabled | Notes |
-|--------------|------------------|-------|
-| **Essential** | cronie, sshd, fstrim.timer, paccache.timer | All modes |
-| **Desktop** | bluetooth.service | Standard/Minimal (not Server) |
-| **Optional** | rustdesk.service, timeshift-autosnap.timer | If installed |
-| **Firewall** | UFW or Firewalld | Auto-detected; fail2ban configures backend accordingly |
-| **Server** | systemd-timesyncd | Server mode only |
-| **GPU Drivers** | AMD/Intel with Vulkan | Auto-detected and installed |
-
-### Gaming Mode (Optional)
-
-Transform your system into a gaming powerhouse with one click:
-
-| Component | Description |
-|-----------|-------------|
-| **Steam** | Native gaming platform with Proton support |
-| **Heroic Games Launcher** | Epic Games + GOG support (Flatpak) |
-| **Faugus Launcher** | Game management and launcher (Flatpak) |
-| **ProtonPlus** | Proton-GE installer (Flatpak) |
-| **Discord** | Voice and text chat for gamers |
-| **MangoHud** | Vulkan/OpenGL overlay for monitoring FPS and performance |
-| **Goverlay** | MangoHud configuration GUI |
-| **GameMode** | Automatic performance tuning daemon |
-| **Wine** | Windows compatibility layer |
-| **lib32 packages** | 32-bit libraries for gaming (gamemode, mangohud) |
-| **Multilib** | Automatically enabled for 32-bit gaming support | |
-
-### Wake-on-LAN Configuration
-
-Intelligent Wake-on-LAN setup for desktop systems with multi-adapter support:
-
-| Feature | Detection | Configuration |
-|---------|------------|-------------|
-| **Laptop Detection** | Battery + DMI chassis | Auto-skip WoL on laptops |
-| **Multi-Adapter Support** | All ethernet interfaces | Smart selection menu |
-| **Internet Testing** | Ping + route checking | Prioritizes active connection |
-| **Persistent Services** | systemd integration | Survives reboots automatically |
-| **MAC Display** | Interface enumeration | Easy remote wake-up setup |
+### Optional Extras
+- **Gaming Mode** — Steam, Wine, GameMode, MangoHud, Discord, Heroic & more (with multilib enabled)
+- **Wake-on-LAN** — persistent, multi-adapter WoL for desktops (auto-skipped on laptops/VMs)
+- **Server mode** — Docker, sysctl tuning, and time sync for headless boxes
 
 ---
 
 ## Installation Modes
 
-Choose the perfect setup for your use case:
+| Mode | Best for | What you get |
+|------|----------|--------------|
+| **Standard** | Full desktop use | Complete DE + apps, all optimizations |
+| **Minimal** | Lightweight / low-spec | Essentials only, less bloat |
+| **Server** | Headless boxes | Docker, sysctl tuning, **interactive** Portainer & Watchtower setup |
 
-| Mode | Use Case | Requirements |
-|------|-------------|-------------|
-| **Standard** | Full-featured desktop | General users, enthusiasts |
-| **Minimal** | Lightweight essentials | Low-spec hardware, minimal bloat |
-| **Server** | Headless configuration | Docker, Docker Compose, sysctl tuning, no Portainer/Watchtower |
-
-**Gaming Mode** is offered as an optional add-on during Standard or Minimal installation.
+> **Gaming Mode** is offered as an optional add-on during Standard or Minimal installs.
 
 ---
 
 ## Quick Start
 
 ### Prerequisites
+- A fresh Arch Linux install (minimal base system)
+- An active internet connection
+- A user account with `sudo` privileges
+- At least 2 GB free disk space
 
-- Fresh Arch Linux installation (minimal base system)
-- Active internet connection
-- User account with sudo privileges
-- 2GB+ free disk space
-
-### Installation
+### Run it
 
 ```bash
-# Clone and run
 git clone https://github.com/GAndromidas/archinstaller.git
 cd archinstaller
 ./install.sh
 ```
 
-**One-Click Setup:** The installer handles everything automatically - just select your preferred mode and let it configure your system.
-
-### Command-Line Options
+You'll pick your mode from an interactive menu (or type ahead with options):
 
 ```bash
-./install.sh [OPTIONS]
-
-OPTIONS:
-  -h, --help      Show help message
-  -v, --verbose   Enable detailed output
-  -q, --quiet     Minimal output mode
-  -d, --dry-run   Preview changes only
-  --server        Configure as server (Docker, sysctl tuning, no Portainer/Watchtower)
+./install.sh --verbose   # Detailed package output
+./install.sh --quiet     # Minimal output
+./install.sh --dry-run   # Preview changes without making any
 ```
 
-### Server Mode Configuration
+> **Server mode** is selected from the menu (or auto-selected on headless systems). There is no `--server` flag.
 
-When running with `--server`, the installer configures:
+### What it does for you
+The installer runs through 10 steps and tracks its own progress, so an interrupted install can **resume where it left off**:
 
-```yaml
-Docker Hardening:
-  - Log rotation: 10MB max, 3 files
-  - Live-restore: enabled
-  - No-new-privileges: enabled
-  - Userland proxy: disabled
-  - Iptables: enabled
-
-Sysctl Tuning:
-  - TCP keepalive: 60s interval, 6 probes
-  - File descriptors: 65536 max
-  - TCP reuse: enabled
-  - TCP fin timeout: 15s
-  - Buffer sizes: optimized for throughput
-
-Time Synchronization:
-  - systemd-timesyncd enabled
-
-Packages:
-  - Docker + Docker Compose (no Portainer/Watchtower)
-  - htop, tmux, rsync, base-devel
-```
+| # | Step | What happens |
+|---|------|--------------|
+| 1 | System Preparation | pacman tuning, mirror ranking, full update, microcode, kernels, locales |
+| 2 | Shell Setup | Zsh + Oh-My-Zsh + Starship + Fastfetch (never overwrites existing config) |
+| 3 | Yay Installation | AUR helper for community packages |
+| 4 | Programs | Mode- & DE-specific apps from YAML |
+| 5 | Gaming Mode | Optional gaming stack |
+| 6 | Bootloader | Kernel params for GRUB / systemd-boot / Limine |
+| 7 | System Services | Firewall, GPU drivers, power & storage tuning |
+| 8 | Fail2ban | SSH hardening |
+| 9 | Wake-on-LAN | Desktops only |
+| 10 | Maintenance | Cache/package cleanup |
 
 ---
 
 ## Customization
 
-### Package Management
+You don't need to touch the scripts to change what gets installed. Everything lives in **YAML config files**.
 
-All packages are organized in `configs/programs.yaml` with logical groupings:
+### Package lists
+Open [`configs/programs.yaml`](configs/programs.yaml) and add/remove packages from any section:
 
 ```yaml
-# Package Structure
-pacman:          # Core packages (all modes)
-essential:       # Mode-specific packages
+pacman:      # Core packages (all modes)
+essential:   # Mode-specific packages
 desktop_environments:  # DE-specific packages
-aur:             # AUR packages
-flatpak:         # Flatpak applications
+aur:         # AUR packages
+flatpak:     # Flatpak apps
 ```
 
-**Easy Customization:**
+Gaming packages live in [`configs/gaming_mode.yaml`](configs/gaming_mode.yaml).
 
-1. Open `configs/programs.yaml`
-2. Add/remove packages from relevant sections
-3. No script modification needed
-4. Run installer - custom packages installed automatically
-
-### Configuration Files
-
+### Other config files
 | File | Purpose |
 |------|---------|
-| `.zshrc` | Zsh shell configuration with Oh-My-Zsh |
-| `starship.toml` | Starship prompt theme configuration |
-| `config.jsonc` | Fastfetch system info configuration |
-| `gaming_mode.yaml` | Gaming package definitions (Steam, Wine, GameMode, etc.) |
-| `programs.yaml` | Package lists for all modes and desktop environments |
-| `MangoHud.conf` | MangoHud gaming overlay configuration |
+| `.zshrc` | Zsh shell configuration (Oh-My-Zsh) |
+| `starship.toml` | Starship prompt theme |
+| `config.jsonc` | Fastfetch system-info display |
+| `MangoHud.conf` | Gaming overlay config |
 
 ---
 
-## What Gets Installed
+## Hardware Support
 
-### Common Across All Modes
-
-- System utilities (android-tools, bat, btop, chromium, cmatrix, cpupower, dosfstools, duf, firefox, fwupd, gnome-disk-utility, hwinfo, inxi, ncdu, net-tools, nmap, noto-fonts-extra, samba, sl, speedtest-cli, sshfs, ttf-hack-nerd, ttf-liberation, unrar, wakeonlan, xdg-desktop-portal-gtk)
-- Development essentials (base-devel, git, curl)
-- Zsh shell with Oh-My-Zsh, Starship prompt, Fastfetch
-- System monitoring tools (btop, inxi, hwinfo)
-- Pacman optimization (Dynamic ParallelDownloads based on RAM, Color, VerbosePkgLists, ILoveCandy, multilib)
-- CPU microcode (intel-ucode or amd-ucode)
-- Kernel headers for all installed kernels
-- Locale generation (en_US.UTF-8 + auto-detected country locale)
-### Mode-Specific Packages
-
-| Mode | Desktop | Applications | Tools |
-|------|-------------|-------------|------|
-| **Standard** | Full DE (KDE/GNOME/Cosmic) | Filezilla, Kdenlive, LibreOffice, Dropbox, RustDesk, Ventoy | Performance monitoring |
-| **Minimal** | Lightweight DE | MPV, RustDesk | Basic utilities |
-| **Server** | No DE | Docker + Docker Compose only | Server utilities (btop, inxi, nmap, samba, htop, tmux, rsync, base-devel) |
-
-### Installation Steps
-
-The installer includes 10 comprehensive steps for complete system setup:
-
-| Step | Description | Mode Coverage |
-|------|-------------|---------------|
-| **1. System Preparation** | Pacman configuration, helper utilities, system update, CPU microcode, kernel headers, locales | All modes |
-| **2. Shell Setup** | Zsh + Oh-My-Zsh + Starship + Fastfetch | All modes |
-| **3. Yay Installation** | AUR helper setup | All modes |
-| **4. Programs Installation** | Mode-specific applications from YAML configs | All modes |
-| **5. Gaming Mode** | Steam, Wine, GameMode, MangoHud, Discord, gaming launchers | Optional (Standard/Minimal) |
-| **6. Bootloader Configuration** | Kernel params, GRUB/systemd-boot/Limine config | Standard/Minimal/Gaming |
-| **7. System Services** | Firewall (UFW/Firewalld), user groups, GPU drivers, power management | All modes |
-| **8. Fail2ban Setup** | SSH security hardening (1hr ban, 3 retries, auto-detects firewall backend) | All modes |
-| **9. Wake-on-LAN Configuration** | Multi-adapter WoL setup with laptop detection | Desktop systems only (skipped in server mode) |
-| **10. Maintenance** | Cache cleanup (paccache), orphan removal, SSD optimization | All modes |
-
----
-
-## Security Features
-
-### Enabled by Default
-
-| Feature | Status | Configuration |
-|---------|--------|---------------|
-| **Firewall** | Active | UFW (Arch) or Firewalld (EndeavourOS) with secure policies |
-| **SSH Protection** | Active | Fail2ban with 1hr ban, 3 retries, auto-detects ufw/firewalld backend |
-| **Wake-on-LAN** | Desktop Only | Skipped in server mode; multi-adapter with smart selection, laptop detection |
-| **User Groups** | Active | wheel, video, storage, optical, scanner, lp, rfkill |
-| **Bootloader** | Active | GRUB/systemd-boot/Limine with kernel optimization |
-| **Sudo** | Active | Password feedback enabled |
-
----
-
-## Supported Platforms
-
-### Hardware Support
-
-| Component | Support | Notes |
-|-----------|---------|-------|
-| **CPU** | Intel, AMD | Microcode + optimizations |
-| **GPU** | AMD, Intel, NVIDIA | Driver auto-detection |
-| **Storage** | NVMe, SSD, HDD | I/O scheduler optimization |
-| **Form Factor** | Desktop, Laptop, VM | Power management + thermal |
-| **Laptop Brands** | 15+ Manufacturers | Brand-specific optimizations |
-
-### Bootloader Support
-
-- **GRUB** 2.x with timeout optimization
-- **systemd-boot** with LTS kernel fallback
-- **Limine** (modern UEFI bootloader)
-
-### Desktop Environments
-
-- **KDE Plasma** 6.x (Qt6-based) - bleeding edge only
-- **GNOME** 46+ (latest stable)
-- **Cosmic** (experimental, latest builds)
-
----
-
-### Laptop Optimizations
-
-The installer includes automatic laptop detection and optimizations:
-
-#### Detection Methods
-- Battery presence check (/sys/class/power_supply/BAT*)
-- DMI chassis type detection (laptop, notebook, portable, etc.)
-- Product name analysis for common laptop indicators
-
-#### Optimizations Applied
-- Battery vs AC power optimization
-- CPU frequency scaling
-- Thermal management
-- Suspend/resume functionality
-
-#### Supported Features
-- Manufacturer-specific WMI module loading
-- Function key and hotkey support
-- Brightness, volume, WiFi toggle support
-- ACPI event handling
+| Component | Supported |
+|-----------|-----------|
+| **CPU** | Intel & AMD (microcode + tuning) |
+| **GPU** | AMD, Intel, NVIDIA, plus VM (QXL/virtio/VMware) |
+| **Storage** | NVMe, SSD, HDD |
+| **Form factor** | Desktop, Laptop, VM |
+| **Laptops** | 15+ brands with manufacturer-specific setups |
+| **Bootloaders** | GRUB, systemd-boot, Limine |
+| **Desktops** | KDE Plasma 6+, GNOME 46+, Cosmic |
 
 ---
 
 ## Troubleshooting
 
-### Common Issues
+| Issue | Fix |
+|-------|-----|
+| Install interrupted | Re-run `./install.sh` — it resumes from the saved state |
+| No internet | Check `ping archlinux.org`, then re-run |
+| Package install failure | Check the install log below |
+| Not enough disk space | Free 2 GB+ and retry |
 
-| Issue | Solution |
-|-------|----------|
-| **Installation Interrupted** | Resume from `/tmp/archinstaller.state` |
-| **No Internet Connection** | Check `ping archlinux.org` |
-| **Insufficient Disk Space** | Minimum 2GB free required |
-| **Package Installation Failures** | Check `/tmp/archinstaller.log` |
-
-### Log Files
-
+### Logs & state
 ```bash
-/tmp/archinstaller.log     # Complete installation log
-/tmp/archinstaller.state   # Progress tracking
+/tmp/archinstaller.log     # Full installation log
+/tmp/archinstaller.state   # Progress/resume tracking
 ```
 
-> **Note:** Log files are stored in `/tmp` and are automatically cleaned up on reboot. Manual cleanup is available via the post-install prompt.
+> Logs live in `/tmp`, so they're cleared on reboot. The installer offers manual cleanup at the end.
 
 ---
 
 ## Contributing
 
-### How to Contribute
+Contributions are welcome! To keep things clean:
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+1. Fork the repo and create a branch (`git checkout -b feature/my-feature`)
+2. Keep changes focused and well-tested
+3. Open a pull request describing what & why
 
-### Contribution Types
-
-- **Report bugs**: Open an issue with details
-- **Suggest features**: Describe your use case
-- **Improve code**: Submit a pull request
-- **Update documentation**: Help others understand the project
+Found a bug or want a feature? [Open an issue](https://github.com/GAndromidas/archinstaller/issues).
 
 ---
 
 ## Project Status
 
-| Component | Status |
-|-----------|--------|
-| **Core Functionality** | Production Ready |
-| **Hardware Detection** | Stable |
-| **Smart AMD P-State** | Implemented |
-| **Advanced Optimizations** | Implemented |
-| **Dashboard UI** | Professional Wizard-Style |
-| **Gaming Mode** | Tested |
-| **Server Mode** | Production Ready |
-| **Security Hardening** | Active |
-| **Comprehensive Logging** | All output captured |
-| **Documentation** | Complete |
-
-### Recent Major Improvements
-
-#### Performance & Reliability
-- **Speed Optimizations**: Single pacman sync, dynamic ParallelDownloads based on RAM, batch Flatpak installs, yay BatchInstall, Flathub added once
-- **Dashboard UI**: Professional wizard-style display with step timers, progress bars, and elapsed time
-- **Resume Support**: Automatic detection of interrupted installations with state tracking
-- **Smart Caching**: Cached `supports_gum()` check, removed unnecessary sleeps
-
-#### Server Mode Enhancements
-- **CLI Flag**: `--server` flag for headless configuration
-- **Docker Hardening**: daemon.json with log rotation, live-restore, no-new-privileges, disable userland-proxy
-- **Sysctl Tuning**: TCP keepalive, file descriptors, buffer sizes, connection reuse for servers
-- **Time Synchronization**: systemd-timesyncd enabled for server time sync
-- **Package Cleanup**: Removed Portainer/Watchtower; only Docker + Docker Compose
-
-#### Security & Bug Fixes
-- **Fail2ban**: Auto-detects ufw or firewalld backend for proper integration
-- **15 Bug Fixes**: Server mode exit 0, mirrorlist URL, background mirror race, NVIDIA GPU detection, printf ANSI escapes, and more
-- **Timer Fixes**: Negative elapsed time clamped, accurate wall time tracking
-- **Comprehensive Logging**: All `ui_*` functions now log to file; log and state files moved to `/tmp` for auto-cleanup
+| Area | Status |
+|------|--------|
+| Core installer | Production ready |
+| Hardware detection | Stable |
+| Security hardening | Active & on by default |
+| Gaming mode | Tested |
+| Server mode | Production ready |
+| Resume / logging | Working |
 
 ---
 
 ## License
 
-This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
+MIT — see the [LICENSE](LICENSE) file.
 
-You are free to use, modify, and distribute this software for personal or commercial purposes.
-
----
-
-## Acknowledgments
-
-- Inspired by Arch Linux philosophy: simplicity and user control
-- Built with community best practices and feedback
-- Thanks to all contributors and users
-
----
-
-## Support & Contact
-
-| Platform | Link |
-|----------|------|
-| **Issues** | [GitHub Issues](https://github.com/GAndromidas/archinstaller/issues) |
-| **Discussions** | [GitHub Discussions](https://github.com/GAndromidas/archinstaller/discussions) |
-| **Repository** | [github.com/GAndromidas/archinstaller](https://github.com/GAndromidas/archinstaller) |
+You're free to use, modify, and distribute this for personal or commercial purposes.
 
 ---
 
 <div align="center">
 
-## Made with love for the Arch Linux community
-
-If you find this useful, please consider starring the repository!
-
-[![Star](https://img.shields.io/github/stars/GAndromidas/archinstaller.svg?style=social&logo=github)](https://github.com/GAndromidas/archinstaller/stargazers)
+Built for the Arch Linux community. If this saved you time, consider giving it a ⭐
 
 </div>

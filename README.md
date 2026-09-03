@@ -101,7 +101,7 @@ The installer runs through 10 steps and tracks its own progress, so an interrupt
 | 3 | Yay Installation | AUR helper for community packages |
 | 4 | Programs | Mode- & DE-specific apps from YAML |
 | 5 | Gaming Mode | Optional gaming stack |
-| 6 | Bootloader | Kernel params for GRUB / systemd-boot / Limine |
+| 6 | Bootloader | Kernel params for GRUB / systemd-boot / **Limine + Snapper** integration. When Limine is detected, installer configures Limine with Snapper support, enabling snapshot boot entries. |
 | 7 | System Services | Firewall, GPU drivers, power & storage tuning |
 | 8 | Fail2ban | SSH hardening |
 | 9 | Wake-on-LAN | Desktops only |
@@ -145,7 +145,7 @@ Gaming packages live in [`configs/gaming_mode.yaml`](configs/gaming_mode.yaml).
 | **Storage** | NVMe, SSD, HDD |
 | **Form factor** | Desktop, Laptop, VM |
 | **Laptops** | 15+ brands with manufacturer-specific setups |
-| **Bootloaders** | GRUB, systemd-boot, Limine |
+| **Bootloaders** | GRUB, systemd-boot, Limine (+ Snapper integration) |
 | **Desktops** | KDE Plasma 6+, GNOME 46+, Cosmic |
 
 ---

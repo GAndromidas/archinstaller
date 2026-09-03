@@ -110,14 +110,6 @@ detect_bootloader() {
     if sudo test -d /boot/grub 2>/dev/null || sudo test -d /boot/grub2 2>/dev/null || \
        [ -d "/boot/efi/EFI/grub" ] || [ -d "/efi/EFI/grub" ]; then
         bootloader="grub"
-    # Check for active Limine (config file takes priority)
-    elif sudo test -f /boot/limine.conf 2>/dev/null || \
-         sudo test -f /boot/limine/limine.conf 2>/dev/null || \
-         sudo test -f /boot/EFI/limine/limine.conf 2>/dev/null || \
-         sudo test -f /boot/EFI/arch-limine/limine.conf 2>/dev/null || \
-         sudo test -d /boot/limine 2>/dev/null || \
-         [ -d "/boot/EFI/limine" ] || [ -d "/boot/EFI/arch-limine" ]; then
-        bootloader="limine"
     # Check for active systemd-boot (loader entries + loader.conf)
     elif sudo test -d /boot/loader/entries 2>/dev/null || [ -d "/efi/loader/entries" ] || \
          sudo test -f /boot/loader/loader.conf 2>/dev/null || [ -f "/efi/loader/loader.conf" ] || \
@@ -127,8 +119,6 @@ detect_bootloader() {
     # Tier 2: Installed-package detection (may have false positives for inactive bootloaders)
     elif command -v grub-mkconfig &>/dev/null || pacman -Q grub &>/dev/null 2>&1; then
         bootloader="grub"
-    elif command -v limine &>/dev/null || pacman -Q limine &>/dev/null 2>&1; then
-        bootloader="limine"
     elif command -v bootctl &>/dev/null || pacman -Q systemd-boot &>/dev/null 2>&1 || \
          [ -d "/boot/EFI/BOOT" ] || [ -d "/efi/EFI/BOOT" ]; then
         bootloader="systemd-boot"

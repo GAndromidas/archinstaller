@@ -188,6 +188,17 @@ configure_server_applications() {
 
 			if sudo docker run -d -p 8000:8000 -p 9443:9443 --name=portainer --restart=always -v /var/run/docker.sock:/var/run/docker.sock -v portainer_data:/data portainer/portainer-ce:latest >>"$INSTALL_LOG" 2>&1; then
 				log_success "Portainer container is running."
+				# The installer sets deny-incoming firewall policy, so open
+				# Portainer's ports or the UI is unreachable.
+				if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld 2>/dev/null; then
+					sudo firewall-cmd --add-port=8000/tcp --add-port=9443/tcp --permanent >>"$INSTALL_LOG" 2>&1 || true
+					sudo firewall-cmd --reload >>"$INSTALL_LOG" 2>&1 || true
+					log_success "Opened ports 8000,9443/tcp in firewalld for Portainer."
+				elif command -v ufw >/dev/null 2>&1; then
+					sudo ufw allow 8000/tcp >>"$INSTALL_LOG" 2>&1 || true
+					sudo ufw allow 9443/tcp >>"$INSTALL_LOG" 2>&1 || true
+					log_success "Opened ports 8000,9443/tcp in UFW for Portainer."
+				fi
 				ui_info "You can access Portainer at https://<your-server-ip>:9443"
 			else
 				log_error "Failed to start the Portainer container."

@@ -1367,27 +1367,23 @@ detect_gaming_mode_presence() {
   fi
 }
 
+# NOTE: amd_pstate=active is a KERNEL CMDLINE parameter (set in
+# bootloader_config.sh:get_kernel_params). It is NOT a modprobe.d option and
+# NOT a loadable module, so no /etc/modprobe.d or /etc/modules-load.d entry is
+# written here. These functions only select the runtime cpufreq governor.
+
 # Configure AMD P-State for gaming performance
 configure_amd_pstate_gaming() {
-  local pstate_conf="/etc/modprobe.d/amd-pstate.conf"
   local pstate_service="/etc/systemd/system/amd-pstate-schedutil.service"
-  
-  # Create gaming P-State configuration
-  sudo tee "$pstate_conf" > /dev/null << EOF
-# AMD P-state configuration for optimal gaming performance
-# Modern kernels (5.19+) handle pstate=active automatically in boot loaders
-# This ensures compatibility with systemd-boot and GRUB
-options amd_pstate=active
-EOF
-  
-  # Detect available governors and pick the best balance
+
+  log_info "amd_pstate driver itself is enabled via kernel cmdline (amd_pstate=active)"
+
+  # Detect available governors and pick schedutil when offered, else powersave
   local available_governors
   available_governors=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors 2>/dev/null || echo "")
   local chosen_governor="powersave"
   if echo "$available_governors" | grep -qw "schedutil"; then
     chosen_governor="schedutil"
-  elif echo "$available_governors" | grep -qw "performance"; then
-    chosen_governor="powersave"
   fi
 
   # Create systemd service
@@ -1395,6 +1391,7 @@ EOF
 [Unit]
 Description=Set CPU governor to $chosen_governor
 Wants=systemd-udev-settle.service
+After=systemd-udev-settle.service
 
 [Service]
 Type=oneshot
@@ -1404,63 +1401,25 @@ RemainAfterExit=yes
 [Install]
 WantedBy=multi-user.target
 EOF
-  
+
   # Enable the service (only if it was just created)
   if [ -f "$pstate_service" ]; then
     if sudo systemctl daemon-reload && sudo systemctl enable amd-pstate-schedutil.service; then
-      log_success "AMD P-state governor service enabled"
+      log_success "AMD P-state governor service enabled ($chosen_governor)"
     else
-      log_warning "Failed to enable AMD P-state schedutil governor service"
+      log_warning "Failed to enable AMD P-state governor service"
     fi
   fi
-  
-  # Update initramfs if needed
-  if command -v mkinitcpio >/dev/null 2>&1; then
-    local kernels_ok=true
-    for k in linux-zen linux-lts; do
-      [ -f "/boot/vmlinuz-$k" ] || kernels_ok=false
-    done
-    if $kernels_ok; then
-      sudo mkinitcpio -P linux-zen linux-lts 2>/dev/null && log_success "Initramfs updated for gaming P-State"
-    else
-      log_warning "Initramfs not updated — missing kernel images"
-    fi
-  fi
-  
+
+  # No initramfs rebuild needed: governor is applied at runtime by the service.
   log_success "AMD P-State gaming configuration applied"
 }
 
 # Configure AMD P-State for balanced system performance
 configure_amd_pstate_system() {
-  local pstate_conf="/etc/modprobe.d/amd-pstate.conf"
-  
-  # Create balanced P-State configuration
-  sudo tee "$pstate_conf" > /dev/null << EOF
-# AMD P-state configuration for balanced system performance
-# Modern kernels (5.19+) handle pstate=active automatically in boot loaders
-# This ensures compatibility with systemd-boot and GRUB
-options amd_pstate=active
-EOF
-  
-  # Enable AMD P-State driver for better power management
-  if ! grep -q "amd_pstate" /etc/modules-load.d/*.conf 2>/dev/null; then
-    echo "amd_pstate" | sudo tee -a /etc/modules-load.d/amd-pstate.conf >/dev/null
-    log_success "AMD P-State driver enabled for next boot"
-  fi
-  
-  # Update initramfs if needed
-  if command -v mkinitcpio >/dev/null 2>&1; then
-    local kernels_ok=true
-    for k in linux linux-lts; do
-      [ -f "/boot/vmlinuz-$k" ] || kernels_ok=false
-    done
-    if $kernels_ok; then
-      sudo mkinitcpio -P linux linux-lts 2>/dev/null && log_success "Initramfs updated for system P-State"
-    else
-      log_warning "Initramfs not updated — missing kernel images"
-    fi
-  fi
-  
+  log_info "amd_pstate driver itself is enabled via kernel cmdline (amd_pstate=active)"
+  log_info "Using kernel default governor for balanced power management"
+  # No initramfs rebuild needed: nothing on disk changed for the driver.
   log_success "AMD P-State system configuration applied"
 }
 

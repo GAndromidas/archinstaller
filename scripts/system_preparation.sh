@@ -98,7 +98,7 @@ install_all_packages() {
   )
 
   step "Installing all packages"
-  echo -e "${THEME_TEXT}Installing ${#packages_to_install[@]} helper utilities + ${#all_packages[@]} total packages via Pacman...${RESET}"
+  echo -e "${THEME_TEXT}Installing ${#all_packages[@]} total packages via Pacman (${#packages_to_install[@]} helper utilities + shell)...${RESET}"
 
   if [ "${DRY_RUN:-false}" = true ]; then
     ui_info "Dry-run: would install these packages via Pacman:"
@@ -285,10 +285,10 @@ generate_locales() {
 # 2. Configure pacman (ParallelDownloads=10, multilib, color)
 # 3. Install the mirror ranking tool (rate-mirrors) so the ranking below works
 # 4. Update mirrors FIRST so all subsequent downloads are fast
-# 5. Sync databases once (after mirror update)
-# 6. Full system update (single -y, not -yy)
-# 7. Install packages (benefits from fast mirrors + parallel downloads)
-# 8. Remaining setup tasks
+#    (update_system_mirrors syncs once with -Syy after ranking)
+# 5. Full system update via update_system (single -Syu, no extra -Syy)
+# 6. Install packages (benefits from fast mirrors + parallel downloads)
+# 7. Remaining setup tasks
 check_prerequisites
 configure_pacman
 # Install the mirror ranking tool (rate-mirrors) so ranking below works. It is
@@ -297,7 +297,8 @@ if [ "${DRY_RUN:-false}" != true ]; then
   run_step "Installing mirror ranking tool" sudo pacman -S --noconfirm --needed rate-mirrors
 fi
 update_system_mirrors
-run_step "Syncing package databases" sudo pacman -Syy
+# update_system_mirrors already ran `pacman -Syy` after ranking, and
+# update_system runs `pacman -Syu` (which syncs again) — no extra -Syy needed.
 update_system
 install_all_packages
 set_sudo_pwfeedback

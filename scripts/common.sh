@@ -37,8 +37,9 @@ STEP_TIMES=()               # Tracks time for each step
 STEP_START_TIME=0           # Start time of current step
 INSTALLATION_START_TIME=0   # Overall installation start time
 
-# UI/Flow configuration
+# UI/Flow configuration (single source of truth; dashboard.sh falls back to this)
 TOTAL_STEPS=10
+export TOTAL_STEPS
 : "${VERBOSE:=false}"   # Can be overridden/exported by caller
 
 COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"  # common.sh directory (scripts/)
@@ -72,9 +73,10 @@ else
     :
 fi
 
-# Ensure critical variables are defined
-: "${HOME:=/home/$USER}"
+# Ensure critical variables are defined (USER first: HOME default depends on it,
+# and $USER must not be expanded while unset under `set -u`)
 : "${USER:=$(whoami)}"
+: "${HOME:=/home/${USER}}"
 : "${XDG_CURRENT_DESKTOP:=}"
 
 # Source library modules (provides log_*, ui_*, step, run_step, package, system functions)
@@ -96,7 +98,7 @@ unset __lib_module
 # Validate configuration file before modification
 validate_config_file() {
     local config_file="$1"
-    local backup_dir="${2:-/tmp/archinstaller_backups}"
+    local backup_dir="${2:-/var/tmp/archinstaller_backups}"
     
     # Create backup directory if it doesn't exist
     sudo mkdir -p "$backup_dir" 2>/dev/null || true
@@ -167,7 +169,7 @@ atomic_write() {
     local content="$1"
     local target_file="$2"
     local temp_file="${target_file}.tmp.$$"
-    local backup_dir="/tmp/archinstaller_backups"
+    local backup_dir="/var/tmp/archinstaller_backups"
     
     # Validate target directory exists
     local target_dir=$(dirname "$target_file")
@@ -676,7 +678,7 @@ prompt_reboot() {
 
   # Log file
   echo ""
-  echo -e "  ${THEME_TEXT}Log file:${RESET}        ${THEME_MUTED}/tmp/archinstaller.log${RESET}"
+  echo -e "  ${THEME_TEXT}Log file:${RESET}        ${THEME_MUTED}${INSTALL_LOG:-/var/tmp/archinstaller.log}${RESET}"
   echo ""
 
   echo -e "${THEME_WARN}It is strongly recommended to reboot now to apply all changes.${RESET}"

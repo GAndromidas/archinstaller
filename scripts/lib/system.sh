@@ -107,7 +107,14 @@ detect_bootloader() {
 
     # Tier 1: Active bootloader detection (based on actual directories/configs)
     # Use sudo for /boot checks because /boot can have restricted permissions (e.g. 700 with UKI)
-    if sudo test -d /boot/grub 2>/dev/null || sudo test -d /boot/grub2 2>/dev/null || \
+    # Limine is checked first: its EFI binary + limine.conf are distinctive and
+    # would otherwise fall through to the systemd-boot fallback below.
+    if sudo test -f /boot/limine.conf 2>/dev/null || sudo test -f /boot/efi/limine.conf 2>/dev/null || \
+       sudo test -f /efi/limine.conf 2>/dev/null || \
+       [ -d "/boot/EFI/limine" ] || [ -d "/boot/efi/EFI/limine" ] || [ -d "/efi/EFI/limine" ] || \
+       command -v limine-snapper-sync &>/dev/null; then
+        bootloader="limine"
+    elif sudo test -d /boot/grub 2>/dev/null || sudo test -d /boot/grub2 2>/dev/null || \
        [ -d "/boot/efi/EFI/grub" ] || [ -d "/efi/EFI/grub" ]; then
         bootloader="grub"
     # Check for active systemd-boot (loader entries + loader.conf)
@@ -117,6 +124,8 @@ detect_bootloader() {
          sudo test -d /boot/loader 2>/dev/null; then
         bootloader="systemd-boot"
     # Tier 2: Installed-package detection (may have false positives for inactive bootloaders)
+    elif pacman -Q limine &>/dev/null 2>&1; then
+        bootloader="limine"
     elif command -v grub-mkconfig &>/dev/null || pacman -Q grub &>/dev/null 2>&1; then
         bootloader="grub"
     elif command -v bootctl &>/dev/null || pacman -Q systemd-boot &>/dev/null 2>&1 || \

@@ -25,8 +25,8 @@ check_and_enable_multilib() {
 	if ! grep -q "^\[multilib\]" /etc/pacman.conf; then
 		echo -e "\n[multilib]\nInclude = /etc/pacman.d/mirrorlist" | sudo tee -a /etc/pacman.conf >/dev/null
 		log_success "Enabled multilib repository for gaming mode"
-		# Sync databases to pick up multilib (single sync, not full -Syy)
-		sudo pacman -Syy --noconfirm >>"$INSTALL_LOG" 2>&1
+		# Sync databases to pick up multilib (single -Sy, not full -Syy)
+		sudo pacman -Sy --noconfirm >>"$INSTALL_LOG" 2>&1
 	else
 		log_success "Multilib repository already enabled"
 	fi

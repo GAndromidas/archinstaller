@@ -62,10 +62,10 @@ get_kernel_params() {
       fi
       ;;
     intel)
-      # Intel: Enable GuC/HuC firmware for Gen 9.5+ (11th gen+)
-      local intel_gen=$(lspci 2>/dev/null | grep -i 'vga.*intel\|display.*intel' | grep -oP '\[\K[0-9a-f]+' | head -1)
-      # If we can detect a recent Intel GPU, enable GuC
-      if [[ -n "$intel_gen" ]]; then
+      # Intel: Enable GuC/HuC firmware only when GuC firmware actually ships
+      # for this machine (Gen 9.5+). Unconditional enable_guc on old iGPUs can
+      # stall firmware loading, so gate on /lib/firmware/i915/*guc*.
+      if compgen -G "/lib/firmware/i915/*guc*" >/dev/null 2>&1; then
         params="$params i915.enable_guc=3"
       fi
       ;;
@@ -167,7 +167,7 @@ configure_uki_cmdline() {
   # Regenerate UKI images if mkinitcpio presets exist
   if [[ -d /etc/mkinitcpio.d ]]; then
     ui_info "Regenerating UKI images..."
-    if sudo mkinitcpio -P >>"$INSTALL_LOG" 2>&1; then
+    if sudo mkinitcpio -P 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
       log_success "UKI images regenerated"
     else
       log_warning "UKI image regeneration had issues — check mkinitcpio presets"
@@ -576,7 +576,8 @@ configure_grub() {
     set_grub_config "GRUB_CMDLINE_LINUX" ""
     ui_info "Kernel parameters: $kernel_params"
 
-    local KERNELS=($(ls /boot/vmlinuz-* 2>/dev/null | sed 's|/boot/vmlinuz-||g'))
+    local KERNELS=()
+    mapfile -t KERNELS < <(ls /boot/vmlinuz-* 2>/dev/null | sed 's|/boot/vmlinuz-||g')
     if [[ ${#KERNELS[@]} -eq 0 ]]; then
         log_error "No kernels found in /boot."
         return 1
@@ -600,7 +601,7 @@ configure_grub() {
 
     if [ -f "$grub_config" ]; then
         ui_info "Regenerating GRUB configuration..."
-        if sudo grub-mkconfig -o "$grub_cfg" >>"$INSTALL_LOG" 2>&1; then
+        if sudo grub-mkconfig -o "$grub_cfg" 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
             log_success "GRUB configuration regenerated successfully"
         else
             log_error "grub-mkconfig failed"
@@ -719,23 +720,48 @@ ${key} ${value}"
 }
 
 # ============================================================================
-# MAIN EXECUTION
+# LIMINE HELPERS (must be defined before MAIN EXECUTION dispatch below)
 # ============================================================================
 
-# Bootloader-specific configuration (kernel params + bootloader settings)
-if [ "$BOOTLOADER" = "grub" ]; then
-    configure_grub
-elif [ "$BOOTLOADER" = "systemd-boot" ]; then
-    configure_boot
-elif [ "$BOOTLOADER" = "limine" ]; then
-    configure_limine_snapper
-else
-    log_warning "No bootloader detected or bootloader is unsupported. Defaulting to systemd-boot configuration."
-    configure_boot
-fi
-#
-# EOF optional - the configure_limine_snapper function is defined below
+# Detect ESP mountpoint (vfat partition). Echoes path, returns 1 if not found.
+detect_esp_mount() {
+  local esp
+  esp=$(findmnt -n -o TARGET -t vfat 2>/dev/null | head -1 || true)
+  if [[ -z "$esp" ]]; then
+    local p
+    for p in /boot /boot/efi /efi; do
+      if [[ -d "$p" ]] && findmnt -n -o FSTYPE "$p" 2>/dev/null | grep -q vfat; then
+        esp="$p"
+        break
+      fi
+    done
+  fi
+  [[ -n "$esp" ]] || return 1
+  echo "$esp"
+}
 
+# Install an AUR package using whatever helper is available.
+# Returns 0 on success (or already installed), 1 otherwise. Never exits.
+limine_install_aur_pkg() {
+  local pkg="$1"
+  if pacman -Qi "$pkg" &>/dev/null 2>&1; then
+    log_info "$pkg already installed"
+    return 0
+  fi
+  if command -v yay &>/dev/null; then
+    install_aur_quietly "$pkg" && return 0
+    log_warning "Failed to install $pkg via yay"
+    return 1
+  elif command -v paru &>/dev/null; then
+    if sudo -u "${SUDO_USER:-$USER}" paru -S --noconfirm --needed "$pkg" >>"$INSTALL_LOG" 2>&1; then
+      return 0
+    fi
+    log_warning "Failed to install $pkg via paru"
+    return 1
+  fi
+  log_warning "No AUR helper (yay/paru) — skipping $pkg. Run step 3 (yay) first."
+  return 1
+}
 
 # --- Limine + Snapper Configuration ---
 configure_limine_snapper() {
@@ -748,181 +774,217 @@ configure_limine_snapper() {
     return 0
   fi
 
-  # Install required packages
-  step "Installing Limine and Snapper packages"
-  if ! pacman -Syu --needed --noconfirm limine efibootmgr btrfs-progs snapper; then
-    log_error "Failed to install required packages"
+  if [ ! -d /sys/firmware/efi ]; then
+    log_error "Limine requires UEFI boot; legacy BIOS detected. Skipping Limine setup."
     return 1
   fi
 
-  # Install AUR helpers if needed
-  if ! command -v yay &>/dev/null && ! command -v paru &>/dev/null; then
-    log_info "No AUR helper found. Installing yay..."
-    if ! sudo pacman -S --needed --noconfirm base-devel git; then
-      log_error "Failed to install base-devel for AUR helper"
-      return 1
+  local esp_mount
+  if ! esp_mount=$(detect_esp_mount); then
+    log_error "Could not detect ESP mountpoint (vfat partition). Skipping Limine setup."
+    return 1
+  fi
+  log_info "ESP mountpoint: $esp_mount"
+
+  # Snapper needs btrfs on /. Without it, still configure Limine kernel entries
+  # but skip snapshot integration instead of failing the whole step.
+  local want_snapper=true
+  if ! findmnt -n -o FSTYPE / 2>/dev/null | grep -q btrfs; then
+    log_warning "Root is not btrfs — Limine will be configured without Snapper snapshots."
+    want_snapper=false
+  fi
+
+  # Install required packages
+  step "Installing Limine and Snapper packages"
+  local repo_pkgs=(limine efibootmgr)
+  if [[ "$want_snapper" == true ]]; then
+    repo_pkgs+=(btrfs-progs snapper)
+  fi
+  if ! sudo pacman -Sy --needed --noconfirm "${repo_pkgs[@]}" >>"$INSTALL_LOG" 2>&1; then
+    log_error "Failed to install required packages: ${repo_pkgs[*]}"
+    return 1
+  fi
+
+  # AUR snapshot integration (non-fatal if helper/packages unavailable)
+  if [[ "$want_snapper" == true ]]; then
+    limine_install_aur_pkg "limine-snapper-sync" || true
+    limine_install_aur_pkg "snap-pac" || true
+    if command -v mkinitcpio &>/dev/null; then
+      if ! pacman -Qi limine-mkinitcpio-hook &>/dev/null 2>&1; then
+        limine_install_aur_pkg "limine-mkinitcpio-hook" || true
+      fi
     fi
-    BUILD_USER="${SUDO_USER:-}"
-    [[ -n "$BUILD_USER" && "$BUILD_USER" != "root" ]] || err "Re-run with 'sudo' from your normal user."
-    YAY_TMP=$(mktemp -d)
-    chown "$BUILD_USER" -R "$YAY_TMP"
-    sudo -u "$BUILD_USER" git clone https://aur.archlinux.org/yay.git "$YAY_TMP/yay"
-    sudo -u "$BUILD_USER" bash -c "cd '$YAY_TMP/yay' && makepkg -si --noconfirm"
-    rm -rf "$YAY_TMP"
   fi
 
-  # Install limine-snapper-sync and snap-pac via AUR
-  install_aur "limine-snapper-sync"
-  install_aur "snap-pac"
-
-  # Install limine-mkinitcpio-hook for initramfs automation
-  if command -v mkinitcpio &>/dev/null; then
-    if ! pacman -Qi limine-mkinitcpio-hook &>/dev/null 2>&1; then
-      install_aur "limine-mkinitcpio-hook"
+  # Configure Snapper (btrfs only)
+  local snapper_conf="/etc/snapper/configs/root"
+  if [[ "$want_snapper" == true ]]; then
+    step "Configuring Snapper..."
+    if [[ ! -f "$snapper_conf" ]]; then
+      sudo snapper -c root create-config / >>"$INSTALL_LOG" 2>&1 || \
+        log_warning "snapper create-config failed (may already be configured)."
     fi
-  fi
 
-  # Configure Snapper
-  step "Configuring Snapper..."
-  SNAPPER_CONF="/etc/snapper/configs/root"
-  if [[ ! -f "$SNAPPER_CONF" ]]; then
-    snapper -c root create-config / || warn "snapper create-config failed (may already be configured)."
-  fi
+    if ! mountpoint -q /.snapshots 2>/dev/null; then
+      sudo mount -a 2>/dev/null || true
+    fi
+    mountpoint -q /.snapshots 2>/dev/null || \
+      log_warning "/.snapshots not mounted yet; will mount on next boot."
 
-  # Mount /.snapshots
-  if ! mountpoint -q /.snapshots 2>/dev/null; then
-    mount -a 2>/dev/null || true
-  fi
-  mountpoint -q /.snapshots 2>/dev/null || warn "/.snapshots not mounted yet; will mount on next boot."
+    if [[ -f "$snapper_conf" ]]; then
+      sudo sed -i 's/^TIMELINE_MIN_AGE=.*/TIMELINE_MIN_AGE="1800"/' "$snapper_conf"
+      sudo sed -i 's/^TIMELINE_LIMIT_HOURLY=.*/TIMELINE_LIMIT_HOURLY="5"/' "$snapper_conf"
+      sudo sed -i 's/^TIMELINE_LIMIT_DAILY=.*/TIMELINE_LIMIT_DAILY="7"/' "$snapper_conf"
+      sudo sed -i 's/^TIMELINE_LIMIT_WEEKLY=.*/TIMELINE_LIMIT_WEEKLY="0"/' "$snapper_conf"
+      sudo sed -i 's/^TIMELINE_LIMIT_MONTHLY=.*/TIMELINE_LIMIT_MONTHLY="0"/' "$snapper_conf"
+      sudo sed -i 's/^TIMELINE_LIMIT_YEARLY=.*/TIMELINE_LIMIT_YEARLY="0"/' "$snapper_conf"
+      log_success "Snapper timeline limits configured."
+    fi
 
-  # Set timeline limits
-  SNAPPER_CONF="/etc/snapper/configs/root"
-  if [[ -f "$SNAPPER_CONF" ]]; then
-    sed -i 's/^TIMELINE_MIN_AGE=.*/TIMELINE_MIN_AGE="1800"/' "$SNAPPER_CONF"
-    sed -i 's/^TIMELINE_LIMIT_HOURLY=.*/TIMELINE_LIMIT_HOURLY="5"/' "$SNAPPER_CONF"
-    sed -i 's/^TIMELINE_LIMIT_DAILY=.*/TIMELINE_LIMIT_DAILY="7"/' "$SNAPPER_CONF"
-    sed -i 's/^TIMELINE_LIMIT_WEEKLY=.*/TIMELINE_LIMIT_WEEKLY="0"/' "$SNAPPER_CONF"
-    sed -i 's/^TIMELINE_LIMIT_MONTHLY=.*/TIMELINE_LIMIT_MONTHLY="0"/' "$SNAPPER_CONF"
-    sed -i 's/^TIMELINE_LIMIT_YEARLY=.*/TIMELINE_LIMIT_YEARLY="0"/' "$SNAPPER_CONF"
-    ok "Snapper timeline limits configured."
+    sudo systemctl enable --now snapper-timeline.timer 2>/dev/null || true
+    sudo systemctl enable --now snapper-cleanup.timer 2>/dev/null || true
+    log_success "Snapper timers enabled."
   fi
-
-  systemctl enable --now snapper-timeline.timer 2>/dev/null || true
-  systemctl enable --now snapper-cleanup.timer 2>/dev/null || true
-  ok "Snapper timers enabled."
 
   # Deploy Limine EFI binary
   step "Deploying Limine EFI binary..."
 
-  LIMINE_EFI_SRC=""
+  local limine_efi_src=""
+  local p
   for p in \
     /usr/share/limine/BOOTX64.EFI \
     /usr/lib/limine/BOOTX64.EFI \
     /usr/share/limine/limine-x86_64.efi; do
     if [[ -f "$p" ]]; then
-      LIMINE_EFI_SRC="$p"
+      limine_efi_src="$p"
       break
     fi
   done
-  [[ -n "$LIMINE_EFI_SRC" ]] || err "Limine EFI binary not found."
-  LIMINE_EFI_DIR="$ESP_MOUNT/EFI/limine"
-  mkdir -p "$LIMINE_EFI_DIR"
-  cp "$LIMINE_EFI_SRC" "$LIMINE_EFI_DIR/BOOTX64.EFI"
-  ok "Limine EFI binary deployed."
+  if [[ -z "$limine_efi_src" ]]; then
+    log_error "Limine EFI binary not found under /usr/share/limine or /usr/lib/limine."
+    return 1
+  fi
+  local limine_efi_dir="$esp_mount/EFI/limine"
+  sudo mkdir -p "$limine_efi_dir"
+  sudo cp "$limine_efi_src" "$limine_efi_dir/BOOTX64.EFI"
+  log_success "Limine EFI binary deployed."
 
   # Create EFI NVRAM entry if missing
-  if efibootmgr | grep -qi limine; then
-    ok "Limine EFI boot entry already exists."
+  if sudo efibootmgr 2>/dev/null | grep -qi limine; then
+    log_info "Limine EFI boot entry already exists."
   else
-    ESP_DEV=$(findmnt -n -o SOURCE "$ESP_MOUNT")
-    if [[ "$ESP_DEV" =~ ^/dev/(.+?)(p[0-9]+)$ ]]; then
-      ESP_DISK="/dev/${BASH_REMATCH[1]}"
-      ESP_PART="${BASH_REMATCH[2]#p}"
-    elif [[ "$ESP_DEV" =~ ^/dev/nvme[0-9]+n[0-9]+p([0-9]+)$ ]]; then
-      ESP_DISK="${ESP_DEV%p*}"
-      ESP_PART="${BASH_REMATCH[1]}"
-    elif [[ "$ESP_DEV" =~ ^/dev/sd[a-z]([0-9]+)$ ]]; then
-      ESP_DISK="${ESP_DEV%[0-9]*}"
-      ESP_PART="${BASH_REMATCH[1]}"
+    local esp_dev esp_disk esp_part
+    esp_dev=$(findmnt -n -o SOURCE "$esp_mount" 2>/dev/null || true)
+    if [[ "$esp_dev" =~ ^/dev/nvme[0-9]+n[0-9]+p([0-9]+)$ ]]; then
+      esp_disk="${esp_dev%p*}"
+      esp_part="${BASH_REMATCH[1]}"
+    elif [[ "$esp_dev" =~ ^/dev/(.+)(p[0-9]+)$ ]]; then
+      esp_disk="/dev/${BASH_REMATCH[1]}"
+      esp_part="${BASH_REMATCH[2]#p}"
+    elif [[ "$esp_dev" =~ ^/dev/[a-z]+([0-9]+)$ ]]; then
+      esp_disk="${esp_dev%[0-9]*}"
+      esp_part="${BASH_REMATCH[1]}"
     else
-      err "Could not parse ESP device: $ESP_DEV"
+      log_warning "Could not parse ESP device ($esp_dev) — skipping NVRAM entry. Select EFI/limine/BOOTX64.EFI manually."
+      esp_disk=""
     fi
 
-    info "Creating EFI NVRAM entry..."
-    efibootmgr --create \
-        --disk "$ESP_DISK" \
-        --part "$ESP_PART" \
-        --label "Limine" \
-        --loader '\\EFI\\limine\\BOOTX64.EFI' \
-        --unicode
-    ok "EFI boot entry created."
-  fi
-
-  # Configure limine-snapper-sync settings
-  LIMINE_DEFAULTS="/etc/default/limine"
-  mkdir -p "$(dirname "$LIMINE_DEFAULTS")"
-
-  ESP_PATH_VAL="$ESP_MOUNT"
-  [[ "$ESP_PATH_VAL" == "/boot" ]] && ESP_PATH_VAL=""
-
-  set_default_key() {
-    local key="$1" value="$2"
-    if grep -q "^$key=" "$LIMINE_DEFAULTS" 2>/dev/null; then
-      sed -i "s|^$key=.*|$key=$value|" "$LIMINE_DEFAULTS"
-    else
-      printf '%s=%s\n' "$key" "$value" >> "$LIMINE_DEFAULTS"
+    if [[ -n "${esp_disk:-}" ]]; then
+      log_info "Creating EFI NVRAM entry..."
+      if sudo efibootmgr --create \
+          --disk "$esp_disk" \
+          --part "$esp_part" \
+          --label "Limine" \
+          --loader '\\EFI\\limine\\BOOTX64.EFI' \
+          --unicode >>"$INSTALL_LOG" 2>&1; then
+        log_success "EFI boot entry created."
+      else
+        log_warning "efibootmgr failed — you may need to create the Limine entry manually."
+      fi
     fi
-  }
-
-  if [[ ! -f "$LIMINE_DEFAULTS" ]]; then
-    {
-      echo "### OS Entry Targeting"
-      echo "### Settings managed by archinstaller limine-snapper setup"
-    } > "$LIMINE_DEFAULTS"
   fi
 
-  set_default_key "TARGET_OS_NAME" "\"$NAME\""
-  set_default_key "MAX_SNAPSHOT_ENTRIES" "10"
-  set_default_key "LIMIT_USAGE_PERCENT" "80"
-  set_default_key "ESP_PATH" "\"$ESP_PATH_VAL\""
-  set_default_key "SNAPSHOT_FORMAT_CHOICE" "8"
-  set_default_key "HASH_FUNCTION" "sha256"
-  set_default_key "COMMANDS_BEFORE_SAVE" "\"\""
-  set_default_key "COMMANDS_AFTER_SAVE" "\"\""
-  set_default_key "SPACE_NUMBER" "5"
-  ok "limine-snapper-sync configured at $LIMINE_DEFAULTS"
+  # Configure limine-snapper-sync settings (btrfs only)
+  local limine_defaults="/etc/default/limine"
+  sudo mkdir -p "$(dirname "$limine_defaults")"
+
+  if [[ "$want_snapper" == true ]]; then
+    local esp_path_val="$esp_mount"
+    [[ "$esp_path_val" == "/boot" ]] && esp_path_val=""
+
+    local os_name="Arch Linux"
+    if [[ -r /etc/os-release ]]; then
+      # shellcheck disable=SC1091
+      . /etc/os-release
+      [[ -n "${NAME:-}" ]] && os_name="$NAME"
+    fi
+
+    # Create file with sudo if missing (redirection must not run as user)
+    if ! sudo test -f "$limine_defaults" 2>/dev/null; then
+      printf '%s\n' "### OS Entry Targeting" "### Settings managed by archinstaller limine-snapper setup" | \
+        sudo tee "$limine_defaults" >/dev/null
+    fi
+
+    limine_set_default_key() {
+      local key="$1" value="$2"
+      if sudo grep -q "^$key=" "$limine_defaults" 2>/dev/null; then
+        sudo sed -i "s|^$key=.*|$key=$value|" "$limine_defaults"
+      else
+        printf '%s=%s\n' "$key" "$value" | sudo tee -a "$limine_defaults" >/dev/null
+      fi
+    }
+
+    limine_set_default_key "TARGET_OS_NAME" "\"$os_name\""
+    limine_set_default_key "MAX_SNAPSHOT_ENTRIES" "10"
+    limine_set_default_key "LIMIT_USAGE_PERCENT" "80"
+    limine_set_default_key "ESP_PATH" "\"$esp_path_val\""
+    limine_set_default_key "SNAPSHOT_FORMAT_CHOICE" "8"
+    limine_set_default_key "HASH_FUNCTION" "sha256"
+    limine_set_default_key "COMMANDS_BEFORE_SAVE" "\"\""
+    limine_set_default_key "COMMANDS_AFTER_SAVE" "\"\""
+    limine_set_default_key "SPACE_NUMBER" "5"
+    log_success "limine-snapper-sync configured at $limine_defaults"
+  fi
 
   # Generate boot entries
   step "Generating Limine boot entries..."
-  LIMINE_CONF="$ESP_MOUNT/limine.conf"
+  local limine_conf="$esp_mount/limine.conf"
 
   if command -v limine-update &>/dev/null; then
-    info "Running limine-update to regenerate boot entries..."
-    limine-update || warn "limine-update returned an error."
-    ok "limine-update completed."
+    log_info "Running limine-update to regenerate boot entries..."
+    if sudo limine-update >>"$INSTALL_LOG" 2>&1; then
+      log_success "limine-update completed."
+    else
+      log_warning "limine-update returned an error."
+    fi
   fi
 
-  if [[ -f "$LIMINE_CONF" ]] && ! grep -q 'Snapshots' "$LIMINE_CONF"; then
-    printf '\n  //Snapshots\n' >> "$LIMINE_CONF"
-    ok "Added //Snapshots marker to $LIMINE_CONF."
+  if [[ "$want_snapper" == true ]]; then
+    if sudo test -f "$limine_conf" 2>/dev/null && ! sudo grep -q 'Snapshots' "$limine_conf" 2>/dev/null; then
+      printf '\n  //Snapshots\n' | sudo tee -a "$limine_conf" >/dev/null
+      log_success "Added //Snapshots marker to $limine_conf."
+    fi
+
+    if command -v limine-snapper-sync &>/dev/null; then
+      log_info "Running limine-snapper-sync..."
+      if sudo limine-snapper-sync >>"$INSTALL_LOG" 2>&1; then
+        log_success "limine-snapper-sync completed."
+      else
+        log_warning "limine-snapper-sync returned an error (normal on first run)."
+      fi
+    fi
+
+    if systemctl list-unit-files 2>/dev/null | grep -q limine-snapper-sync; then
+      sudo systemctl enable --now limine-snapper-sync.service 2>/dev/null || true
+      log_success "limine-snapper-sync.service enabled."
+    fi
   fi
 
-  if command -v limine-snapper-sync &>/dev/null; then
-    info "Running limine-snapper-sync..."
-    limine-snapper-sync || warn "limine-snapper-sync returned an error (normal on first run)."
-    ok "limine-snapper-sync completed."
-  fi
-
-  # Enable limine-snapper-sync systemd service
-  if systemctl list-unit-files 2>/dev/null | grep -q limine-snapper-sync; then
-    systemctl enable --now limine-snapper-sync.service 2>/dev/null || true
-    ok "limine-snapper-sync.service enabled."
-  fi
-
-  # Install snap-manager helper
+  # Install snap-manager helper (btrfs only; harmless to skip otherwise)
+  if [[ "$want_snapper" == true ]]; then
   step "Installing snapshot manager helper..."
 
-  cat > /usr/local/bin/snap-manager << 'HELPER_EOF'
+  sudo tee /usr/local/bin/snap-manager >/dev/null << 'HELPER_EOF'
 #!/usr/bin/env bash
 #
 # snap-manager - Manage Btrfs snapshots with Limine integration (Arch)
@@ -993,37 +1055,32 @@ case "${1:-help}" in
 esac
 HELPER_EOF
 
-  chmod +x /usr/local/bin/snap-manager
-  ok "Helper script installed: /usr/local/bin/snap-manager"
+  sudo chmod +x /usr/local/bin/snap-manager
+  log_success "Helper script installed: /usr/local/bin/snap-manager"
+  fi
 
-  # Summary
-  echo ""
-  echo -e "${GREEN}══════════════════════════════════════════════════════════════════${NC}"
-  echo -e "${GREEN} Setup Complete!${NC}"
-  echo -e "${GREEN}══════════════════════════════════════════════════════════════════${NC}"
-  echo ""
-  echo "  Limine config:     $ESP_MOUNT/limine.conf"
-  echo "  Snapper config:    $SNAPPER_CONF"
-  echo "  limine defaults:   $LIMINE_DEFAULTS"
-  echo ""
-  echo -e "${CYAN}Quick commands:${NC}"
-  echo "  snap-manager list           - List all snapshots"
-  echo "  snap-manager create 'desc'  - Create a snapshot"
-  echo "  snap-manager sync           - Sync snapshots to Limine"
-  echo "  snap-manager delete <N>     - Delete a snapshot"
-  echo "  snap-manager fix            - Fix subvol= paths in limine.conf"
-  echo ""
-  echo -e "${CYAN}Limine commands:${NC}"
-  echo "  limine-snapper-sync         - Sync boot entries"
-  echo "  limine-snapper-list         - List bootable snapshots"
-  echo "  limine-update               - Regenerate kernel/EFI entries"
-  echo ""
-  echo -e "${YELLOW}Reboot to see snapshot entries in the Limine boot menu.${NC}"
-  echo -e "${YELLOW}Snapshots created by 'snap-pac' will appear automatically.${NC}"
-  echo ""
-  read -rp "Reboot now? [Y/n] " REBOOT_CHOICE
-  if [[ "${REBOOT_CHOICE:-Y}" =~ ^[Yy]?$ ]]; then
-    info "Rebooting..."
-    reboot
+  # Summary (no reboot here — the main installer offers one reboot at the end)
+  log_success "Limine setup complete: $esp_mount/limine.conf"
+  if [[ "$want_snapper" == true ]]; then
+    log_info "Snapshots created by snap-pac will appear in the Limine menu after reboot."
+    log_info "Useful: snap-manager list | snap-manager create 'desc' | snap-manager sync"
+  else
+    log_info "Reboot at the end of the install to boot via Limine."
   fi
 }
+
+# ============================================================================
+# MAIN EXECUTION (dispatch AFTER all function definitions)
+# ============================================================================
+
+# Bootloader-specific configuration (kernel params + bootloader settings)
+if [ "$BOOTLOADER" = "grub" ]; then
+    configure_grub
+elif [ "$BOOTLOADER" = "systemd-boot" ]; then
+    configure_boot
+elif [ "$BOOTLOADER" = "limine" ]; then
+    configure_limine_snapper
+else
+    log_warning "No bootloader detected or bootloader is unsupported. Defaulting to systemd-boot configuration."
+    configure_boot
+fi

@@ -20,6 +20,11 @@ cleanup_and_optimize() {
     ! -path '/tmp/systemd-*' ! -path '/tmp/.X*' ! -path '/tmp/pulse-*' \
     ! -path '/tmp/archinstaller.log' ! -path '/tmp/archinstaller.state' \
     -exec rm -rf {} + 2>/dev/null || true
+  # State/log live in /var/tmp (reboot-safe); clean stale legacy copies in /tmp
+  # only when the live files exist, never the live files themselves.
+  if [ -s /var/tmp/archinstaller.state ] || [ -s /var/tmp/archinstaller.log ]; then
+    rm -f /tmp/archinstaller.log /tmp/archinstaller.state 2>/dev/null || true
+  fi
 }
 
 setup_maintenance() {

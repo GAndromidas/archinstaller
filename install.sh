@@ -1,8 +1,8 @@
 #!/bin/bash
 set -uo pipefail
 
-# Installation log file
-INSTALL_LOG="/tmp/archinstaller.log"
+# Installation log file (/var/tmp persists across reboots so resume works)
+INSTALL_LOG="/var/tmp/archinstaller.log"
 
 # Function to show help
 show_help() {
@@ -70,8 +70,8 @@ EXAMPLES:
     ./install.sh --help         Show this help message
 
 LOG FILES:
-    Installation log: /tmp/archinstaller.log
-    Progress tracking: /tmp/archinstaller.state
+    Installation log: /var/tmp/archinstaller.log
+    Progress tracking: /var/tmp/archinstaller.state
 
 MORE INFO:
     https://github.com/GAndromidas/archinstaller
@@ -89,8 +89,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$SCRIPT_DIR/scripts"
 CONFIGS_DIR="$SCRIPT_DIR/configs"
 
-# State tracking for error recovery
-STATE_FILE="/tmp/archinstaller.state"
+# State tracking for error recovery (/var/tmp survives reboot; migrate legacy /tmp state)
+STATE_FILE="/var/tmp/archinstaller.state"
+if [[ ! -s "$STATE_FILE" && -s /tmp/archinstaller.state ]]; then
+  cp -a /tmp/archinstaller.state "$STATE_FILE" 2>/dev/null || true
+fi
+if [[ ! -s "$INSTALL_LOG" && -s /tmp/archinstaller.log ]]; then
+  cp -a /tmp/archinstaller.log "$INSTALL_LOG" 2>/dev/null || true
+fi
 
 # Source new modular libraries
 source "$SCRIPTS_DIR/lib/core.sh"
@@ -108,7 +114,7 @@ source "$SCRIPTS_DIR/lib/dashboard.sh"
 # Install gum silently for enhanced UI experience
 if ! command -v gum >/dev/null 2>&1; then
   log_to_file "Installing gum for enhanced UI experience..."
-  if sudo pacman -S --noconfirm gum >>"$INSTALL_LOG" 2>&1; then
+  if sudo pacman -S --noconfirm --needed gum 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
     log_to_file "Gum installed successfully"
   else
     log_to_file "Failed to install gum, falling back to basic UI"
@@ -154,8 +160,6 @@ arch_ascii
 
 # System checking function (defined before use)
 check_system_requirements() {
-  local requirements_failed=false
-
   # Use the enhanced compatibility check from common.sh
   if ! check_system_compatibility; then
     ui_error "System compatibility check failed!"
@@ -275,7 +279,6 @@ show_resume_menu() {
     local completed_steps=()
     local step_status=()
     local has_failures=false
-    local last_completed_step=""
 
     # Read and parse state file
     while IFS= read -r step; do
@@ -283,14 +286,12 @@ show_resume_menu() {
       # Check if step was marked as completed
       if [[ "$step" =~ ^COMPLETED: ]]; then
         step_status+=("completed")
-        last_completed_step="${step#*: }"
       elif [[ "$step" =~ ^FAILED: ]]; then
         step_status+=("failed")
         has_failures=true
       else
         # Legacy format - assume completed
         step_status+=("completed")
-        last_completed_step="$step"
       fi
     done < "$STATE_FILE"
 
@@ -451,12 +452,14 @@ fi
 if [ "$DRY_RUN" = false ]; then
   while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
   SUDO_KEEPALIVE_PID=$!
-  # Trap on exit/interrupt/termination (ERR is intentionally omitted: with
-  # `set -u`/`pipefail` and no `errexit`, an ERR trap is never triggered here)
-  trap 'cleanup_on_error $? $LINENO; save_log_on_exit' EXIT INT TERM
-else
-  trap 'cleanup_on_error $? $LINENO; save_log_on_exit' EXIT INT TERM
 fi
+# Exit/int traps: capture the real exit code first ($? is valid inside an EXIT
+# trap). $LINENO at trap time is NOT the failing line, so don't report it as
+# one — per-step FAILED markers in the state file are the source of truth.
+# (ERR trap intentionally omitted: without `errexit` it never fires.)
+trap 'rc=$?; cleanup_on_error "$rc"; save_log_on_exit' EXIT
+trap 'cleanup_on_error 130 "interrupted (SIGINT)"; save_log_on_exit; exit 130' INT
+trap 'cleanup_on_error 143 "terminated (SIGTERM)"; save_log_on_exit; exit 143' TERM
 
 # Function to mark step as completed with atomic append and status tracking
 # Tracks both completed and failed steps with detailed progress reporting.
@@ -485,35 +488,40 @@ mark_step_complete_with_progress() {
   }
 }
 
-# Function to check if step was completed
+# Function to check if step was completed (fixed-string match — step names are
+# literal, never regex)
 is_step_complete() {
-  [ -f "$STATE_FILE" ] && grep -qE "^COMPLETED: ${1}$|^${1}$" "$STATE_FILE"
+  [ -f "$STATE_FILE" ] && grep -qFx -e "COMPLETED: $1" -e "$1" "$STATE_FILE"
 }
 
 # Enhanced error handling and rollback functions
 cleanup_on_error() {
-  local exit_code=${1:-$?}
-  local error_line=${2:-$LINENO}
-  
-  if [ $exit_code -ne 0 ]; then
-    log_error "Installation failed with exit code $exit_code at line $error_line"
-    log_error "Check the log file for details: $INSTALL_LOG"
-    
-    # Kill sudo keep-alive if running
-    if [ -n "${SUDO_KEEPALIVE_PID+x}" ]; then
-      kill $SUDO_KEEPALIVE_PID 2>/dev/null || true
+  local exit_code="${1:-$?}"
+  local context="${2:-}"
+
+  if [ "$exit_code" -ne 0 ]; then
+    if [ -n "$context" ]; then
+      log_error "Installation ended: $context (exit code $exit_code)"
+    else
+      log_error "Installation failed with exit code $exit_code"
     fi
-    
+    log_error "Check the log file for details: $INSTALL_LOG"
+
+    # Kill sudo keep-alive if running
+    if [ -n "${SUDO_KEEPALIVE_PID:-}" ]; then
+      kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+    fi
+
     # Check if steps actually failed — if all steps completed, don't mark as failure
     # Use state file as source of truth (more reliable than ERRORS array which runs in subshells)
     if [ -f "$STATE_FILE" ] && ! grep -q "^FAILED:" "$STATE_FILE" 2>/dev/null; then
       log_warning "All installation steps completed successfully despite external signal (exit code $exit_code)"
       return 0
     fi
-    
+
     # Mark installation as failed
     INSTALLATION_SUCCESS=false
-    
+
     # Offer recovery options
     echo ""
     ui_error "Installation encountered an error!"
@@ -521,9 +529,9 @@ cleanup_on_error() {
     ui_info "1. Run the script again to resume from where it left off"
     ui_info "2. Check the log file: $INSTALL_LOG"
     ui_info "3. Start fresh installation: rm -f $STATE_FILE"
-    
-    # Save error state
-    echo "FAILED: Installation failed at line $error_line (exit code: $exit_code)" >> "$STATE_FILE"
+
+    # Save error state (no bogus line number — step-level FAILED lines are precise)
+    echo "FAILED: Installation ended (exit code: $exit_code)${context:+ — $context}" >> "$STATE_FILE"
   fi
 }
 
@@ -533,8 +541,8 @@ INSTALLATION_SUCCESS=true
 # Function to save log on exit
 save_log_on_exit() {
   # Kill sudo keep-alive if running
-  if [ -n "${SUDO_KEEPALIVE_PID+x}" ]; then
-    kill $SUDO_KEEPALIVE_PID 2>/dev/null || true
+  if [ -n "${SUDO_KEEPALIVE_PID:-}" ]; then
+    kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
   fi
   
   {

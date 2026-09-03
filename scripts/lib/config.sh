@@ -30,7 +30,7 @@ read_yaml_packages() {
     fi
     
     local yq_output
-    yq_output=$(yq -r "$yaml_path[]" "$yaml_file" 2>/dev/null)
+    yq_output=$(yq -r "${yaml_path}[]" "$yaml_file" 2>/dev/null)
     
     if [[ $? -eq 0 && -n "$yq_output" ]]; then
         while IFS= read -r pkg; do
@@ -62,7 +62,7 @@ read_yaml_packages_with_desc() {
     fi
     
     local yq_output
-    yq_output=$(yq -r "$yaml_path[] | [.name, .description] | @tsv" "$yaml_file" 2>/dev/null)
+    yq_output=$(yq -r "${yaml_path}[] | [.name, .description] | @tsv" "$yaml_file" 2>/dev/null)
     
     if [[ $? -eq 0 && -n "$yq_output" ]]; then
         while IFS=$'\t' read -r name description; do

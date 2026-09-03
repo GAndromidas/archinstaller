@@ -26,7 +26,7 @@ install_fail2ban() {
 detect_firewall_action() {
   if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld 2>/dev/null; then
     echo "firewalld"
-  elif command -v ufw >/dev/null 2>&1 && systemctl is-active --quiet ufw 2>/dev/null; then
+  elif command -v ufw >/dev/null 2>&1 && { sudo ufw status 2>/dev/null | grep -q "Status: active"; }; then
     echo "ufw"
   else
     echo "systemd"

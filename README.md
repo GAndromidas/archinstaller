@@ -161,11 +161,11 @@ Gaming packages live in [`configs/gaming_mode.yaml`](configs/gaming_mode.yaml).
 
 ### Logs & state
 ```bash
-/tmp/archinstaller.log     # Full installation log
-/tmp/archinstaller.state   # Progress/resume tracking
+/var/tmp/archinstaller.log     # Full installation log
+/var/tmp/archinstaller.state   # Progress/resume tracking
 ```
 
-> Logs live in `/tmp`, so they're cleared on reboot. The installer offers manual cleanup at the end.
+> Logs/state live in `/var/tmp`, so they survive reboots and installs can resume. Legacy `/tmp` copies are migrated automatically.
 
 ---
 

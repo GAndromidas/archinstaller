@@ -147,6 +147,11 @@ setup_shell() {
 
   if [ -f "$src_starship" ]; then
     mkdir -p "$HOME/.config"
+    if [ -f "$dst_starship" ]; then
+      local bak="$dst_starship.backup.$(date +%Y%m%d_%H%M%S)"
+      log_info "Backing up existing starship config to $bak"
+      cp -a "$dst_starship" "$bak" || log_warning "Failed to back up $dst_starship"
+    fi
     log_info "Copying starship.toml: $src_starship -> $dst_starship"
     if cp "$src_starship" "$dst_starship"; then
       log_success "Starship prompt configuration copied to $dst_starship"
@@ -177,6 +182,11 @@ setup_shell() {
   local dst_zshrc="$HOME/.zshrc"
 
   if [ -f "$src_zshrc" ]; then
+    if [ -f "$dst_zshrc" ]; then
+      local bak="$dst_zshrc.backup.$(date +%Y%m%d_%H%M%S)"
+      log_info "Backing up existing .zshrc to $bak"
+      cp -a "$dst_zshrc" "$bak" || log_warning "Failed to back up $dst_zshrc"
+    fi
     log_info "Copying .zshrc: $src_zshrc -> $dst_zshrc"
     if cp "$src_zshrc" "$dst_zshrc"; then
       log_success "ZSH configuration copied to $dst_zshrc"

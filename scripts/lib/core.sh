@@ -46,9 +46,9 @@ if [ -z "${GUM_PRIMARY:-}" ]; then
   readonly GUM_BORDER="26"
 fi
 
-# Global variables
-export INSTALL_LOG="${INSTALL_LOG:-/tmp/archinstaller.log}"
-STATE_FILE="${STATE_FILE:-/tmp/archinstaller.state}"
+# Global variables (/var/tmp survives reboots so resume works; /tmp does not)
+export INSTALL_LOG="${INSTALL_LOG:-/var/tmp/archinstaller.log}"
+STATE_FILE="${STATE_FILE:-/var/tmp/archinstaller.state}"
 ERRORS=()
 INSTALLED_PACKAGES=()
 FAILED_PACKAGES=()

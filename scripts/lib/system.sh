@@ -107,22 +107,44 @@ detect_bootloader() {
 
     # Tier 1: Active bootloader detection (based on actual directories/configs)
     # Use sudo for /boot checks because /boot can have restricted permissions (e.g. 700 with UKI)
-    # Limine is checked first: its EFI binary + limine.conf are distinctive and
-    # would otherwise fall through to the systemd-boot fallback below.
-    if sudo test -f /boot/limine.conf 2>/dev/null || sudo test -f /boot/efi/limine.conf 2>/dev/null || \
-       sudo test -f /efi/limine.conf 2>/dev/null || \
-       [ -d "/boot/EFI/limine" ] || [ -d "/boot/efi/EFI/limine" ] || [ -d "/efi/EFI/limine" ] || \
+    # Limine is checked first: limine.conf is distinctive and would otherwise
+    # fall through to the systemd-boot fallback below.
+    # Layout reference: official archinstall deploys to <esp>/EFI/arch-limine/
+    # (or <esp>/EFI/BOOT/ when "removable", which is its UEFI default) with
+    # limine.conf alongside the EFI binary, plus a 99-limine.hook pacman hook.
+    # NOTE: <esp>/EFI/BOOT/ alone is NOT a signal (systemd-boot uses it too) —
+    # only limine.conf in these locations counts.
+    if sudo test -f /boot/EFI/arch-limine/limine.conf 2>/dev/null || \
+       sudo test -f /boot/EFI/BOOT/limine.conf 2>/dev/null || \
+       [ -f "/boot/efi/EFI/arch-limine/limine.conf" ] || [ -f "/boot/efi/EFI/BOOT/limine.conf" ] || \
+       [ -f "/efi/EFI/arch-limine/limine.conf" ] || [ -f "/efi/EFI/BOOT/limine.conf" ] || \
+       sudo test -f /boot/limine.conf 2>/dev/null || sudo test -f /boot/limine/limine.conf 2>/dev/null || \
+       sudo test -f /boot/efi/limine.conf 2>/dev/null || sudo test -f /efi/limine.conf 2>/dev/null || \
+       sudo test -f /limine/limine.conf 2>/dev/null || sudo test -f /limine.conf 2>/dev/null || \
+       sudo grep -q "^Target = limine" /etc/pacman.d/hooks/99-limine.hook 2>/dev/null || \
+       sudo efibootmgr 2>/dev/null | grep -qi "limine" || \
        command -v limine-snapper-sync &>/dev/null; then
         bootloader="limine"
     elif sudo test -d /boot/grub 2>/dev/null || sudo test -d /boot/grub2 2>/dev/null || \
        [ -d "/boot/efi/EFI/grub" ] || [ -d "/efi/EFI/grub" ]; then
         bootloader="grub"
+    # rEFInd (official archinstall deploys to <esp>/EFI/refind/)
+    elif sudo test -f /boot/EFI/refind/refind_x64.efi 2>/dev/null || \
+       [ -f "/boot/efi/EFI/refind/refind_x64.efi" ] || [ -f "/efi/EFI/refind/refind_x64.efi" ] || \
+       sudo test -f /boot/EFI/refind/refind.conf 2>/dev/null || \
+       sudo efibootmgr 2>/dev/null | grep -qi "rEFInd"; then
+        bootloader="refind"
     # Check for active systemd-boot (loader entries + loader.conf)
     elif sudo test -d /boot/loader/entries 2>/dev/null || [ -d "/efi/loader/entries" ] || \
          sudo test -f /boot/loader/loader.conf 2>/dev/null || [ -f "/efi/loader/loader.conf" ] || \
          [ -d "/boot/EFI/systemd" ] || [ -d "/efi/EFI/systemd" ] || \
          sudo test -d /boot/loader 2>/dev/null; then
         bootloader="systemd-boot"
+    # EFISTUB: kernels live directly on a FAT /boot with no bootloader
+    # directory at all (official archinstall efistub layout).
+    elif { sudo test "$(findmnt -n -o FSTYPE /boot 2>/dev/null)" = "vfat" 2>/dev/null; } && \
+         sudo ls /boot/vmlinuz-* >/dev/null 2>&1; then
+        bootloader="efistub"
     # Tier 2: Installed-package detection (may have false positives for inactive bootloaders)
     elif pacman -Q limine &>/dev/null 2>&1; then
         bootloader="limine"
@@ -156,10 +178,13 @@ is_uki_system() {
     
     local result="false"
 
-    # Method 1: UKI .efi files exist in the ESP (use sudo for /boot due to 700 perms with UKI)
+    # Method 1: UKI .efi files exist in the ESP (use sudo for /boot due to 700 perms with UKI).
+    # archinstall writes them to <esp>/EFI/Linux/ — cover every ESP mountpoint.
     if sudo test -d /boot/efi/EFI/Linux 2>/dev/null && sudo ls /boot/efi/EFI/Linux/*.efi >/dev/null 2>&1; then
         result="true"
     elif sudo test -d /boot/EFI/Linux 2>/dev/null && sudo ls /boot/EFI/Linux/*.efi >/dev/null 2>&1; then
+        result="true"
+    elif sudo test -d /efi/EFI/Linux 2>/dev/null && sudo ls /efi/EFI/Linux/*.efi >/dev/null 2>&1; then
         result="true"
     fi
 

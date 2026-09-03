@@ -105,6 +105,38 @@ configure_user_groups() {
   done
 }
 
+# Snapper integration (mirrors the Timeshift/timeshift-autosnap handling):
+# if snapper is already installed, add snap-pac (pacman hook that
+# auto-snapshots on every transaction). btrfs-assistant (GUI snapshot
+# manager) is included only when $1 is true — headless servers skip it.
+# Both are official repo packages (no AUR helper needed) and hook/GUI-only
+# with nothing to enable. Snapper without btrfs on / is pointless, so bail.
+setup_snapper_integration() {
+  local with_gui="${1:-true}"
+
+  if ! pacman -Q snapper &>/dev/null; then
+    log_info "Snapper not detected - skipping snap-pac installation"
+    return 0
+  fi
+
+  if ! is_btrfs_system; then
+    log_info "Snapper detected but root is not btrfs — skipping snap-pac."
+    return 0
+  fi
+
+  log_success "Snapper detected on btrfs - installing snap-pac..."
+  local snapper_pkgs=()
+  pacman -Q snap-pac &>/dev/null || snapper_pkgs+=(snap-pac)
+  if [[ "$with_gui" == true ]]; then
+    pacman -Q btrfs-assistant &>/dev/null || snapper_pkgs+=(btrfs-assistant)
+  fi
+  if [ ${#snapper_pkgs[@]} -gt 0 ]; then
+    install_packages_quietly "${snapper_pkgs[@]}"
+  else
+    log_info "snapper integration packages already installed"
+  fi
+}
+
 enable_services() {
   # Ensure openssh is installed before trying to enable sshd
   if ! pacman -Q openssh &>/dev/null; then
@@ -141,7 +173,10 @@ enable_services() {
     else
       log_warning "Some services failed to enable: ${server_failed[*]}"
     fi
-    
+
+    # Headless: snap-pac only (btrfs-assistant is a GUI, useless on a server)
+    setup_snapper_integration false
+
     # Continue to shared optimizations (memory, filesystem, storage, audio, kernel)
   else
 
@@ -202,6 +237,9 @@ enable_services() {
   else
     log_info "Timeshift not detected - skipping timeshift-autosnap installation"
   fi
+
+  # Desktop: full snapper integration including the GUI manager
+  setup_snapper_integration true
 
   step "Enabling the following system services:"
   for svc in "${services[@]}"; do

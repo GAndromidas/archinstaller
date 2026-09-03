@@ -97,28 +97,113 @@ get_kernel_params() {
   fi
 }
 
+# ============================================================================
+# KERNEL CMDLINE MERGE
+# ============================================================================
+# Official archinstall writes installer-chosen params (root=, cryptdevice=,
+# rd.luks.uuid=, resume=, zswap.*, ...) into bootloader configs. Replacing
+# those lines wholesale would drop them and render encrypted/hibernating
+# systems unbootable. So this installer OWNS only the keys below and MERGES:
+# existing unmanaged params are preserved verbatim, managed keys are replaced.
+MANAGED_PARAM_KEYS="quiet loglevel nowatchdog splash vt.global_cursor_default nvidia_drm.modeset nvidia_drm.fbdev NVreg_DynamicPowerManagement NVreg_PreserveVideoMemoryAllocations NVreg_TemporaryFilePath radeon.si_support amdgpu.si_support radeon.cik_support amdgpu.cik_support amd_pstate i915.enable_guc rootflags"
+
+_merge_param_key() {
+  local tok="$1"
+  if [[ "$tok" == *=* ]]; then
+    echo "${tok%%=*}"
+  else
+    echo "$tok"
+  fi
+}
+
+# merge_kernel_params <existing> <managed> — echo merged cmdline.
+# Tokens are space-separated (kernel cmdline convention).
+merge_kernel_params() {
+  local existing="$1" managed="$2"
+  local out=()
+  local tok key seen m
+  # shellcheck disable=SC2086
+  for tok in $existing; do
+    [[ -z "$tok" ]] && continue
+    key=$(_merge_param_key "$tok")
+    # Drop tokens whose key we manage (they get re-added from $managed)
+    # shellcheck disable=SC2076
+    if [[ " $MANAGED_PARAM_KEYS " =~ " $key " ]]; then
+      continue
+    fi
+    # Dedupe exact repeats
+    seen=false
+    for m in ${out[@]+"${out[@]}"}; do
+      [[ "$m" == "$tok" ]] && seen=true && break
+    done
+    [[ "$seen" == false ]] && out+=("$tok")
+  done
+  # shellcheck disable=SC2086
+  for tok in $managed; do
+    [[ -z "$tok" ]] && continue
+    out+=("$tok")
+  done
+  echo "${out[*]}"
+}
+
+# ensure_root_rw <cmdline> — echo cmdline with root= and rw present (added from
+# live system only when missing; existing values always win).
+ensure_root_rw() {
+  local merged="$1"
+  if ! echo " $merged " | grep -qE ' root=[^ ]+ '; then
+    local root_uuid
+    root_uuid=$(findmnt -n -o UUID / 2>/dev/null || echo "")
+    if [[ -n "$root_uuid" ]]; then
+      merged="root=UUID=$root_uuid${merged:+ $merged}"
+    fi
+  fi
+  if ! echo " $merged " | grep -qE '(^| )rw( |$)'; then
+    merged="$merged rw"
+  fi
+  echo "$merged"
+}
+
+# True when the root filesystem sits on an encrypted device (archinstall LUKS).
+is_encrypted_root() {
+  local src
+  src=$(findmnt -n -o SOURCE / 2>/dev/null | cut -d'[' -f1 || echo "")
+  [[ "$src" == /dev/mapper/* || "$src" == /dev/dm-* ]] && return 0
+  lsblk -n -o NAME,FSTYPE 2>/dev/null | grep -q crypto_LUKS && \
+    lsblk -n -o MOUNTPOINT 2>/dev/null | grep -qx "/" && return 0
+  return 1
+}
+
+# True when UEFI Secure Boot is active (binaries are signature-checked).
+is_secureboot_active() {
+  local last
+  last=$(od -An -tu1 /sys/firmware/efi/efivars/SecureBoot-* 2>/dev/null | awk '{print $NF}')
+  [[ "$last" == "1" ]]
+}
+
 # Write kernel parameters to UKI /etc/kernel/cmdline
 configure_uki_cmdline() {
   local cmdline_file="/etc/kernel/cmdline"
   local params
-  params=$(get_kernel_params)
+  # cmdline-only here: root=/rw are unmanaged (preserved from the existing
+  # file) and re-added by ensure_root_rw below. Passing the full params would
+  # duplicate root= and rw on every run.
+  params=$(get_kernel_params --cmdline-only)
 
-  local needs_update=true
+  local current_params=""
   if [[ -f "$cmdline_file" ]]; then
-    local current_params
     current_params=$(sudo cat "$cmdline_file" 2>/dev/null || echo "")
-    if [[ "$current_params" == "$params" ]]; then
-      log_info "UKI cmdline already configured"
-      needs_update=false
-    else
-      sudo cp "$cmdline_file" "${cmdline_file}.backup.$(date +%Y%m%d_%H%M%S)"
-      log_info "Backed up existing UKI cmdline"
-    fi
   fi
+  local merged
+  merged=$(merge_kernel_params "$current_params" "$params")
+  merged=$(ensure_root_rw "$merged")
 
-  if [[ "$needs_update" == true ]]; then
-    echo "$params" | sudo tee "$cmdline_file" >/dev/null
-    log_success "UKI cmdline written: $params"
+  if [[ "$current_params" == "$merged" ]]; then
+    log_info "UKI cmdline already configured"
+  else
+    [[ -f "$cmdline_file" ]] && sudo cp "$cmdline_file" "${cmdline_file}.backup.$(date +%Y%m%d_%H%M%S)"
+    log_info "Backed up existing UKI cmdline"
+    echo "$merged" | sudo tee "$cmdline_file" >/dev/null
+    log_success "UKI cmdline written: $merged"
   fi
 
   # Add --splash to mkinitcpio preset if Plymouth is installed (ArchWiki: UKI + Plymouth)
@@ -172,6 +257,27 @@ configure_uki_cmdline() {
     else
       log_warning "UKI image regeneration had issues — check mkinitcpio presets"
     fi
+  fi
+}
+
+# Sync /etc/kernel/cmdline only (no image rebuild) for NVRAM-managed
+# bootloaders (refind/efistub) whose cmdline lives in firmware entries.
+configure_uki_cmdline_note_only() {
+  local cmdline_file="/etc/kernel/cmdline"
+  local unified
+  unified=$(get_kernel_params --cmdline-only)
+  local current=""
+  if sudo test -f "$cmdline_file" 2>/dev/null; then
+    current=$(sudo cat "$cmdline_file" 2>/dev/null || echo "")
+  fi
+  local merged
+  merged=$(merge_kernel_params "$current" "$unified")
+  if [[ "$current" != "$merged" ]]; then
+    [[ -n "$current" ]] && sudo cp "$cmdline_file" "${cmdline_file}.backup.$(date +%Y%m%d_%H%M%S)"
+    echo "$merged" | sudo tee "$cmdline_file" >/dev/null
+    log_success "Synced $cmdline_file (firmware entries still authoritative)"
+  else
+    log_info "$cmdline_file already up to date"
   fi
 }
 
@@ -239,14 +345,18 @@ update_systemd_boot_options() {
     [ -f "$entry" ] || continue
     [[ "$(basename "$entry")" == *fallback* ]] && continue
 
-    # Read existing root device from options line
-    local existing_root=""
+    # Merge with the existing options line: preserves archinstall-written
+    # root= (UUID OR PARTUUID), cryptdevice, resume, etc.; only managed keys
+    # are replaced.
+    local existing=""
     if grep -q "^options " "$entry"; then
-      existing_root=$(grep "^options " "$entry" | sed 's/^options //' | grep -oP 'root=UUID=\S+')
+      existing=$(grep "^options " "$entry" | sed 's/^options //')
     fi
 
     # Build new options line
-    local new_options="${existing_root} rw ${new_params}"
+    local new_options
+    new_options=$(merge_kernel_params "$existing" "$new_params")
+    new_options=$(ensure_root_rw "$new_options")
 
     # Update or add options line
     if grep -q "^options " "$entry"; then
@@ -571,10 +681,18 @@ configure_grub() {
     set_grub_config "GRUB_GFXMODE" "auto"
     set_grub_config "GRUB_GFXPAYLOAD_LINUX" "keep"
 
-    # Set kernel parameters (quiet, splash, nvidia, etc.)
-    set_grub_config "GRUB_CMDLINE_LINUX_DEFAULT" "$kernel_params"
-    set_grub_config "GRUB_CMDLINE_LINUX" ""
-    ui_info "Kernel parameters: $kernel_params"
+    # Merge kernel parameters (quiet, splash, nvidia, etc.) with the existing
+    # GRUB_CMDLINE_LINUX_DEFAULT — archinstall writes cryptdevice/resume here
+    # on encrypted systems, so never replace wholesale. GRUB_CMDLINE_LINUX is
+    # left untouched for the same reason (it used to be blanked — a boot
+    # breaker when the installer put params there).
+    local grub_current=""
+    grub_current=$(grep -E '^GRUB_CMDLINE_LINUX_DEFAULT=' /etc/default/grub 2>/dev/null | cut -d= -f2- | tr -d '"' || echo "")
+    local grub_merged
+    grub_merged=$(merge_kernel_params "$grub_current" "$kernel_params")
+    # Quote: /etc/default/grub is shell-sourced, unquoted spaces break it.
+    set_grub_config "GRUB_CMDLINE_LINUX_DEFAULT" "\"$grub_merged\""
+    ui_info "Kernel parameters: $grub_merged"
 
     local KERNELS=()
     mapfile -t KERNELS < <(ls /boot/vmlinuz-* 2>/dev/null | sed 's|/boot/vmlinuz-||g')
@@ -595,8 +713,8 @@ configure_grub() {
     local grub_cfg="/boot/grub/grub.cfg"
     local backup_grub_config="${grub_config}.backup.$(date +%Y%m%d_%H%M%S)"
 
-    if [ -f "$grub_config" ]; then
-        cp "$grub_config" "$backup_grub_config" || true
+    if sudo test -f "$grub_config" 2>/dev/null; then
+        sudo cp "$grub_config" "$backup_grub_config" || true
     fi
 
     if [ -f "$grub_config" ]; then
@@ -729,7 +847,7 @@ detect_esp_mount() {
   esp=$(findmnt -n -o TARGET -t vfat 2>/dev/null | head -1 || true)
   if [[ -z "$esp" ]]; then
     local p
-    for p in /boot /boot/efi /efi; do
+    for p in /boot /boot/efi /efi /limine; do
       if [[ -d "$p" ]] && findmnt -n -o FSTYPE "$p" 2>/dev/null | grep -q vfat; then
         esp="$p"
         break
@@ -808,7 +926,14 @@ configure_limine_snapper() {
   # AUR snapshot integration (non-fatal if helper/packages unavailable)
   if [[ "$want_snapper" == true ]]; then
     limine_install_aur_pkg "limine-snapper-sync" || true
-    limine_install_aur_pkg "snap-pac" || true
+    # snap-pac lives in the official repos — prefer that, AUR as fallback.
+    # (Step 7 installs it too when snapper is detected; --needed keeps this idempotent.)
+    if ! pacman -Qi snap-pac &>/dev/null 2>&1; then
+      sudo pacman -S --needed --noconfirm snap-pac >>"$INSTALL_LOG" 2>&1 || \
+        limine_install_aur_pkg "snap-pac" || true
+    else
+      log_info "snap-pac already installed"
+    fi
     if command -v mkinitcpio &>/dev/null; then
       if ! pacman -Qi limine-mkinitcpio-hook &>/dev/null 2>&1; then
         limine_install_aur_pkg "limine-mkinitcpio-hook" || true
@@ -846,8 +971,12 @@ configure_limine_snapper() {
     log_success "Snapper timers enabled."
   fi
 
-  # Deploy Limine EFI binary
-  step "Deploying Limine EFI binary..."
+  # Locate an existing Limine install or deploy fresh.
+  # Official archinstall deploys to <esp>/EFI/arch-limine/ — or <esp>/EFI/BOOT/
+  # when "removable" (its UEFI default) — with limine.conf alongside the EFI
+  # binary. Refreshing in place is critical: deploying a second copy elsewhere
+  # would not be the copy the firmware boots.
+  step "Locating Limine EFI binary..."
 
   local limine_efi_src=""
   local p
@@ -864,12 +993,100 @@ configure_limine_snapper() {
     log_error "Limine EFI binary not found under /usr/share/limine or /usr/lib/limine."
     return 1
   fi
-  local limine_efi_dir="$esp_mount/EFI/limine"
-  sudo mkdir -p "$limine_efi_dir"
-  sudo cp "$limine_efi_src" "$limine_efi_dir/BOOTX64.EFI"
-  log_success "Limine EFI binary deployed."
 
-  # Create EFI NVRAM entry if missing
+  local limine_dir="" limine_conf=""
+  local d
+  for d in "$esp_mount/EFI/arch-limine" "$esp_mount/EFI/BOOT" "$esp_mount/EFI/limine" \
+           "$esp_mount/limine" /boot/limine; do
+    if sudo test -f "$d/BOOTX64.EFI" 2>/dev/null || sudo test -f "$d/BOOTIA32.EFI" 2>/dev/null || \
+       sudo test -f "$d/BOOTAA64.EFI" 2>/dev/null || sudo test -f "$d/limine_x64.efi" 2>/dev/null || \
+       sudo test -f "$d/limine.conf" 2>/dev/null; then
+      limine_dir="$d"
+      limine_conf="$d/limine.conf"
+      break
+    fi
+  done
+
+  if [[ -n "$limine_dir" ]]; then
+    # Refresh-in-place keeps the booted copy current — EXCEPT under Secure
+    # Boot, where the deployed binary is sbctl-signed and overwriting it
+    # breaks verification.
+    if is_secureboot_active; then
+      log_warning "Secure Boot is active — leaving signed Limine binary untouched (re-sign with sbctl after manual updates)."
+    else
+      log_info "Existing Limine install found at $limine_dir — refreshing binary in place."
+      local efi_src_dir
+      efi_src_dir=$(dirname "$limine_efi_src")
+      local f
+      for f in BOOTX64.EFI BOOTIA32.EFI BOOTAA64.EFI; do
+        if sudo test -f "$limine_dir/$f" 2>/dev/null && [[ -f "$efi_src_dir/$f" ]]; then
+          sudo cp "$efi_src_dir/$f" "$limine_dir/$f" && \
+            log_success "Refreshed $limine_dir/$f"
+        fi
+      done
+      if sudo test -f "$limine_dir/limine_x64.efi" 2>/dev/null; then
+        # limine-entry-tool naming — refresh from upstream if the file exists
+        for p in "$efi_src_dir/limine_x64.efi" "$limine_efi_src"; do
+          if [[ -f "$p" ]]; then
+            sudo cp "$p" "$limine_dir/limine_x64.efi" && log_success "Refreshed $limine_dir/limine_x64.efi"
+            break
+          fi
+        done
+      fi
+    fi
+  else
+    # No existing install — fresh deploy in archinstall's non-removable layout,
+    # plus the same pacman hook archinstall writes so upgrades redeploy.
+    limine_dir="$esp_mount/EFI/limine"
+    limine_conf="$limine_dir/limine.conf"
+    step "Deploying Limine EFI binary..."
+    sudo mkdir -p "$limine_dir"
+    sudo cp "$limine_efi_src" "$limine_dir/BOOTX64.EFI"
+    log_success "Limine EFI binary deployed to $limine_dir."
+
+    local hook_dir="/etc/pacman.d/hooks"
+    sudo mkdir -p "$hook_dir"
+    if ! sudo test -f "$hook_dir/99-limine.hook" 2>/dev/null; then
+      printf '%s\n' "[Trigger]" "Operation = Install" "Operation = Upgrade" "Type = Package" \
+        "Target = limine" "" "[Action]" "Description = Deploying Limine after upgrade..." \
+        "When = PostTransaction" "Exec = /bin/sh -c \"/usr/bin/cp /usr/share/limine/BOOTX64.EFI $limine_dir/\"" | \
+        sudo tee "$hook_dir/99-limine.hook" >/dev/null
+      log_success "Limine pacman hook installed."
+    fi
+
+    # Fresh deploy has no config yet — write a minimal archinstall-style one,
+    # but only when kernels live on the ESP (Limine reads FAT only). With a
+    # separate ESP + non-UKI kernels on ext4/btrfs /boot, Limine cannot read
+    # them — same layout rule archinstall itself enforces.
+    if [[ "$esp_mount" == "/boot" ]]; then
+      local fresh_kernels=()
+      mapfile -t fresh_kernels < <(ls /boot/vmlinuz-* 2>/dev/null | sed 's|/boot/vmlinuz-||g')
+      if [[ ${#fresh_kernels[@]} -gt 0 ]]; then
+        local full_params
+        full_params=$(get_kernel_params)
+        {
+          echo "timeout: 3"
+          local k
+          for k in "${fresh_kernels[@]}"; do
+            printf '\n/Arch Linux (%s)\n' "$k"
+            echo "    protocol: linux"
+            echo "    path: boot():/vmlinuz-$k"
+            echo "    cmdline: $full_params"
+            echo "    module_path: boot():/initramfs-$k.img"
+          done
+        } | sudo tee "$limine_conf" >/dev/null
+        log_success "Wrote minimal Limine config with ${#fresh_kernels[@]} kernel entries."
+      else
+        log_warning "No kernels in /boot — skipping initial limine.conf."
+      fi
+    else
+      log_error "ESP ($esp_mount) is separate from /boot and no UKI is configured — Limine cannot read non-FAT /boot. Enable UKI or use a FAT /boot (see ArchWiki Limine)."
+    fi
+  fi
+
+  # Ensure an NVRAM entry exists pointing at the REAL install dir (firmware
+  # entries get wiped by updates/resets; archinstall skips this for removable
+  # installs, so re-check every run). Loader path is ESP-relative.
   if sudo efibootmgr 2>/dev/null | grep -qi limine; then
     log_info "Limine EFI boot entry already exists."
   else
@@ -885,17 +1102,22 @@ configure_limine_snapper() {
       esp_disk="${esp_dev%[0-9]*}"
       esp_part="${BASH_REMATCH[1]}"
     else
-      log_warning "Could not parse ESP device ($esp_dev) — skipping NVRAM entry. Select EFI/limine/BOOTX64.EFI manually."
+      log_warning "Could not parse ESP device ($esp_dev) — skipping NVRAM entry. Select ${limine_dir} manually in firmware."
       esp_disk=""
     fi
 
     if [[ -n "${esp_disk:-}" ]]; then
-      log_info "Creating EFI NVRAM entry..."
+      # ESP-relative loader path, e.g. /boot/EFI/arch-limine -> \EFI\arch-limine\BOOTX64.EFI
+      local efi_bin="BOOTX64.EFI"
+      sudo test -f "$limine_dir/$efi_bin" 2>/dev/null || efi_bin=$(sudo ls "$limine_dir" 2>/dev/null | grep -im1 '\.efi$' || echo "BOOTX64.EFI")
+      local loader_path="${limine_dir#$esp_mount}/$efi_bin"
+      loader_path=${loader_path//\//\\}
+      log_info "Creating EFI NVRAM entry ($loader_path)..."
       if sudo efibootmgr --create \
           --disk "$esp_disk" \
           --part "$esp_part" \
           --label "Limine" \
-          --loader '\\EFI\\limine\\BOOTX64.EFI' \
+          --loader "$loader_path" \
           --unicode >>"$INSTALL_LOG" 2>&1; then
         log_success "EFI boot entry created."
       else
@@ -946,17 +1168,66 @@ configure_limine_snapper() {
     log_success "limine-snapper-sync configured at $limine_defaults"
   fi
 
-  # Generate boot entries
-  step "Generating Limine boot entries..."
-  local limine_conf="$esp_mount/limine.conf"
+  # Kernel parameters for non-UKI Limine. Official archinstall writes per-entry
+  # `    cmdline:` lines into limine.conf, so patch those in place. Also sync
+  # /etc/kernel/cmdline (the shared default consulted by mkinitcpio, dracut
+  # and limine-entry-tool). Snapshot entries derive from the base entries, so
+  # this must run BEFORE limine-snapper-sync below.
+  step "Updating Limine kernel parameters..."
+  local unified_cmdline
+  unified_cmdline=$(get_kernel_params --cmdline-only)
+  local cmdline_file="/etc/kernel/cmdline"
+  local current_cmdline=""
+  if sudo test -f "$cmdline_file" 2>/dev/null; then
+    current_cmdline=$(sudo cat "$cmdline_file" 2>/dev/null || echo "")
+  fi
+  local merged_cmdline
+  merged_cmdline=$(merge_kernel_params "$current_cmdline" "$unified_cmdline")
+  if [[ "$current_cmdline" != "$merged_cmdline" ]]; then
+    [[ -n "$current_cmdline" ]] && sudo cp "$cmdline_file" "${cmdline_file}.backup.$(date +%Y%m%d_%H%M%S)"
+    echo "$merged_cmdline" | sudo tee "$cmdline_file" >/dev/null
+    log_success "Updated $cmdline_file"
+  else
+    log_info "$cmdline_file already up to date"
+  fi
+
+  # Secure Boot with enrolled config checksum: editing limine.conf (or the
+  # binary) breaks verification. Warn and skip file edits; packages/snapper
+  # above are unaffected.
+  local skip_conf_edit=false
+  if is_secureboot_active; then
+    if sudo grep -q "^ENABLE_ENROLL_LIMINE_CONFIG=yes" /etc/default/limine 2>/dev/null; then
+      log_warning "Secure Boot + enrolled Limine config detected — skipping limine.conf edits (re-enroll with limine-enroll-config after changing params)."
+      skip_conf_edit=true
+    else
+      log_warning "Secure Boot is active — binary/config signatures left untouched where verification applies."
+    fi
+  fi
 
   if command -v limine-update &>/dev/null; then
-    log_info "Running limine-update to regenerate boot entries..."
+    log_info "Regenerating entries with limine-update (reads $cmdline_file)..."
     if sudo limine-update >>"$INSTALL_LOG" 2>&1; then
       log_success "limine-update completed."
     else
       log_warning "limine-update returned an error."
     fi
+  elif [[ "$skip_conf_edit" == true ]]; then
+    : # warned above
+  elif sudo test -f "$limine_conf" 2>/dev/null; then
+    if sudo grep -qE '^[[:space:]]*cmdline:' "$limine_conf" 2>/dev/null; then
+      local existing_cmdline merged_full
+      existing_cmdline=$(sudo grep -E '^[[:space:]]*cmdline:' "$limine_conf" 2>/dev/null | head -1 | sed -E 's/^[[:space:]]*cmdline:[[:space:]]*//')
+      merged_full=$(merge_kernel_params "$existing_cmdline" "$(get_kernel_params --cmdline-only)")
+      merged_full=$(ensure_root_rw "$merged_full")
+      sudo cp "$limine_conf" "${limine_conf}.backup.$(date +%Y%m%d_%H%M%S)"
+      # Params contain / (rootflags) but no | or & — pipe delimiter is safe.
+      sudo sed -i -E "s|^([[:space:]]*cmdline:).*|\1 $merged_full|" "$limine_conf"
+      log_success "Updated kernel cmdline in $limine_conf"
+    else
+      log_warning "No cmdline entries in $limine_conf — leaving it untouched."
+    fi
+  else
+    log_warning "Limine config not found at $limine_conf — skipping kernel parameter update."
   fi
 
   if [[ "$want_snapper" == true ]]; then
@@ -1074,12 +1345,24 @@ HELPER_EOF
 # ============================================================================
 
 # Bootloader-specific configuration (kernel params + bootloader settings)
+log_info "Detected bootloader: $BOOTLOADER"
+if is_encrypted_root; then
+  log_info "Encrypted root detected — existing crypt device parameters will be preserved, never replaced."
+fi
 if [ "$BOOTLOADER" = "grub" ]; then
     configure_grub
 elif [ "$BOOTLOADER" = "systemd-boot" ]; then
     configure_boot
 elif [ "$BOOTLOADER" = "limine" ]; then
     configure_limine_snapper
+elif [ "$BOOTLOADER" = "refind" ] || [ "$BOOTLOADER" = "efistub" ]; then
+    # rEFInd/EFISTUB are NVRAM-managed: there are no loader entries or
+    # grub.cfg semantics to tune, and writing systemd-boot files here would
+    # create configs the firmware never reads. Sync the shared cmdline file
+    # and leave boot alone.
+    log_warning "$BOOTLOADER manages boot via NVRAM — skipping bootloader tuning (no files written)."
+    log_info "To change kernel params for $BOOTLOADER, update your NVRAM boot entries (efibootmgr) manually."
+    configure_uki_cmdline_note_only
 else
     log_warning "No bootloader detected or bootloader is unsupported. Defaulting to systemd-boot configuration."
     configure_boot

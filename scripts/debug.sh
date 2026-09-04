@@ -161,7 +161,7 @@ verify_install() {
   systemctl is-active --quiet fstrim.timer 2>/dev/null && check_pass "fstrim.timer active" || check_warn "fstrim.timer not active"
   if command -v ufw &>/dev/null; then
     sudo ufw status 2>/dev/null | grep -q "Status: active" && check_pass "UFW active" || check_fail "UFW not active"
-    sudo ufw status 2>/dev/null | grep -q "22/tcp" && check_pass "UFW ssh allowed" || check_warn "UFW ssh not allowed"
+    sudo ufw status 2>/dev/null | grep -qE "22/tcp|22\s|OpenSSH" && check_pass "UFW ssh allowed" || check_warn "UFW ssh not allowed (try: sudo ufw allow 22/tcp && sudo ufw allow OpenSSH)"
   elif systemctl is-active --quiet firewalld 2>/dev/null; then
     check_pass "firewalld active"
   else

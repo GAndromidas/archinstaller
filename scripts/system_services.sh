@@ -84,12 +84,21 @@ configure_ufw() {
   sudo ufw default allow outgoing
   log_success "Default policy set to allow all outgoing connections."
 
-  # Allow SSH
-  if ! sudo ufw status 2>/dev/null | grep -q "22/tcp"; then
-    sudo ufw allow ssh >>"$INSTALL_LOG" 2>&1 || true
+  # Allow SSH - robust for 22/tcp, 22, OpenSSH (UFW shows different forms)
+  # Always ensure (idempotent) - don't rely on grep form, just allow
+  sudo ufw allow 22/tcp >>"$INSTALL_LOG" 2>&1 || true
+  sudo ufw allow OpenSSH >>"$INSTALL_LOG" 2>&1 || true
+  # Verify and log
+  if sudo ufw status 2>/dev/null | grep -qE "22/tcp|22\s|OpenSSH"; then
     log_success "SSH allowed through UFW."
   else
-    log_warning "SSH is already allowed. Skipping SSH service configuration."
+    # Fallback try ssh alias
+    sudo ufw allow ssh >>"$INSTALL_LOG" 2>&1 || true
+    if sudo ufw status 2>/dev/null | grep -qE "22|ssh|OpenSSH"; then
+      log_success "SSH allowed through UFW."
+    else
+      log_warning "UFW ssh rule may not be active - check sudo ufw status"
+    fi
   fi
 
   # Check if KDE Connect is installed

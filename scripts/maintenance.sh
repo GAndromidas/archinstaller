@@ -58,6 +58,56 @@ cleanup_helpers() {
   run_step "Cleaning yay build dir" sudo rm -rf /tmp/yay
 }
 
+cleanup_snapper_snapshots() {
+  # Clean snapper snapshots to leave system without snapshots after archinstaller (as requested)
+  # Robust for 700 /boot, btrfs only, snapper present
+  if ! is_btrfs_system 2>/dev/null; then
+    return 0
+  fi
+  if ! pacman -Q snapper &>/dev/null 2>&1 && ! command -v snapper &>/dev/null; then
+    return 0
+  fi
+  local snap_count
+  snap_count=$(sudo snapper -c root list 2>/dev/null | awk 'NR>2 && $1 ~ /^[0-9]+$/ {print $1}' | wc -l)
+  snap_count=$(echo "$snap_count" | tr -d ' ')
+  if [[ -z "$snap_count" || "$snap_count" -eq 0 ]]; then
+    log_info "No snapper snapshots to clean"
+    return 0
+  fi
+  log_info "Cleaning $snap_count snapper snapshot(s) for clean post-install (no snapshots)"
+  # Delete via snapper (updates DB) - batch delete if possible
+  local ids
+  ids=$(sudo snapper -c root list 2>/dev/null | awk 'NR>2 && $1 ~ /^[0-9]+$/ {print $1}' | tr '\n' ' ')
+  if [[ -n "$ids" ]]; then
+    # Try batch delete first (faster)
+    if ! sudo snapper -c root delete $ids >>"$INSTALL_LOG" 2>&1; then
+      # Fallback: delete one by one (handles busy snapshots)
+      for id in $ids; do
+        sudo snapper -c root delete "$id" >>"$INSTALL_LOG" 2>&1 || sudo btrfs subvolume delete "/.snapshots/$id/snapshot" 2>/dev/null || true
+      done
+    fi
+    log_success "Cleaned snapper snapshots - system now without snapshots"
+  fi
+  # Cleanup any orphaned btrfs subvolumes under /.snapshots not tracked by snapper
+  local orphans
+  orphans=$(sudo btrfs subvolume list -o /.snapshots 2>/dev/null | awk '{print $NF}' || true)
+  if [[ -n "$orphans" ]]; then
+    echo "$orphans" | while read -r sv; do
+      [[ -n "$sv" ]] || continue
+      # Only delete if not tracked (snapper list doesn't contain the ID)
+      local sid=$(basename "$(dirname "$sv")" 2>/dev/null || echo "")
+      if ! echo "$ids" | grep -qw "$sid" 2>/dev/null; then
+        sudo btrfs subvolume delete "/$sv" 2>/dev/null || true
+      fi
+    done
+  fi
+  # Also clean limine-snapper-sync history if present (bloated limine.conf //Snapshots already kept, but history subvols)
+  if sudo test -d "/.snapshots" 2>/dev/null; then
+    # Ensure /.snapshots is still a valid btrfs subvolume mount
+    mountpoint -q /.snapshots 2>/dev/null || sudo mount -a 2>/dev/null || true
+  fi
+}
+
 cleanup_script_backups() {
   # Remove .backup files the script created - only if no failures before maintenance
   # Keeps them for debugging if any step failed (STATE_FILE contains FAILED:)
@@ -136,6 +186,7 @@ cleanup_script_backups() {
 cleanup_and_optimize
 setup_maintenance
 cleanup_helpers
+run_step "Cleaning snapper snapshots (clean post-install without snapshots)" cleanup_snapper_snapshots
 run_step "Cleaning script-created .backup files" cleanup_script_backups
 
 # Final message

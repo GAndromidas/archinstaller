@@ -1100,34 +1100,24 @@ backdrop: 05142a
 "
     fi
   fi
-  # Theme header - polished, wallpaper optional (falls back to solid term_background if no image)
-  local theme="# Arch Linux Limine theme
-# Clean dark, blue accent, Arch branding - transparent to show background.png
-timeout: 3
+  # Theme - minimal, less bloat, hides version/other text, only kernel + snapshots, transparent
+  local theme="timeout: 3
 default_entry: Arch Linux/linux
-hash_mismatch_panic: no
-graphics: yes
-quiet: no
 interface_branding: Arch Linux
 interface_branding_colour: 3e93af
-interface_help_colour: 6c7086
-editor_enabled: yes
-editor_highlighting: yes
+hash_mismatch_panic: no
+graphics: yes
 ${wallpaper_line}wallpaper_style: stretched
-term_palette: 05142a;f38ba8;a6e3a1;f9e2af;3e93af;f5c2e7;94e2d5;cdd6f4
-term_palette_bright: 45475a;f38ba8;a6e3a1;f9e2af;3e93af;f5c2e7;94e2d5;ffffff
 term_background: 1A05142a
+backdrop: 05142a
+term_palette: 05142a;f38ba8;a6e3a1;f9e2af;3e93af;f5c2e7;94e2d5;cdd6f4
 term_foreground: cdd6f4
-term_background_bright: 1A05142a
-term_foreground_bright: cdd6f4
-term_margin: 64
-term_margin_gradient: 4
 "
   local existing=""
   if sudo test -f "$conf" 2>/dev/null; then
     existing=$(sudo cat "$conf" 2>/dev/null || echo "")
-    # Remove existing global theme keys + timeout to avoid duplicates, keep entries
-    existing=$(echo "$existing" | grep -vE "^\s*#*\s*(timeout:|default_entry|hash_mismatch_panic|quiet|graphics:|interface_branding|interface_help|wallpaper|backdrop|term_palette|term_background|term_foreground|term_margin|editor_)" || true)
+    # Remove existing global theme keys + timeout + bloat comments to keep only kernel/snapshots, hide version/other text
+    existing=$(echo "$existing" | grep -vE "^\s*###" | grep -vE "^\s*#*\s*(timeout:|default_entry|hash_mismatch_panic|quiet|graphics:|interface_branding|interface_help|wallpaper|backdrop|term_palette|term_background|term_foreground|term_margin|editor_)" || true)
     # Trim leading blank lines
     existing=$(echo "$existing" | sed '/./,$!d' || true)
   fi

@@ -1002,90 +1002,9 @@ patch_limine_cmdlines() {
   log_success "Patched $patched base cmdline line(s) ($skipped refused, $snap_skipped snapshot-owned) in $conf"
 }
 
-# Universal Snapper stack for ALL bootloaders when snapper is present (btrfs)
-# Installs btrfs-assistant (GUI) + snap-pac (pacman hook) from extra (not AUR),
-# then applies ArchWiki profile. Limine-specific AUR limine-snapper-sync stays limine-only.
-ensure_snapper_aux_universal() {
-  if ! pacman -Q snapper &>/dev/null; then
-    return 0
-  fi
-  if ! is_btrfs_system 2>/dev/null; then
-    return 0
-  fi
-  local pkgs=()
-  pacman -Q snap-pac &>/dev/null || pkgs+=(snap-pac)
-  # btrfs-assistant is GUI - install on desktop, skip headless server
-  if ! is_headless_system 2>/dev/null; then
-    pacman -Q btrfs-assistant &>/dev/null || pkgs+=(btrfs-assistant)
-  fi
-  if [[ ${#pkgs[@]} -gt 0 ]]; then
-    log_info "Snapper detected — ensuring snap-pac/btrfs-assistant for all bootloaders: ${pkgs[*]}"
-    install_packages_quietly "${pkgs[@]}" 2>>"$INSTALL_LOG" || log_warning "Failed to install snapper aux: ${pkgs[*]}"
-  else
-    log_info "Snapper aux packages (snap-pac/btrfs-assistant) already present"
-  fi
-  # Always ensure profile even if packages already present
-  apply_btrfs_assistant_profile
-}
-
-# Shared Btrfs-Assistant profile for ALL bootloaders (systemd-boot, GRUB, Limine)
-# ArchWiki snapper-configs(5): Daily 1, Boot 1 (via snapper-boot.timer), others 0, Number 8 (from 50)
-# Includes QUARTERLY (missed before, caused btrfs-assistant to show stale) and idempotent handling
-apply_btrfs_assistant_profile() {
-  local conf="/etc/snapper/configs/root"
-  if [[ ! -f "$conf" ]]; then
-    if is_btrfs_system 2>/dev/null; then
-      log_info "No snapper config for / — creating one for btrfs-assistant profile..."
-      if ! sudo snapper -c root create-config / >>"$INSTALL_LOG" 2>&1; then
-        log_warning "Initial create-config failed, trying @.snapshots workaround..."
-        if mountpoint -q /.snapshots 2>/dev/null; then sudo umount /.snapshots 2>/dev/null || true; fi
-        sudo rm -rf /.snapshots 2>/dev/null || true
-        if sudo snapper -c root create-config / >>"$INSTALL_LOG" 2>&1; then
-          sudo btrfs subvolume delete /.snapshots 2>/dev/null || true
-          sudo mkdir -p /.snapshots 2>/dev/null || true
-          local root_dev=$(findmnt -n -o SOURCE / 2>/dev/null | cut -d'[' -f1)
-          if sudo btrfs subvolume list / 2>/dev/null | grep -q "path @snapshots"; then
-            sudo mount -o subvol=@snapshots "$root_dev" /.snapshots 2>/dev/null || sudo mount -a 2>/dev/null || true
-          else
-            sudo mount -a 2>/dev/null || true
-          fi
-        else
-          log_warning "Could not create snapper config — skipping btrfs-assistant limits."
-          return 0
-        fi
-      fi
-    else
-      log_info "Not btrfs — skipping btrfs-assistant profile."
-      return 0
-    fi
-  fi
-  if [[ -f "$conf" ]]; then
-    _snapper_set() {
-      local key="$1" val="$2"
-      if sudo grep -qE "^#*${key}=" "$conf" 2>/dev/null; then
-        sudo sed -i -E "s|^#*${key}=.*|${key}=\"${val}\"|" "$conf"
-      else
-        echo "${key}=\"${val}\"" | sudo tee -a "$conf" >/dev/null
-      fi
-    }
-    _snapper_set TIMELINE_MIN_AGE "1800"
-    _snapper_set TIMELINE_LIMIT_HOURLY "0"
-    _snapper_set TIMELINE_LIMIT_DAILY "1"
-    _snapper_set TIMELINE_LIMIT_WEEKLY "0"
-    _snapper_set TIMELINE_LIMIT_MONTHLY "0"
-    _snapper_set TIMELINE_LIMIT_QUARTERLY "0"
-    _snapper_set TIMELINE_LIMIT_YEARLY "0"
-    _snapper_set NUMBER_MIN_AGE "1800"
-    _snapper_set NUMBER_LIMIT "8"
-    _snapper_set NUMBER_LIMIT_IMPORTANT "8"
-    _snapper_set TIMELINE_CREATE "yes"
-    _snapper_set TIMELINE_CLEANUP "yes"
-    _snapper_set NUMBER_CLEANUP "yes"
-    _snapper_set EMPTY_PRE_POST_CLEANUP "yes"
-    _snapper_set BACKGROUND_COMPARISON "yes"
-    log_success "Btrfs-Assistant profile applied: Daily 1, Boot 1, Hourly/Weekly/Monthly/Yearly/Quarterly 0, Number 8 (from 50) - ArchWiki single+timeline"
-  fi
-}
+# Thin wrappers to shared single-source in common.sh (no duplication, fast guard)
+ensure_snapper_aux_universal() { snapper_ensure_aux_packages; snapper_apply_btrfs_assistant_profile; }
+apply_btrfs_assistant_profile() { snapper_apply_btrfs_assistant_profile; }
 
 # Wire the overlayfs initramfs hook from limine-mkinitcpio-hook so booting a
 # read-only snapshot actually works (GDM and other writers fail without a

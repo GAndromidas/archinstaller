@@ -290,6 +290,91 @@ with_privileged_boot() {
 }
 
 # ============================================================================
+# SECTION 3c: SHARED SNAPPER / BTRFS-ASSISTANT (single source, all bootloaders)
+# ============================================================================
+# ArchWiki snapper-configs(5): Daily 1, Boot 1 (snapper-boot.timer single),
+# Hourly/Weekly/Monthly/Quarterly/Yearly 0, Number 8 (from 50)
+# Single source for bootloader_config + system_services - no duplication, fast (guard)
+
+SNAPPER_BTRFS_PROFILE_DONE=false
+
+snapper_ensure_config_with_workaround() {
+  local conf="/etc/snapper/configs/root"
+  if [[ -f "$conf" ]]; then
+    return 0
+  fi
+  if ! is_btrfs_system 2>/dev/null; then
+    return 1
+  fi
+  log_info "No snapper config for / — creating one..."
+  if sudo snapper -c root create-config / >>"$INSTALL_LOG" 2>&1; then
+    return 0
+  fi
+  log_warning "Initial create-config failed, trying ArchWiki @.snapshots workaround..."
+  if mountpoint -q /.snapshots 2>/dev/null; then sudo umount /.snapshots 2>/dev/null || true; fi
+  sudo rm -rf /.snapshots 2>/dev/null || true
+  if sudo snapper -c root create-config / >>"$INSTALL_LOG" 2>&1; then
+    log_success "Snapper config created after workaround"
+    sudo btrfs subvolume delete /.snapshots 2>/dev/null || true
+    sudo mkdir -p /.snapshots 2>/dev/null || true
+    local root_dev=$(findmnt -n -o SOURCE / 2>/dev/null | cut -d'[' -f1)
+    if sudo btrfs subvolume list / 2>/dev/null | grep -q "path @snapshots"; then
+      sudo mount -o subvol=@snapshots "$root_dev" /.snapshots 2>/dev/null || sudo mount -a 2>/dev/null || true
+    else
+      sudo mount -a 2>/dev/null || true
+    fi
+    return 0
+  fi
+  log_warning "Could not create snapper config for /"
+  return 1
+}
+
+snapper_apply_btrfs_assistant_profile() {
+  # Fast guard - if already 8/Daily 1, skip 13 seds
+  if [[ "$SNAPPER_BTRFS_PROFILE_DONE" == true ]]; then
+    return 0
+  fi
+  local conf="/etc/snapper/configs/root"
+  if ! snapper_ensure_config_with_workaround; then
+    return 0
+  fi
+  if [[ ! -f "$conf" ]]; then
+    return 0
+  fi
+  # Idempotent _snapper_set (handles #KEY, missing, different quotes)
+  local key val
+  for kv in 'TIMELINE_MIN_AGE:1800' 'TIMELINE_LIMIT_HOURLY:0' 'TIMELINE_LIMIT_DAILY:1' 'TIMELINE_LIMIT_WEEKLY:0' 'TIMELINE_LIMIT_MONTHLY:0' 'TIMELINE_LIMIT_QUARTERLY:0' 'TIMELINE_LIMIT_YEARLY:0' 'NUMBER_MIN_AGE:1800' 'NUMBER_LIMIT:8' 'NUMBER_LIMIT_IMPORTANT:8' 'TIMELINE_CREATE:yes' 'TIMELINE_CLEANUP:yes' 'NUMBER_CLEANUP:yes' 'EMPTY_PRE_POST_CLEANUP:yes' 'BACKGROUND_COMPARISON:yes'; do
+    key=${kv%%:*}; val=${kv#*:}
+    if sudo grep -qE "^#*${key}=" "$conf" 2>/dev/null; then
+      sudo sed -i -E "s|^#*${key}=.*|${key}=\"${val}\"|" "$conf"
+    else
+      echo "${key}=\"${val}\"" | sudo tee -a "$conf" >/dev/null
+    fi
+  done
+  SNAPPER_BTRFS_PROFILE_DONE=true
+  log_success "Btrfs-Assistant profile applied: Daily 1, Boot 1, Hourly/Weekly/Monthly/Quarterly/Yearly 0, Number 8 (from 50) - single source"
+}
+
+snapper_ensure_aux_packages() {
+  # Universal when snapper present (not limine-only) - extra repo, headless skips GUI
+  if ! pacman -Q snapper &>/dev/null; then
+    return 0
+  fi
+  if ! is_btrfs_system 2>/dev/null; then
+    return 0
+  fi
+  local pkgs=()
+  pacman -Q snap-pac &>/dev/null || pkgs+=(snap-pac)
+  if ! is_headless_system 2>/dev/null; then
+    pacman -Q btrfs-assistant &>/dev/null || pkgs+=(btrfs-assistant)
+  fi
+  if [[ ${#pkgs[@]} -gt 0 ]]; then
+    log_info "Snapper detected — ensuring aux for all bootloaders: ${pkgs[*]}"
+    install_packages_quietly "${pkgs[@]}" 2>>"$INSTALL_LOG" || log_warning "Failed snapper aux: ${pkgs[*]}"
+  fi
+}
+
+# ============================================================================
 # SECTION 4: TERMINAL OUTPUT & UI FUNCTIONS
 # ============================================================================
 

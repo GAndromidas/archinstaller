@@ -169,67 +169,8 @@ setup_snapper_integration() {
 # NUMBER_LIMIT — no manual maintenance. btrfs-assistant (when installed)
 # picks these up automatically for browsing/rollback.
 configure_snapper_schedule() {
-  # ArchWiki: snapper needs 700 /boot handled via sudo, and archinstall's
-  # @.snapshots subvolume (pre-3.0.5) makes create-config fail - apply workaround.
-  if [[ ! -f /etc/snapper/configs/root ]]; then
-    log_info "No snapper config for / — creating one..."
-    if ! sudo snapper -c root create-config / >>"$INSTALL_LOG" 2>&1; then
-      log_warning "Initial create-config failed, trying ArchWiki @.snapshots workaround..."
-      # ArchWiki: unmount, delete mountpoint, create-config, delete subvolume, mkdir, mount
-      if mountpoint -q /.snapshots 2>/dev/null; then
-        sudo umount /.snapshots 2>/dev/null || true
-      fi
-      sudo rm -rf /.snapshots 2>/dev/null || true
-      if sudo snapper -c root create-config / >>"$INSTALL_LOG" 2>&1; then
-        log_success "Snapper config created after workaround"
-        sudo btrfs subvolume delete /.snapshots 2>/dev/null || true
-        sudo mkdir -p /.snapshots 2>/dev/null || true
-        # Re-mount @snapshots if exists (archinstall layout)
-        local root_dev=$(findmnt -n -o SOURCE / 2>/dev/null | cut -d'[' -f1)
-        if sudo btrfs subvolume list / 2>/dev/null | grep -q "path @snapshots"; then
-          sudo mount -o subvol=@snapshots "$root_dev" /.snapshots 2>/dev/null || sudo mount -a 2>/dev/null || true
-        else
-          sudo mount -a 2>/dev/null || true
-        fi
-      else
-        log_warning "Could not create snapper config for / — skipping snapshot schedule."
-        return 0
-      fi
-    fi
-  fi
-
-  # Helper to set snapper config robustly (ArchWiki: edit /etc/snapper/configs/root)
-  # Handles missing key, commented #KEY, or different quoting
-  _snapper_set() {
-    local key="$1" val="$2" conf="/etc/snapper/configs/root"
-    if sudo grep -qE "^#*${key}=" "$conf" 2>/dev/null; then
-      sudo sed -i -E "s|^#*${key}=.*|${key}=\"${val}\"|" "$conf"
-    else
-      echo "${key}=\"${val}\"" | sudo tee -a "$conf" >/dev/null
-    fi
-  }
-
-  # btrfs-assistant profile: Daily 1, Boot 1, keep 8, others 0 (ArchWiki snapper-configs(5))
-  # Must include QUARTERLY (missed before) - otherwise btrfs-assistant shows stale value
-  if [[ -f /etc/snapper/configs/root ]]; then
-    _snapper_set TIMELINE_MIN_AGE "1800"
-    _snapper_set TIMELINE_LIMIT_HOURLY "0"
-    _snapper_set TIMELINE_LIMIT_DAILY "1"
-    _snapper_set TIMELINE_LIMIT_WEEKLY "0"
-    _snapper_set TIMELINE_LIMIT_MONTHLY "0"
-    _snapper_set TIMELINE_LIMIT_QUARTERLY "0"
-    _snapper_set TIMELINE_LIMIT_YEARLY "0"
-    _snapper_set NUMBER_MIN_AGE "1800"
-    _snapper_set NUMBER_LIMIT "8"
-    _snapper_set NUMBER_LIMIT_IMPORTANT "8"
-    _snapper_set TIMELINE_CREATE "yes"
-    _snapper_set TIMELINE_CLEANUP "yes"
-    _snapper_set NUMBER_CLEANUP "yes"
-    _snapper_set EMPTY_PRE_POST_CLEANUP "yes"
-    # ArchWiki also recommends these for btrfs-assistant correctness
-    _snapper_set BACKGROUND_COMPARISON "yes"
-    log_success "Snapper limits configured (Daily 1, Boot 1, keep 8, others 0) for btrfs-assistant (incl. QUARTERLY 0)."
-  fi
+  # Single source in common.sh - no duplication, fast guard, optimized for re-runs
+  snapper_apply_btrfs_assistant_profile
 
   # ArchWiki way: use snapper's own timers (not custom number timers)
   # timeline (hourly creates, daily cleanup) + cleanup + boot

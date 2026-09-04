@@ -1060,8 +1060,8 @@ configure_limine_theme() {
     log_warning "Limine theme: no config path, skipping"
     return 0
   fi
-  # Idempotent - if already themed with correct image-matched palette, skip
-  if sudo grep -q "term_palette: 05142a;" "$conf" 2>/dev/null && sudo grep -qE "^\s*interface_branding:\s*Arch Linux" "$conf" 2>/dev/null; then
+  # Idempotent - if already themed with correct 10% opaque palette, skip
+  if sudo grep -q "term_palette: 05142a;" "$conf" 2>/dev/null && sudo grep -q "term_background: 1A" "$conf" 2>/dev/null && sudo grep -qE "^\s*interface_branding:\s*Arch Linux" "$conf" 2>/dev/null; then
     log_info "Limine theme already present in $conf"
     return 0
   fi
@@ -1116,9 +1116,9 @@ editor_highlighting: yes
 ${wallpaper_line}wallpaper_style: stretched
 term_palette: 05142a;f38ba8;a6e3a1;f9e2af;3e93af;f5c2e7;94e2d5;cdd6f4
 term_palette_bright: 45475a;f38ba8;a6e3a1;f9e2af;3e93af;f5c2e7;94e2d5;ffffff
-term_background: 00000000
+term_background: 1A05142a
 term_foreground: cdd6f4
-term_background_bright: 00000000
+term_background_bright: 1A05142a
 term_foreground_bright: cdd6f4
 term_margin: 64
 term_margin_gradient: 4

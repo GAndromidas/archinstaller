@@ -871,26 +871,15 @@ ${key} ${value}"
         }
     fi
 
-    # Write to file atomically
-    local temp_file="${loader_config}.tmp.$$"
-    if ! echo "$new_content" > "$temp_file" 2>/dev/null; then
-        log_error "Failed to write to temporary file $temp_file"
-        rm -f "$temp_file"
+    # Robust atomic write: uses /tmp for privileged /boot (700) so bare > never fails,
+    # then sudo mv — never chmods /boot, so no revert needed and boot never breaks
+    if is_boot_privileged 2>/dev/null; then
+        log_info "Writing $loader_config via privileged atomic write (preserving 700)"
+    fi
+    if ! privileged_write "$new_content" "$loader_config"; then
+        log_error "Failed to write $loader_config for key '$key'"
         return 1
     fi
-
-    if [ ! -s "$temp_file" ]; then
-        log_error "Temporary file $temp_file is empty"
-        rm -f "$temp_file"
-        return 1
-    fi
-
-    if ! sudo mv "$temp_file" "$loader_config"; then
-        log_error "Failed to move $temp_file to $loader_config"
-        rm -f "$temp_file"
-        return 1
-    fi
-
     log_success "Successfully wrote configuration to $loader_config for key '$key'"
     return 0
 }

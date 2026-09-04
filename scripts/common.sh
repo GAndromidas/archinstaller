@@ -172,22 +172,41 @@ atomic_write() {
     local temp_file="${target_file}.tmp.$$"
     local backup_dir="/var/tmp/archinstaller_backups"
     
-    # Validate target directory exists
+    # Validate target directory exists (sudo: /boot is 700)
     local target_dir=$(dirname "$target_file")
-    if [ ! -d "$target_dir" ]; then
+    if ! sudo test -d "$target_dir" 2>/dev/null && [ ! -d "$target_dir" ]; then
         log_error "Target directory $target_dir does not exist"
         return 1
     fi
     
-    # Create backup if target exists
-    if [ -f "$target_file" ]; then
+    # Create backup if target exists (sudo: /boot is 700)
+    if sudo test -f "$target_file" 2>/dev/null || [ -f "$target_file" ]; then
         validate_config_file "$target_file" "$backup_dir"
     fi
     
-    # Write to temporary file first
-    if ! echo "$content" > "$temp_file"; then
-        log_error "Failed to write to temporary file $temp_file"
-        return 1
+    # Write to temporary file first - use /tmp for privileged targets (/boot is 700)
+    # so bare > doesn't fail when archinstall locks /boot to root-only
+    local privileged_target=false
+    if [[ "$target_file" == /boot/* ]] || [[ "$target_file" == /efi/* ]] || sudo test -d "$(dirname "$target_file")" 2>/dev/null && ! test -w "$(dirname "$target_file")" 2>/dev/null; then
+        # Check if target dir is actually root-only
+        if sudo test -d "$target_dir" 2>/dev/null && ! [ -w "$target_dir" ] 2>/dev/null; then
+            privileged_target=true
+        fi
+    fi
+
+    if [[ "$privileged_target" == true ]]; then
+        temp_file=$(mktemp /tmp/archinstaller.XXXXXX 2>/dev/null || echo "/tmp/archinstaller.$$.tmp")
+        if ! echo "$content" > "$temp_file" 2>/dev/null; then
+            log_error "Failed to write to temporary file $temp_file"
+            rm -f "$temp_file"
+            return 1
+        fi
+    else
+        temp_file="${target_file}.tmp.$$"
+        if ! echo "$content" > "$temp_file"; then
+            log_error "Failed to write to temporary file $temp_file"
+            return 1
+        fi
     fi
     
     # Validate temporary file
@@ -197,15 +216,72 @@ atomic_write() {
         return 1
     fi
     
-    # Atomic move to target
-    if ! sudo mv "$temp_file" "$target_file"; then
-        log_error "Failed to move $temp_file to $target_file"
-        rm -f "$temp_file"
-        return 1
+    # Atomic move to target (always via sudo for consistency, preserves 700)
+    if ! sudo mv "$temp_file" "$target_file" 2>/dev/null; then
+        # Fallback for non-privileged targets without sudo
+        if ! mv "$temp_file" "$target_file" 2>/dev/null; then
+            log_error "Failed to move $temp_file to $target_file"
+            rm -f "$temp_file"
+            return 1
+        fi
     fi
     
     log_success "Successfully wrote configuration to $target_file"
     return 0
+}
+
+# ============================================================================
+# SECTION 3b: PRIVILEGED /BOOT HANDLING (archinstall 700)
+# ============================================================================
+# archinstall sets /boot to 700 (root-only) for UKI protection. Bare
+# [ -f /boot/... ] and > /boot/... fail for the user, but sudo succeeds.
+# This helper provides a delicate, robust way: never chmod 755, just use
+# sudo for all /boot I/O and do atomic writes via /tmp so we never
+# need to revert permissions and never break boot on failure.
+
+is_boot_privileged() {
+    # True if /boot is locked to root-only (700 or fmask=0077)
+    local perms
+    perms=$(stat -c %a /boot 2>/dev/null || echo 755)
+    if [[ "$perms" == "700" ]]; then
+        return 0
+    fi
+    if findmnt -n -o OPTIONS /boot 2>/dev/null | grep -q "fmask=0077"; then
+        return 0
+    fi
+    return 1
+}
+
+privileged_read() {
+    # Robust read: tries sudo cat first (700), falls back to bare cat
+    local file="$1"
+    if sudo test -r "$file" 2>/dev/null; then
+        sudo cat "$file" 2>/dev/null
+        return $?
+    fi
+    cat "$file" 2>/dev/null
+}
+
+privileged_write() {
+    # Robust atomic write for privileged paths (never chmods /boot)
+    # Usage: privileged_write "$content" /boot/loader/loader.conf
+    local content="$1"
+    local target="$2"
+    atomic_write "$content" "$target"
+}
+
+# Wrapper to run a function with verified /boot access, no perms change
+# Fails gracefully (logs, returns 1) instead of breaking boot
+with_privileged_boot() {
+    # Verify sudo can actually access /boot before attempting
+    if is_boot_privileged; then
+        if ! sudo test -d /boot 2>/dev/null; then
+            log_warning "/boot is privileged (700) but sudo cannot access it — skipping $* (run with passwordless sudo or as root)"
+            return 1
+        fi
+        log_info "/boot is root-only (700) — using sudo for privileged access (no chmod, no revert needed)"
+    fi
+    "$@"
 }
 
 # ============================================================================

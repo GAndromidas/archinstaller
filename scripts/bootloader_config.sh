@@ -364,7 +364,7 @@ configure_boot() {
   fi
 }
 
-# Update kernel options in systemd-boot entries
+# Update kernel options in systemd-boot entries - smart for archinstall dated entries
 update_systemd_boot_options() {
   local new_params="$1"
   local entries_dir
@@ -374,14 +374,35 @@ update_systemd_boot_options() {
     return 0
   fi
 
+  # Smart find: archinstall creates dated entries like 2026-09-04_10-49-12_linux.conf
+  # Regular entries are simple like linux.conf, linux-lts.conf
+  # Use sudo find for 700 /boot, handle both patterns
+  local entries=()
+  while IFS= read -r -d '' entry; do
+    entries+=("$entry")
+  done < <(sudo find "$entries_dir" -maxdepth 1 -name "*.conf" ! -name "*fallback*" -print0 2>/dev/null)
+
+  if [[ ${#entries[@]} -eq 0 ]]; then
+    log_warning "No systemd-boot entries found in $entries_dir"
+    return 0
+  fi
+
+  log_info "Found ${#entries[@]} systemd-boot entries in $entries_dir"
+  for entry in "${entries[@]}"; do
+    log_info "  - $(basename "$entry")"
+  done
+
   local updated=0
   local entry
-  # sudo find: user-side globs return nothing when archinstall locks /boot to
-  # root-only, which previously made this loop silently skip every entry.
-  while IFS= read -r -d '' entry; do
+  for entry in "${entries[@]}"; do
+    local entry_name=$(basename "$entry")
+    # Smart detection: dated archinstall entry (2026-09-04_10-49-12_linux.conf) vs simple (linux.conf)
+    if [[ "$entry_name" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}_(.*)\.conf$ ]]; then
+      log_info "Dated archinstall entry detected: $entry_name -> will patch options in-place (e.g. add amd_pstate=active)"
+    fi
     # Merge with the existing options line: preserves archinstall-written
-    # root= (UUID OR PARTUUID), cryptdevice, resume, etc.; only managed keys
-    # are replaced.
+    # root= (PARTUUID c9862f4f-c053-4124-a6a3-55be71016782), zswap.enabled=0, rw, rootfstype etc.
+    # Only managed keys (quiet, amd_pstate, etc.) are replaced - example file keeps PARTUUID
     local existing=""
     if sudo grep -q "^options " "$entry" 2>/dev/null; then
       existing=$(sudo grep "^options " "$entry" 2>/dev/null | sed 's/^options //')
@@ -397,16 +418,18 @@ update_systemd_boot_options() {
     fi
     log_to_file "Entry $(basename "$entry") options: $new_options"
 
-    # Update or add options line
+    # Update or add options line - handles files with header comments (# Created by archinstall)
     if sudo grep -q "^options " "$entry" 2>/dev/null; then
       sudo sed -i "s|^options .*|options $new_options|" "$entry"
+      log_info "Patched $entry_name options (added managed params like amd_pstate=active if needed)"
     else
       echo "options $new_options" | sudo tee -a "$entry" >/dev/null
+      log_info "Added options to $entry_name"
     fi
     ((updated++))
-  done < <(sudo find "$entries_dir" -maxdepth 1 -name "*.conf" ! -name "*fallback*" -print0 2>/dev/null)
+  done
 
-  [[ $updated -gt 0 ]] && log_success "Updated kernel options in $updated systemd-boot entries"
+  [[ $updated -gt 0 ]] && log_success "Updated kernel options in $updated systemd-boot entries (dated + simple handled)"
 }
 
 # Check kernel options consistency and only sync if necessary

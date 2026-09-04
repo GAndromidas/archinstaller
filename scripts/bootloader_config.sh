@@ -1060,8 +1060,8 @@ configure_limine_theme() {
     log_warning "Limine theme: no config path, skipping"
     return 0
   fi
-  # Idempotent - if already themed (term_palette + interface_branding), skip
-  if sudo grep -qE "^\s*term_palette:" "$conf" 2>/dev/null && sudo grep -qE "^\s*interface_branding:" "$conf" 2>/dev/null; then
+  # Idempotent - if already themed with correct branding, skip (migrates Archinstaller -> Arch Linux)
+  if sudo grep -qE "^\s*term_palette:" "$conf" 2>/dev/null && sudo grep -qE "^\s*interface_branding:\s*Arch Linux" "$conf" 2>/dev/null; then
     log_info "Limine theme already present in $conf"
     return 0
   fi
@@ -1070,7 +1070,7 @@ configure_limine_theme() {
 # Better looking, clean dark, Arch blue accent
 timeout: 3
 graphics: yes
-interface_branding: Archinstaller
+interface_branding: Arch Linux
 interface_branding_colour: 89b4fa
 interface_help_colour: 6c7086
 wallpaper_style: stretched

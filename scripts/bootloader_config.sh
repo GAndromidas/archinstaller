@@ -1065,7 +1065,7 @@ configure_limine_theme() {
     log_info "Limine theme already present in $conf"
     return 0
   fi
-  # Handle background.png from archinstaller wherever it is cloned (Dropbox, $HOME/archinstaller, /tmp)
+  # Handle background.png from archinstaller wherever it is cloned ($HOME/archinstaller)
   # Robust: $SCRIPT_DIR is /path/to/archinstaller/scripts, so ../configs is /path/to/archinstaller/configs
   local wallpaper_line=""
   local bg_src=""

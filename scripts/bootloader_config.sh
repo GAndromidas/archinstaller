@@ -1065,9 +1065,20 @@ configure_limine_theme() {
     log_info "Limine theme already present in $conf"
     return 0
   fi
-  # Handle background.png from configs -> ESP (FAT) for Limine wallpaper (best practice: boot():/background.png on ESP)
+  # Handle background.png from archinstaller wherever it is cloned (Dropbox, $HOME/archinstaller, /tmp)
+  # Robust: $SCRIPT_DIR is /path/to/archinstaller/scripts, so ../configs is /path/to/archinstaller/configs
   local wallpaper_line=""
-  local bg_src="$SCRIPT_DIR/../configs/background.png"
+  local bg_src=""
+  for cand_src in "$SCRIPT_DIR/../configs/background.png" "$SCRIPT_DIR/configs/background.png" "./configs/background.png" "$HOME/archinstaller/configs/background.png" "$PWD/configs/background.png"; do
+    if [[ -f "$cand_src" ]]; then
+      bg_src="$cand_src"
+      break
+    fi
+  done
+  # Fallback: also check CONFIGS_DIR if defined
+  if [[ -z "$bg_src" && -n "${CONFIGS_DIR:-}" && -f "$CONFIGS_DIR/background.png" ]]; then
+    bg_src="$CONFIGS_DIR/background.png"
+  fi
   if [[ -f "$bg_src" ]]; then
     local esp_for_bg
     esp_for_bg=$(findmnt -n -o TARGET -t vfat 2>/dev/null | head -1 || findmnt -n -o TARGET /boot 2>/dev/null || echo "/boot")

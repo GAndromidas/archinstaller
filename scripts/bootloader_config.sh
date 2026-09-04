@@ -1060,64 +1060,34 @@ configure_limine_theme() {
     log_warning "Limine theme: no config path, skipping"
     return 0
   fi
-  # Idempotent - if already themed with correct 10% opaque palette, skip
-  if sudo grep -q "term_palette: 05142a;" "$conf" 2>/dev/null && sudo grep -q "term_background: 1A" "$conf" 2>/dev/null && sudo grep -qE "^\s*interface_branding:\s*Arch Linux" "$conf" 2>/dev/null; then
+  # Idempotent - if already themed with correct branding, skip (migrates Archinstaller -> Arch Linux)
+  if sudo grep -qE "^\s*term_palette:" "$conf" 2>/dev/null && sudo grep -qE "^\s*interface_branding:\s*Arch Linux" "$conf" 2>/dev/null; then
     log_info "Limine theme already present in $conf"
     return 0
   fi
-  # Handle background.png from archinstaller wherever it is cloned ($HOME/archinstaller)
-  # Robust: $SCRIPT_DIR is /path/to/archinstaller/scripts, so ../configs is /path/to/archinstaller/configs
-  local wallpaper_line=""
-  local bg_src=""
-  for cand_src in "$SCRIPT_DIR/../configs/background.png" "$SCRIPT_DIR/configs/background.png" "./configs/background.png" "$HOME/archinstaller/configs/background.png" "$PWD/configs/background.png"; do
-    if [[ -f "$cand_src" ]]; then
-      bg_src="$cand_src"
-      break
-    fi
-  done
-  # Fallback: also check CONFIGS_DIR if defined
-  if [[ -z "$bg_src" && -n "${CONFIGS_DIR:-}" && -f "$CONFIGS_DIR/background.png" ]]; then
-    bg_src="$CONFIGS_DIR/background.png"
-  fi
-  if [[ -f "$bg_src" ]]; then
-    local esp_for_bg
-    esp_for_bg=$(findmnt -n -o TARGET -t vfat 2>/dev/null | head -1 || findmnt -n -o TARGET /boot 2>/dev/null || echo "/boot")
-    local bg_dst=""
-    for cand in "$esp_for_bg/background.png" "$esp_for_bg/limine/background.png" "/boot/background.png"; do
-      if sudo mkdir -p "$(dirname "$cand")" 2>/dev/null && sudo cp "$bg_src" "$cand" 2>/dev/null && sudo test -f "$cand" 2>/dev/null; then
-        bg_dst="boot():/background.png"
-        log_success "Copied Limine wallpaper to $cand (2752x1536, Catppuccin Mocha)"
-        # Also ensure limine dir copy for fallback boot():/limine/background.png
-        if [[ "$cand" == "$esp_for_bg/background.png" ]]; then
-          sudo mkdir -p "$esp_for_bg/limine" 2>/dev/null && sudo cp "$bg_src" "$esp_for_bg/limine/background.png" 2>/dev/null || true
-        fi
-        break
-      fi
-    done
-    if [[ -n "$bg_dst" ]]; then
-      wallpaper_line="wallpaper: $bg_dst
-backdrop: 05142a
-"
-    fi
-  fi
-  # Theme - minimal, less bloat, hides version/other text, only kernel + snapshots, transparent
-  local theme="timeout: 3
-default_entry: Arch Linux/linux
-interface_branding: Arch Linux
-interface_branding_colour: 3e93af
-hash_mismatch_panic: no
+  # Theme header - no wallpaper image required (avoids missing boot():/limine-splash.png)
+  local theme="# Archinstaller Limine theme - Catppuccin Mocha
+# Better looking, clean dark, Arch blue accent
+timeout: 3
 graphics: yes
-${wallpaper_line}wallpaper_style: stretched
-term_background: 1A05142a
-backdrop: 05142a
-term_palette: 05142a;f38ba8;a6e3a1;f9e2af;3e93af;f5c2e7;94e2d5;cdd6f4
+interface_branding: Arch Linux
+interface_branding_colour: 89b4fa
+interface_help_colour: 6c7086
+wallpaper_style: stretched
+term_palette: 1e1e2e;f38ba8;a6e3a1;f9e2af;89b4fa;f5c2e7;94e2d5;cdd6f4
+term_palette_bright: 585b70;f38ba8;a6e3a1;f9e2af;89b4fa;f5c2e7;94e2d5;cdd6f4
+term_background: 1e1e2e
 term_foreground: cdd6f4
+term_background_bright: 1e1e2e
+term_foreground_bright: cdd6f4
+term_margin: 64
+term_margin_gradient: 4
 "
   local existing=""
   if sudo test -f "$conf" 2>/dev/null; then
     existing=$(sudo cat "$conf" 2>/dev/null || echo "")
-    # Remove existing global theme keys + timeout + bloat comments to keep only kernel/snapshots, hide version/other text
-    existing=$(echo "$existing" | grep -vE "^\s*###" | grep -vE "^\s*#*\s*(timeout:|default_entry|hash_mismatch_panic|quiet|graphics:|interface_branding|interface_help|wallpaper|backdrop|term_palette|term_background|term_foreground|term_margin|editor_)" || true)
+    # Remove existing global theme keys + timeout to avoid duplicates, keep entries
+    existing=$(echo "$existing" | grep -vE "^\s*(timeout:|graphics:|interface_branding|interface_help|wallpaper|term_palette|term_background|term_foreground|term_margin)" || true)
     # Trim leading blank lines
     existing=$(echo "$existing" | sed '/./,$!d' || true)
   fi

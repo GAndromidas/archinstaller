@@ -1060,8 +1060,8 @@ configure_limine_theme() {
     log_warning "Limine theme: no config path, skipping"
     return 0
   fi
-  # Idempotent - if already themed with correct branding, skip (migrates Archinstaller -> Arch Linux)
-  if sudo grep -qE "^\s*term_palette:" "$conf" 2>/dev/null && sudo grep -qE "^\s*interface_branding:\s*Arch Linux" "$conf" 2>/dev/null; then
+  # Idempotent - if already themed with correct image-matched palette, skip
+  if sudo grep -q "term_palette: 05142a;" "$conf" 2>/dev/null && sudo grep -qE "^\s*interface_branding:\s*Arch Linux" "$conf" 2>/dev/null; then
     log_info "Limine theme already present in $conf"
     return 0
   fi
@@ -1096,7 +1096,7 @@ configure_limine_theme() {
     done
     if [[ -n "$bg_dst" ]]; then
       wallpaper_line="wallpaper: $bg_dst
-backdrop: 1e1e2e
+backdrop: 05142a
 "
     fi
   fi
@@ -1109,13 +1109,13 @@ hash_mismatch_panic: no
 graphics: yes
 quiet: no
 interface_branding: Arch Linux
-interface_branding_colour: 89b4fa
+interface_branding_colour: 3e93af
 interface_help_colour: 6c7086
 editor_enabled: yes
 editor_highlighting: yes
 ${wallpaper_line}wallpaper_style: stretched
-term_palette: 1e1e2e;f38ba8;a6e3a1;f9e2af;89b4fa;f5c2e7;94e2d5;cdd6f4
-term_palette_bright: 585b70;f38ba8;a6e3a1;f9e2af;89b4fa;f5c2e7;94e2d5;cdd6f4
+term_palette: 05142a;f38ba8;a6e3a1;f9e2af;3e93af;f5c2e7;94e2d5;cdd6f4
+term_palette_bright: 45475a;f38ba8;a6e3a1;f9e2af;3e93af;f5c2e7;94e2d5;ffffff
 term_background: 00000000
 term_foreground: cdd6f4
 term_background_bright: 00000000

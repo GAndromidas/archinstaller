@@ -1066,27 +1066,26 @@ configure_limine_theme() {
     return 0
   fi
   # Theme - colors matched to background.png dominant 05142a + accent 3e93af (not Catppuccin)
-  local theme="# Arch Linux Limine theme - matched to background.png
+  local theme="# Arch Linux Limine theme - minimal, hide version/help, only kernel+snapshots
 timeout: 3
-graphics: yes
+default_entry: Arch Linux/linux
 interface_branding: Arch Linux
 interface_branding_colour: 3e93af
-interface_help_colour: 6c7086
+hash_mismatch_panic: no
+graphics: yes
+quiet: yes
+interface_help_hidden: yes
+editor_enabled: no
 wallpaper_style: stretched
 term_palette: 05142a;f38ba8;a6e3a1;f9e2af;3e93af;f5c2e7;94e2d5;cdd6f4
-term_palette_bright: 45475a;f38ba8;a6e3a1;f9e2af;3e93af;f5c2e7;94e2d5;ffffff
-term_background: 05142a
 term_foreground: cdd6f4
-term_background_bright: 05142a
-term_foreground_bright: cdd6f4
-term_margin: 64
-term_margin_gradient: 4
+term_background: 05142a
 "
   local existing=""
   if sudo test -f "$conf" 2>/dev/null; then
     existing=$(sudo cat "$conf" 2>/dev/null || echo "")
-    # Remove existing global theme keys + timeout to avoid duplicates, keep entries
-    existing=$(echo "$existing" | grep -vE "^\s*(timeout:|graphics:|interface_branding|interface_help|wallpaper|term_palette|term_background|term_foreground|term_margin)" || true)
+    # Remove existing global theme keys + timeout + bloat, keep only kernel/snapshots entries
+    existing=$(echo "$existing" | grep -vE "^\s*(timeout:|default_entry|hash_mismatch_panic|quiet|graphics:|interface_branding|interface_help|wallpaper|term_palette|term_background|term_foreground|term_margin|editor_)" || true)
     # Trim leading blank lines
     existing=$(echo "$existing" | sed '/./,$!d' || true)
   fi

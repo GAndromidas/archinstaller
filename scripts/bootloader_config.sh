@@ -1089,14 +1089,19 @@ backdrop: 1e1e2e
 "
     fi
   fi
-  # Theme header - wallpaper optional (handled above, falls back to solid term_background if no image)
-  local theme="# Archinstaller Limine theme - Catppuccin Mocha
-# Better looking, clean dark, Arch blue accent
+  # Theme header - polished, wallpaper optional (falls back to solid term_background if no image)
+  local theme="# Arch Linux Limine theme
+# Clean dark, blue accent, Arch branding
 timeout: 3
+default_entry: 1
+hash_mismatch_panic: no
 graphics: yes
+quiet: no
 interface_branding: Arch Linux
 interface_branding_colour: 89b4fa
 interface_help_colour: 6c7086
+editor_enabled: yes
+editor_highlighting: yes
 ${wallpaper_line}wallpaper_style: stretched
 term_palette: 1e1e2e;f38ba8;a6e3a1;f9e2af;89b4fa;f5c2e7;94e2d5;cdd6f4
 term_palette_bright: 585b70;f38ba8;a6e3a1;f9e2af;89b4fa;f5c2e7;94e2d5;cdd6f4
@@ -1111,7 +1116,7 @@ term_margin_gradient: 4
   if sudo test -f "$conf" 2>/dev/null; then
     existing=$(sudo cat "$conf" 2>/dev/null || echo "")
     # Remove existing global theme keys + timeout to avoid duplicates, keep entries
-    existing=$(echo "$existing" | grep -vE "^\s*(timeout:|graphics:|interface_branding|interface_help|wallpaper|backdrop|term_palette|term_background|term_foreground|term_margin)" || true)
+    existing=$(echo "$existing" | grep -vE "^\s*#*\s*(timeout:|default_entry|hash_mismatch_panic|quiet|graphics:|interface_branding|interface_help|wallpaper|backdrop|term_palette|term_background|term_foreground|term_margin|editor_)" || true)
     # Trim leading blank lines
     existing=$(echo "$existing" | sed '/./,$!d' || true)
   fi

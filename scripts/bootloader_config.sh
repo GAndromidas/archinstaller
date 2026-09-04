@@ -918,7 +918,7 @@ detect_esp_mount() {
   if [[ -z "$esp" ]]; then
     local p
     for p in /boot /boot/efi /efi /limine; do
-      if [[ -d "$p" ]] && findmnt -n -o FSTYPE "$p" 2>/dev/null | grep -q vfat; then
+      if sudo test -d "$p" 2>/dev/null && findmnt -n -o FSTYPE "$p" 2>/dev/null | grep -q vfat; then
         esp="$p"
         break
       fi
@@ -998,15 +998,30 @@ patch_limine_cmdlines() {
 }
 
 # Shared Btrfs-Assistant profile for ALL bootloaders (systemd-boot, GRUB, Limine)
-# User-requested: Daily 1, Boot 1 (enabled), Hourly/Weekly/Monthly/Yearly 0, Number 8 (from 50)
+# ArchWiki snapper-configs(5): Daily 1, Boot 1 (via snapper-boot.timer), others 0, Number 8 (from 50)
+# Includes QUARTERLY (missed before, caused btrfs-assistant to show stale) and idempotent handling
 apply_btrfs_assistant_profile() {
   local conf="/etc/snapper/configs/root"
   if [[ ! -f "$conf" ]]; then
     if is_btrfs_system 2>/dev/null; then
       log_info "No snapper config for / — creating one for btrfs-assistant profile..."
       if ! sudo snapper -c root create-config / >>"$INSTALL_LOG" 2>&1; then
-        log_warning "Could not create snapper config for / — skipping btrfs-assistant limits."
-        return 0
+        log_warning "Initial create-config failed, trying @.snapshots workaround..."
+        if mountpoint -q /.snapshots 2>/dev/null; then sudo umount /.snapshots 2>/dev/null || true; fi
+        sudo rm -rf /.snapshots 2>/dev/null || true
+        if sudo snapper -c root create-config / >>"$INSTALL_LOG" 2>&1; then
+          sudo btrfs subvolume delete /.snapshots 2>/dev/null || true
+          sudo mkdir -p /.snapshots 2>/dev/null || true
+          local root_dev=$(findmnt -n -o SOURCE / 2>/dev/null | cut -d'[' -f1)
+          if sudo btrfs subvolume list / 2>/dev/null | grep -q "path @snapshots"; then
+            sudo mount -o subvol=@snapshots "$root_dev" /.snapshots 2>/dev/null || sudo mount -a 2>/dev/null || true
+          else
+            sudo mount -a 2>/dev/null || true
+          fi
+        else
+          log_warning "Could not create snapper config — skipping btrfs-assistant limits."
+          return 0
+        fi
       fi
     else
       log_info "Not btrfs — skipping btrfs-assistant profile."
@@ -1014,20 +1029,30 @@ apply_btrfs_assistant_profile() {
     fi
   fi
   if [[ -f "$conf" ]]; then
-    sudo sed -i 's/^TIMELINE_MIN_AGE=.*/TIMELINE_MIN_AGE="1800"/' "$conf"
-    sudo sed -i 's/^TIMELINE_LIMIT_HOURLY=.*/TIMELINE_LIMIT_HOURLY="0"/' "$conf"
-    sudo sed -i 's/^TIMELINE_LIMIT_DAILY=.*/TIMELINE_LIMIT_DAILY="1"/' "$conf"
-    sudo sed -i 's/^TIMELINE_LIMIT_WEEKLY=.*/TIMELINE_LIMIT_WEEKLY="0"/' "$conf"
-    sudo sed -i 's/^TIMELINE_LIMIT_MONTHLY=.*/TIMELINE_LIMIT_MONTHLY="0"/' "$conf"
-    sudo sed -i 's/^TIMELINE_LIMIT_YEARLY=.*/TIMELINE_LIMIT_YEARLY="0"/' "$conf"
-    sudo sed -i 's/^NUMBER_LIMIT=.*/NUMBER_LIMIT="8"/' "$conf"
-    sudo sed -i 's/^NUMBER_LIMIT_IMPORTANT=.*/NUMBER_LIMIT_IMPORTANT="8"/' "$conf"
-    sudo sed -i 's/^NUMBER_MIN_AGE=.*/NUMBER_MIN_AGE="1800"/' "$conf"
-    sudo sed -i 's/^TIMELINE_CREATE=.*/TIMELINE_CREATE="yes"/' "$conf"
-    sudo sed -i 's/^TIMELINE_CLEANUP=.*/TIMELINE_CLEANUP="yes"/' "$conf"
-    sudo sed -i 's/^NUMBER_CLEANUP=.*/NUMBER_CLEANUP="yes"/' "$conf"
-    sudo sed -i 's/^EMPTY_PRE_POST_CLEANUP=.*/EMPTY_PRE_POST_CLEANUP="yes"/' "$conf"
-    log_success "Btrfs-Assistant profile applied: Daily 1, Boot 1, Hourly/Weekly/Monthly/Yearly 0, Number 8 (from 50)"
+    _snapper_set() {
+      local key="$1" val="$2"
+      if sudo grep -qE "^#*${key}=" "$conf" 2>/dev/null; then
+        sudo sed -i -E "s|^#*${key}=.*|${key}=\"${val}\"|" "$conf"
+      else
+        echo "${key}=\"${val}\"" | sudo tee -a "$conf" >/dev/null
+      fi
+    }
+    _snapper_set TIMELINE_MIN_AGE "1800"
+    _snapper_set TIMELINE_LIMIT_HOURLY "0"
+    _snapper_set TIMELINE_LIMIT_DAILY "1"
+    _snapper_set TIMELINE_LIMIT_WEEKLY "0"
+    _snapper_set TIMELINE_LIMIT_MONTHLY "0"
+    _snapper_set TIMELINE_LIMIT_QUARTERLY "0"
+    _snapper_set TIMELINE_LIMIT_YEARLY "0"
+    _snapper_set NUMBER_MIN_AGE "1800"
+    _snapper_set NUMBER_LIMIT "8"
+    _snapper_set NUMBER_LIMIT_IMPORTANT "8"
+    _snapper_set TIMELINE_CREATE "yes"
+    _snapper_set TIMELINE_CLEANUP "yes"
+    _snapper_set NUMBER_CLEANUP "yes"
+    _snapper_set EMPTY_PRE_POST_CLEANUP "yes"
+    _snapper_set BACKGROUND_COMPARISON "yes"
+    log_success "Btrfs-Assistant profile applied: Daily 1, Boot 1, Hourly/Weekly/Monthly/Yearly/Quarterly 0, Number 8 (from 50) - ArchWiki single+timeline"
   fi
 }
 

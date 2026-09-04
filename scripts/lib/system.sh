@@ -148,7 +148,7 @@ detect_bootloader() {
         bootloader="systemd-boot"
     # EFISTUB: kernels live directly on a FAT /boot with no bootloader
     # directory at all (official archinstall efistub layout).
-    elif { sudo test "$(findmnt -n -o FSTYPE /boot 2>/dev/null)" = "vfat" 2>/dev/null; } && \
+    elif [[ "$(sudo findmnt -n -o FSTYPE /boot 2>/dev/null || findmnt -n -o FSTYPE /boot 2>/dev/null)" == "vfat" ]] && \
          sudo ls /boot/vmlinuz-* >/dev/null 2>&1; then
         bootloader="efistub"
     # Tier 2: Installed-package detection (may have false positives for inactive bootloaders)

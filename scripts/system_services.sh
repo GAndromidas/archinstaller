@@ -148,37 +148,90 @@ setup_snapper_integration() {
 # NUMBER_LIMIT — no manual maintenance. btrfs-assistant (when installed)
 # picks these up automatically for browsing/rollback.
 configure_snapper_schedule() {
-  # snap-pac and the schedule below need a snapper config for /.
-  # (The Limine path in step 6 creates one; GRUB/systemd-boot paths don't.)
+  # ArchWiki: snapper needs 700 /boot handled via sudo, and archinstall's
+  # @.snapshots subvolume (pre-3.0.5) makes create-config fail - apply workaround.
   if [[ ! -f /etc/snapper/configs/root ]]; then
     log_info "No snapper config for / — creating one..."
     if ! sudo snapper -c root create-config / >>"$INSTALL_LOG" 2>&1; then
-      log_warning "Could not create snapper config for / — skipping snapshot schedule."
-      return 0
+      log_warning "Initial create-config failed, trying ArchWiki @.snapshots workaround..."
+      # ArchWiki: unmount, delete mountpoint, create-config, delete subvolume, mkdir, mount
+      if mountpoint -q /.snapshots 2>/dev/null; then
+        sudo umount /.snapshots 2>/dev/null || true
+      fi
+      sudo rm -rf /.snapshots 2>/dev/null || true
+      if sudo snapper -c root create-config / >>"$INSTALL_LOG" 2>&1; then
+        log_success "Snapper config created after workaround"
+        sudo btrfs subvolume delete /.snapshots 2>/dev/null || true
+        sudo mkdir -p /.snapshots 2>/dev/null || true
+        # Re-mount @snapshots if exists (archinstall layout)
+        local root_dev=$(findmnt -n -o SOURCE / 2>/dev/null | cut -d'[' -f1)
+        if sudo btrfs subvolume list / 2>/dev/null | grep -q "path @snapshots"; then
+          sudo mount -o subvol=@snapshots "$root_dev" /.snapshots 2>/dev/null || sudo mount -a 2>/dev/null || true
+        else
+          sudo mount -a 2>/dev/null || true
+        fi
+      else
+        log_warning "Could not create snapper config for / — skipping snapshot schedule."
+        return 0
+      fi
     fi
   fi
 
-  # btrfs-assistant profile: Daily 1, Boot 1, keep 8, others 0
+  # Helper to set snapper config robustly (ArchWiki: edit /etc/snapper/configs/root)
+  # Handles missing key, commented #KEY, or different quoting
+  _snapper_set() {
+    local key="$1" val="$2" conf="/etc/snapper/configs/root"
+    if sudo grep -qE "^#*${key}=" "$conf" 2>/dev/null; then
+      sudo sed -i -E "s|^#*${key}=.*|${key}=\"${val}\"|" "$conf"
+    else
+      echo "${key}=\"${val}\"" | sudo tee -a "$conf" >/dev/null
+    fi
+  }
+
+  # btrfs-assistant profile: Daily 1, Boot 1, keep 8, others 0 (ArchWiki snapper-configs(5))
+  # Must include QUARTERLY (missed before) - otherwise btrfs-assistant shows stale value
   if [[ -f /etc/snapper/configs/root ]]; then
-    sudo sed -i 's/^TIMELINE_MIN_AGE=.*/TIMELINE_MIN_AGE="1800"/' /etc/snapper/configs/root
-    sudo sed -i 's/^TIMELINE_LIMIT_HOURLY=.*/TIMELINE_LIMIT_HOURLY="0"/' /etc/snapper/configs/root
-    sudo sed -i 's/^TIMELINE_LIMIT_DAILY=.*/TIMELINE_LIMIT_DAILY="1"/' /etc/snapper/configs/root
-    sudo sed -i 's/^TIMELINE_LIMIT_WEEKLY=.*/TIMELINE_LIMIT_WEEKLY="0"/' /etc/snapper/configs/root
-    sudo sed -i 's/^TIMELINE_LIMIT_MONTHLY=.*/TIMELINE_LIMIT_MONTHLY="0"/' /etc/snapper/configs/root
-    sudo sed -i 's/^TIMELINE_LIMIT_YEARLY=.*/TIMELINE_LIMIT_YEARLY="0"/' /etc/snapper/configs/root
-    sudo sed -i 's/^NUMBER_LIMIT=.*/NUMBER_LIMIT="8"/' /etc/snapper/configs/root
-    sudo sed -i 's/^NUMBER_LIMIT_IMPORTANT=.*/NUMBER_LIMIT_IMPORTANT="8"/' /etc/snapper/configs/root
-    sudo sed -i 's/^NUMBER_MIN_AGE=.*/NUMBER_MIN_AGE="1800"/' /etc/snapper/configs/root
-    sudo sed -i 's/^TIMELINE_CREATE=.*/TIMELINE_CREATE="yes"/' /etc/snapper/configs/root
-    sudo sed -i 's/^TIMELINE_CLEANUP=.*/TIMELINE_CLEANUP="yes"/' /etc/snapper/configs/root
-    sudo sed -i 's/^NUMBER_CLEANUP=.*/NUMBER_CLEANUP="yes"/' /etc/snapper/configs/root
-    sudo sed -i 's/^EMPTY_PRE_POST_CLEANUP=.*/EMPTY_PRE_POST_CLEANUP="yes"/' /etc/snapper/configs/root
-    log_success "Snapper limits configured (Daily 1, Boot 1, keep 8, others 0) for btrfs-assistant."
+    _snapper_set TIMELINE_MIN_AGE "1800"
+    _snapper_set TIMELINE_LIMIT_HOURLY "0"
+    _snapper_set TIMELINE_LIMIT_DAILY "1"
+    _snapper_set TIMELINE_LIMIT_WEEKLY "0"
+    _snapper_set TIMELINE_LIMIT_MONTHLY "0"
+    _snapper_set TIMELINE_LIMIT_QUARTERLY "0"
+    _snapper_set TIMELINE_LIMIT_YEARLY "0"
+    _snapper_set NUMBER_MIN_AGE "1800"
+    _snapper_set NUMBER_LIMIT "8"
+    _snapper_set NUMBER_LIMIT_IMPORTANT "8"
+    _snapper_set TIMELINE_CREATE "yes"
+    _snapper_set TIMELINE_CLEANUP "yes"
+    _snapper_set NUMBER_CLEANUP "yes"
+    _snapper_set EMPTY_PRE_POST_CLEANUP "yes"
+    # ArchWiki also recommends these for btrfs-assistant correctness
+    _snapper_set BACKGROUND_COMPARISON "yes"
+    log_success "Snapper limits configured (Daily 1, Boot 1, keep 8, others 0) for btrfs-assistant (incl. QUARTERLY 0)."
   fi
 
-  # Boot snapshot: oneshot at the end of boot. --now also takes an
-  # "initial" snapshot right after installation.
-  sudo tee /etc/systemd/system/snapper-boot-snapshot.service >/dev/null <<'EOF'
+  # ArchWiki way: use snapper's own timers (not custom number timers)
+  # timeline (hourly creates, daily cleanup) + cleanup + boot
+  # Previously custom snapper-boot-snapshot.service with --cleanup-algorithm number
+  # made TIMELINE_LIMIT_DAILY irrelevant and NUMBER_LIMIT never enforced without cleanup timer
+  sudo systemctl daemon-reload 2>/dev/null || true
+  # Enable standard ArchWiki timers
+  if sudo systemctl enable --now snapper-timeline.timer >>"$INSTALL_LOG" 2>&1; then
+    log_success "Timeline snapshots enabled (snapper-timeline.timer hourly)"
+  else
+    log_warning "Failed to enable snapper-timeline.timer"
+  fi
+  if sudo systemctl enable --now snapper-cleanup.timer >>"$INSTALL_LOG" 2>&1; then
+    log_success "Cleanup enabled (snapper-cleanup.timer daily) - enforces NUMBER_LIMIT 8"
+  else
+    log_warning "Failed to enable snapper-cleanup.timer"
+  fi
+  if sudo systemctl enable --now snapper-boot.timer >>"$INSTALL_LOG" 2>&1; then
+    log_success "Boot snapshot enabled (snapper-boot.timer - ArchWiki single type, Number 8)"
+  else
+    log_warning "Failed to enable snapper-boot.timer, trying fallback custom service"
+    # Fallback: keep custom boot service for compatibility if stock timer missing
+    sudo tee /etc/systemd/system/snapper-boot-snapshot.service >/dev/null <<'EOF'
 [Unit]
 Description=Snapper snapshot at boot
 After=multi-user.target
@@ -190,39 +243,13 @@ ExecStart=/usr/bin/snapper -c root create --description boot --cleanup-algorithm
 [Install]
 WantedBy=multi-user.target
 EOF
-
-  # Daily snapshot: timer + oneshot, Persistent so powered-off days backfill.
-  sudo tee /etc/systemd/system/snapper-daily-snapshot.service >/dev/null <<'EOF'
-[Unit]
-Description=Snapper daily snapshot
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/snapper -c root create --description daily --cleanup-algorithm number
-EOF
-  sudo tee /etc/systemd/system/snapper-daily-snapshot.timer >/dev/null <<'EOF'
-[Unit]
-Description=Daily snapper snapshot
-
-[Timer]
-OnCalendar=daily
-Persistent=true
-RandomizedDelaySec=30m
-
-[Install]
-WantedBy=timers.target
-EOF
-
-  sudo systemctl daemon-reload 2>/dev/null || true
-  if sudo systemctl enable --now snapper-boot-snapshot.service >>"$INSTALL_LOG" 2>&1; then
-    log_success "Boot snapshot enabled (snapper-boot-snapshot.service)"
-  else
-    log_warning "Failed to enable snapper-boot-snapshot.service"
+    sudo systemctl daemon-reload 2>/dev/null || true
+    sudo systemctl enable --now snapper-boot-snapshot.service >>"$INSTALL_LOG" 2>&1 || log_warning "Fallback boot service failed"
   fi
-  if sudo systemctl enable --now snapper-daily-snapshot.timer >>"$INSTALL_LOG" 2>&1; then
-    log_success "Daily snapshot enabled (snapper-daily-snapshot.timer)"
-  else
-    log_warning "Failed to enable snapper-daily-snapshot.timer"
+  # Clean up old custom daily timer if it exists (migrating to timeline)
+  if [[ -f /etc/systemd/system/snapper-daily-snapshot.timer ]]; then
+    sudo systemctl disable --now snapper-daily-snapshot.timer 2>/dev/null || true
+    log_info "Migrated from custom snapper-daily-snapshot.timer to snapper-timeline.timer"
   fi
 }
 

@@ -187,10 +187,15 @@ atomic_write() {
     # Write to temporary file first - use /tmp for privileged targets (/boot is 700)
     # so bare > doesn't fail when archinstall locks /boot to root-only
     local privileged_target=false
-    if [[ "$target_file" == /boot/* ]] || [[ "$target_file" == /efi/* ]] || sudo test -d "$(dirname "$target_file")" 2>/dev/null && ! test -w "$(dirname "$target_file")" 2>/dev/null; then
+    if [[ "$target_file" == /boot/* ]] || [[ "$target_file" == /efi/* ]] || { sudo test -d "$(dirname "$target_file")" 2>/dev/null && ! test -w "$(dirname "$target_file")" 2>/dev/null; }; then
         # Check if target dir is actually root-only
-        if sudo test -d "$target_dir" 2>/dev/null && ! [ -w "$target_dir" ] 2>/dev/null; then
+        if sudo test -d "$target_dir" 2>/dev/null && ! sudo test -w "$target_dir" 2>/dev/null && ! [ -w "$target_dir" ] 2>/dev/null; then
             privileged_target=true
+        elif sudo test -d "$target_dir" 2>/dev/null && ! [ -w "$target_dir" ] 2>/dev/null; then
+            # Fallback for systems without sudo test -w distinction
+            if is_boot_privileged 2>/dev/null; then
+                privileged_target=true
+            fi
         fi
     fi
 
@@ -240,9 +245,9 @@ atomic_write() {
 # need to revert permissions and never break boot on failure.
 
 is_boot_privileged() {
-    # True if /boot is locked to root-only (700 or fmask=0077)
+    # True if /boot is locked to root-only (700 or fmask=0077) - sudo for 700
     local perms
-    perms=$(stat -c %a /boot 2>/dev/null || echo 755)
+    perms=$(sudo stat -c %a /boot 2>/dev/null || stat -c %a /boot 2>/dev/null || echo 755)
     if [[ "$perms" == "700" ]]; then
         return 0
     fi

@@ -896,18 +896,43 @@ configure_limine_overlayfs() {
 }
 
 # Install an AUR package using whatever helper is available.
+# Optional 2nd arg pre-answers one stdin prompt (e.g. an install scriptlet
+# asking Y/n) — without it, the prompt is invisible under dashboard_run
+# (output goes to the log) while stdin stays live, looking like a hang.
 # Returns 0 on success (or already installed), 1 otherwise. Never exits.
 limine_install_aur_pkg() {
   local pkg="$1"
+  local stdin_answer="${2:-}"
   if pacman -Qi "$pkg" &>/dev/null 2>&1; then
     log_info "$pkg already installed"
     return 0
   fi
   if command -v yay &>/dev/null; then
+    if [[ -n "$stdin_answer" ]]; then
+      local output
+      if output=$(printf '%s\n' "$stdin_answer" | yay -S --noconfirm --needed "$pkg" 2>&1); then
+        echo "$output" >>"$INSTALL_LOG" 2>&1
+        INSTALLED_PACKAGES+=("$pkg")
+        return 0
+      fi
+      echo "$output" >>"$INSTALL_LOG" 2>&1
+      FAILED_PACKAGES+=("$pkg")
+      log_warning "Failed to install $pkg via yay"
+      return 1
+    fi
     install_aur_quietly "$pkg" && return 0
     log_warning "Failed to install $pkg via yay"
     return 1
   elif command -v paru &>/dev/null; then
+    if [[ -n "$stdin_answer" ]]; then
+      if printf '%s\n' "$stdin_answer" | sudo -u "${SUDO_USER:-$USER}" paru -S --noconfirm --needed "$pkg" >>"$INSTALL_LOG" 2>&1; then
+        INSTALLED_PACKAGES+=("$pkg")
+        return 0
+      fi
+      FAILED_PACKAGES+=("$pkg")
+      log_warning "Failed to install $pkg via paru"
+      return 1
+    fi
     if sudo -u "${SUDO_USER:-$USER}" paru -S --noconfirm --needed "$pkg" >>"$INSTALL_LOG" 2>&1; then
       return 0
     fi
@@ -916,6 +941,31 @@ limine_install_aur_pkg() {
   fi
   log_warning "No AUR helper (yay/paru) — skipping $pkg. Run step 3 (yay) first."
   return 1
+}
+
+# Install limine-mkinitcpio-hook. Its install scriptlet asks
+# "Would you like to run 'limine-mkinitcpio' now? [Y/n]" on stdin — ask up
+# front with gum (Gaming Mode style) and pre-answer, or it hangs silently
+# under the dashboard. Yes builds now (slow); No defers to our end-of-step
+# rebuild, which covers it.
+install_limine_mkinitcpio_hook() {
+  if pacman -Qi limine-mkinitcpio-hook &>/dev/null 2>&1; then
+    log_info "limine-mkinitcpio-hook already installed"
+    return 0
+  fi
+  if ! command -v yay &>/dev/null && ! command -v paru &>/dev/null; then
+    log_warning "No AUR helper — skipping limine-mkinitcpio-hook (kernel entries won't auto-update; install it later)."
+    return 1
+  fi
+  local answer="y"
+  if ui_confirm "Run limine-mkinitcpio now during install?" "The hook package asks this on stdin, hidden under the dashboard. Yes builds initramfs now (slow); No defers to the rebuild at the end of this step."; then
+    answer="y"
+    log_info "Will run limine-mkinitcpio during hook install."
+  else
+    answer="n"
+    log_info "Skipping limine-mkinitcpio run during hook install (covered by step-end rebuild)."
+  fi
+  limine_install_aur_pkg "limine-mkinitcpio-hook" "$answer"
 }
 
 # --- Limine + Snapper Configuration ---
@@ -973,9 +1023,7 @@ configure_limine_snapper() {
       log_info "snap-pac already installed"
     fi
     if command -v mkinitcpio &>/dev/null; then
-      if ! pacman -Qi limine-mkinitcpio-hook &>/dev/null 2>&1; then
-        limine_install_aur_pkg "limine-mkinitcpio-hook" || true
-      fi
+      install_limine_mkinitcpio_hook || true
     fi
     # Overlayfs hook AFTER the hook package exists: makes read-only snapshots
     # bootable (GDM and other writers fail without a writable layer).

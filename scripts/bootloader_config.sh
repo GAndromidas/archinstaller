@@ -1145,13 +1145,22 @@ configure_limine_snapper() {
       log_warning "/.snapshots not mounted yet; will mount on next boot."
 
     if [[ -f "$snapper_conf" ]]; then
+      # btrfs-assistant view: Daily 1, Boot 1 (via number), keep 8, others 0
       sudo sed -i 's/^TIMELINE_MIN_AGE=.*/TIMELINE_MIN_AGE="1800"/' "$snapper_conf"
-      sudo sed -i 's/^TIMELINE_LIMIT_HOURLY=.*/TIMELINE_LIMIT_HOURLY="5"/' "$snapper_conf"
-      sudo sed -i 's/^TIMELINE_LIMIT_DAILY=.*/TIMELINE_LIMIT_DAILY="7"/' "$snapper_conf"
+      sudo sed -i 's/^TIMELINE_LIMIT_HOURLY=.*/TIMELINE_LIMIT_HOURLY="0"/' "$snapper_conf"
+      sudo sed -i 's/^TIMELINE_LIMIT_DAILY=.*/TIMELINE_LIMIT_DAILY="1"/' "$snapper_conf"
       sudo sed -i 's/^TIMELINE_LIMIT_WEEKLY=.*/TIMELINE_LIMIT_WEEKLY="0"/' "$snapper_conf"
       sudo sed -i 's/^TIMELINE_LIMIT_MONTHLY=.*/TIMELINE_LIMIT_MONTHLY="0"/' "$snapper_conf"
       sudo sed -i 's/^TIMELINE_LIMIT_YEARLY=.*/TIMELINE_LIMIT_YEARLY="0"/' "$snapper_conf"
-      log_success "Snapper timeline limits configured."
+      sudo sed -i 's/^NUMBER_LIMIT=.*/NUMBER_LIMIT="8"/' "$snapper_conf"
+      sudo sed -i 's/^NUMBER_LIMIT_IMPORTANT=.*/NUMBER_LIMIT_IMPORTANT="8"/' "$snapper_conf"
+      sudo sed -i 's/^NUMBER_MIN_AGE=.*/NUMBER_MIN_AGE="1800"/' "$snapper_conf"
+      # ensure cleanup/creation flags match the btrfs-assistant profile
+      sudo sed -i 's/^TIMELINE_CREATE=.*/TIMELINE_CREATE="yes"/' "$snapper_conf"
+      sudo sed -i 's/^TIMELINE_CLEANUP=.*/TIMELINE_CLEANUP="yes"/' "$snapper_conf"
+      sudo sed -i 's/^NUMBER_CLEANUP=.*/NUMBER_CLEANUP="yes"/' "$snapper_conf"
+      sudo sed -i 's/^EMPTY_PRE_POST_CLEANUP=.*/EMPTY_PRE_POST_CLEANUP="yes"/' "$snapper_conf"
+      log_success "Snapper timeline limits configured (Daily 1, Boot 1, keep 8, others 0)."
     fi
 
     sudo systemctl enable --now snapper-timeline.timer 2>/dev/null || true
@@ -1601,10 +1610,17 @@ else
 fi
 
 # Single collected initramfs rebuild for the whole step (was up to 3× -P).
+# limine-mkinitcpio-hook installs an alpm hook that asks
+# "Would you like to run 'limine-mkinitcpio' now? [Y/n]" on stdin.
+# Under dashboard_run stdout is on the log and stdin is live — answering
+# is invisible and looks like a hang (UI shows the earlier Yes/No but this
+# second prompt has no UI). Pre-answer with 'n': limine entries were already
+# updated via limine-update/limine-mkinitcpio above, this is just the
+# plain mkinitcpio image for /boot/initramfs-*.img.
 if [[ "$NEEDS_INITRAMFS_REBUILD" == true ]]; then
   if [[ -d /etc/mkinitcpio.d ]] && command -v mkinitcpio &>/dev/null; then
     ui_info "Regenerating initramfs (all pending step-6 changes)..."
-    if sudo mkinitcpio -P 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
+    if printf 'n\n' | sudo mkinitcpio -P 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
       log_success "Initramfs regenerated"
     else
       log_warning "Initramfs regeneration had issues — check mkinitcpio presets"

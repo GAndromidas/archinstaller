@@ -158,6 +158,24 @@ configure_snapper_schedule() {
     fi
   fi
 
+  # btrfs-assistant profile: Daily 1, Boot 1, keep 8, others 0
+  if [[ -f /etc/snapper/configs/root ]]; then
+    sudo sed -i 's/^TIMELINE_MIN_AGE=.*/TIMELINE_MIN_AGE="1800"/' /etc/snapper/configs/root
+    sudo sed -i 's/^TIMELINE_LIMIT_HOURLY=.*/TIMELINE_LIMIT_HOURLY="0"/' /etc/snapper/configs/root
+    sudo sed -i 's/^TIMELINE_LIMIT_DAILY=.*/TIMELINE_LIMIT_DAILY="1"/' /etc/snapper/configs/root
+    sudo sed -i 's/^TIMELINE_LIMIT_WEEKLY=.*/TIMELINE_LIMIT_WEEKLY="0"/' /etc/snapper/configs/root
+    sudo sed -i 's/^TIMELINE_LIMIT_MONTHLY=.*/TIMELINE_LIMIT_MONTHLY="0"/' /etc/snapper/configs/root
+    sudo sed -i 's/^TIMELINE_LIMIT_YEARLY=.*/TIMELINE_LIMIT_YEARLY="0"/' /etc/snapper/configs/root
+    sudo sed -i 's/^NUMBER_LIMIT=.*/NUMBER_LIMIT="8"/' /etc/snapper/configs/root
+    sudo sed -i 's/^NUMBER_LIMIT_IMPORTANT=.*/NUMBER_LIMIT_IMPORTANT="8"/' /etc/snapper/configs/root
+    sudo sed -i 's/^NUMBER_MIN_AGE=.*/NUMBER_MIN_AGE="1800"/' /etc/snapper/configs/root
+    sudo sed -i 's/^TIMELINE_CREATE=.*/TIMELINE_CREATE="yes"/' /etc/snapper/configs/root
+    sudo sed -i 's/^TIMELINE_CLEANUP=.*/TIMELINE_CLEANUP="yes"/' /etc/snapper/configs/root
+    sudo sed -i 's/^NUMBER_CLEANUP=.*/NUMBER_CLEANUP="yes"/' /etc/snapper/configs/root
+    sudo sed -i 's/^EMPTY_PRE_POST_CLEANUP=.*/EMPTY_PRE_POST_CLEANUP="yes"/' /etc/snapper/configs/root
+    log_success "Snapper limits configured (Daily 1, Boot 1, keep 8, others 0) for btrfs-assistant."
+  fi
+
   # Boot snapshot: oneshot at the end of boot. --now also takes an
   # "initial" snapshot right after installation.
   sudo tee /etc/systemd/system/snapper-boot-snapshot.service >/dev/null <<'EOF'

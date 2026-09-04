@@ -1,79 +1,24 @@
 <div align="center">
 
-# 🏗️ Archinstaller
+# Archinstaller
 
-**Turn a fresh Arch Linux base into a fully configured, optimized system — automatically.**
+**Fresh Arch → ready-to-use in 10 steps. Hardware-aware, resumable, transparent.**
 
-[![Platform](https://img.shields.io/badge/Platform-Arch%20Linux-1793E1?style=for-the-badge&logo=arch-linux)](https://archlinux.org/)
-[![GitHub release](https://img.shields.io/github/release/GAndromidas/archinstaller.svg?style=for-the-badge&logo=github)](https://github.com/GAndromidas/archinstaller/releases)
-[![Last Commit](https://img.shields.io/github/last-commit/GAndromidas/archinstaller.svg?style=for-the-badge&logo=git)](https://github.com/GAndromidas/archinstaller/commits/main)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
-[![Stars](https://img.shields.io/github/stars/GAndromidas/archinstaller.svg?style=for-the-badge&logo=star)](https://github.com/GAndromidas/archinstaller/stargazers)
+[![Arch Linux](https://img.shields.io/badge/Arch%20Linux-1793D1?style=for-the-badge&logo=arch-linux&logoColor=white)](https://archlinux.org)
+[![Release](https://img.shields.io/github/v/release/GAndromidas/archinstaller?style=for-the-badge)](https://github.com/GAndromidas/archinstaller/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 
-[Quick Start](#quick-start) · [Features](#features) · [Modes](#installation-modes) · [Customization](#customization) · [Troubleshooting](#troubleshooting)
+`post-install automation` · `hardware-aware` · `resumable` · `logged`
+
+[Quick Start](#-quick-start) · [Features](#-features) · [Modes](#-modes) · [Customize](#-customize)
 
 </div>
 
 ---
 
-## What is this?
+## ⚡ Quick Start
 
-Archinstaller is a **post-installation automation tool** for Arch Linux. It detects your hardware (CPU, GPU, storage, desktop environment) and applies **targeted optimizations** instead of one-size-fits-all settings — then sets up your shell, programs, firewall, and services through a clean, wizard-style dashboard.
-
-It's designed around the Arch philosophy: **simple, transparent, and under your control.** The whole 10-step process can resume after an interruption, and every action is logged.
-
----
-
-## ✨ Features
-
-### System Intelligence
-- **Hardware-aware detection** — CPU vendor, GPU type, storage type (NVMe/SSD/HDD), laptop vs desktop
-- **Bootloader detection** — automatically configures GRUB, systemd-boot, or Limine
-- **VM-friendly** — virtualized GPUs (QXL/virtio/VMware) get the right lightweight drivers for testing in gnome-boxes & friends
-- **Desktop detection** — KDE Plasma 6+, GNOME 46+, and Cosmic get tailored packages & tweaks
-
-### Performance
-- **I/O scheduling** tuned per storage type (NVMe: `none`, SSD: `mq-deadline`, HDD: `bfq`) with persistent udev rules
-- **Smart memory management** — swappiness adjusted to your RAM
-- **Fixed fast downloads** — pacman `ParallelDownloads = 10`
-- **Automatic microcode** — `intel-ucode` / `amd-ucode` for your CPU
-- **Kernel headers** installed for every kernel you've got
-- **Laptop optimizations** for 15+ manufacturers (power, thermals, function keys)
-
-### Security (on by default)
-- **Firewall** — UFW on Arch, firewalld on EndeavourOS (deny-incoming by default)
-- **Fail2ban** — SSH brute-force protection reading from the systemd journal, with the ban action matched to your firewall
-- **SSH allowed automatically**; KDE Connect ports opened when detected
-- **User groups** — `wheel`, `video`, `storage`, `optical`, `scanner`, `lp`, `rfkill`
-
-### Optional Extras
-- **Gaming Mode** — Steam, Wine, GameMode, MangoHud, LACT (AMD GPU control, auto-enabled daemon), Discord, Heroic & more (with multilib enabled)
-- **Wake-on-LAN** — persistent, multi-adapter WoL for desktops (auto-skipped on laptops/VMs)
-- **Server mode** — Docker, sysctl tuning, and time sync for headless boxes
-
----
-
-## Installation Modes
-
-| Mode | Best for | What you get |
-|------|----------|--------------|
-| **Standard** | Full desktop use | Complete DE + apps, all optimizations |
-| **Minimal** | Lightweight / low-spec | Essentials only, less bloat |
-| **Server** | Headless boxes | Docker, sysctl tuning, **interactive** Portainer & Watchtower setup |
-
-> **Gaming Mode** is offered as an optional add-on during Standard or Minimal installs.
-
----
-
-## Quick Start
-
-### Prerequisites
-- A fresh Arch Linux install (minimal base system)
-- An active internet connection
-- A user account with `sudo` privileges
-- At least 2 GB free disk space
-
-### Run it
+**Prereqs:** fresh Arch base, internet, `sudo` user, 2 GB free.
 
 ```bash
 git clone https://github.com/GAndromidas/archinstaller.git
@@ -81,129 +26,121 @@ cd archinstaller
 ./install.sh
 ```
 
-You'll pick your mode from an interactive menu (or type ahead with options):
-
 ```bash
-./install.sh --verbose   # Detailed package output
-./install.sh --quiet     # Minimal output
-./install.sh --dry-run   # Preview changes without making any
+./install.sh --verbose   # detailed output
+./install.sh --quiet     # minimal
+./install.sh --dry-run   # preview only
 ```
 
-> **Server mode** is selected from the menu (or auto-selected on headless systems). There is no `--server` flag.
-
-### What it does for you
-The installer runs through 10 steps and tracks its own progress, so an interrupted install can **resume where it left off**:
-
-| # | Step | What happens |
-|---|------|--------------|
-| 1 | System Preparation | pacman tuning, mirror ranking, full update, microcode, kernels, locales |
-| 2 | Shell Setup | Zsh + Oh-My-Zsh + Starship + Fastfetch (never overwrites existing config) |
-| 3 | Yay Installation | AUR helper for community packages |
-| 4 | Programs | Mode- & DE-specific apps from YAML |
-| 5 | Gaming Mode | Optional gaming stack (incl. LACT on AMD GPUs, GameMode service) |
-| 6 | Bootloader | Kernel params for GRUB / systemd-boot / **Limine + Snapper** integration. When Limine is detected, installer configures Limine with Snapper support, enabling snapshot boot entries. |
-| 7 | System Services | Firewall, GPU drivers, power & storage tuning |
-| 8 | Fail2ban | SSH hardening |
-| 9 | Wake-on-LAN | Desktops only |
-| 10 | Maintenance | Cache/package cleanup |
+> Re-run to resume — state in `/var/tmp/archinstaller.state` survives reboots.
 
 ---
 
-## Customization
+## 🎯 What it does
 
-You don't need to touch the scripts to change what gets installed. Everything lives in **YAML config files**.
+Detects your system (CPU, GPU, SSD/HDD/NVMe, laptop/desktop/VM, bootloader, DE) and applies **targeted optimizations** — not one-size-fits-all. 10-step wizard, every action logged to `/var/tmp/archinstaller.log`.
 
-### Package lists
-Open [`configs/programs.yaml`](configs/programs.yaml) and add/remove packages from any section:
+**Philosophy:** Simple, transparent, under your control. No hidden magic.
+
+---
+
+## ✨ Features
+
+| Area | Highlights |
+|------|------------|
+| **System** | `700 /boot` (UKI) handled via `sudo` + atomic `/tmp` writes · dated `systemd-boot` `2026-09-04_10-49-12_linux.conf` smart patch · `loader.conf: timeout 3 / console-mode max` |
+| **Performance** | I/O scheduler per storage (`none`/`mq-deadline`/`bfq` + udev) · swappiness by RAM · `ParallelDownloads=10` · `amd-ucode`/`intel-ucode` · kernel headers |
+| **Bootloaders** | `systemd-boot` (UKI + dated entries) · `GRUB` · `Limine + Snapper` — auto-detected |
+| **Snapshots** | `snapper` + `snap-pac` + `btrfs-assistant` universal (all bootloaders, not just Limine) · ArchWiki profile `Daily 1 / Boot 1 / others 0 / Number 8` + `QUARTERLY 0`, `snapper-timeline/cleanup/boot.timer` |
+| **Security** | `UFW` (Arch) / `firewalld` (EndeavourOS) `deny incoming` · `Fail2ban` (systemd-journal, `ufw`/`firewalld` action) · `SSH` auto-allow · `KDE Connect`/`Portainer 8000/9443` deferred |
+| **Desktop** | KDE 6+, GNOME 46+, Cosmic tailored · `Zsh + Oh-My-Zsh + Starship` (never overwrites) |
+| **Extras** | Gaming (Steam/Wine/GameMode/MangoHud/LACT) · WoL (desktops, multi-NIC) · Server (Docker) |
+
+---
+
+## 🧭 Modes
+
+| Mode | For | Gets you |
+|------|-----|----------|
+| **Standard** | Daily desktop | Full DE + apps + all tuning |
+| **Minimal** | Low-spec / clean | Essentials only |
+| **Server** | Headless | Docker + sysctl + Portainer/Watchtower |
+
+`Gaming Mode` is an optional add-on for Standard/Minimal.
+
+---
+
+## 📋 10 Steps
+
+| # | Step | Does |
+|---|------|------|
+| 1 | Preparation | pacman tune, `rate-mirrors`, full update, microcode, headers, locales |
+| 2 | Shell | Zsh, Starship, Fastfetch |
+| 3 | Yay | AUR helper |
+| 4 | Programs | `programs.yaml` / `gaming_mode.yaml` (DE/mode-aware) |
+| 5 | Gaming | Optional stack |
+| 6 | Bootloader | Unified kernel params (`quiet`/`splash`/`amd_pstate`/`nvidia` etc.) for GRUB/systemd-boot/Limine |
+| 7 | Services | Firewall, GPU drivers, power/storage/audio |
+| 8 | Fail2ban | SSH hardening |
+| 9 | WoL | Desktops only |
+| 10 | Maintenance | Cache cleanup |
+
+---
+
+## 🔧 Customize
+
+No script edits needed — edit YAML:
 
 ```yaml
-pacman:      # Core packages (all modes)
-essential:   # Mode-specific packages
-desktop_environments:  # DE-specific packages
-aur:         # AUR packages
-flatpak:     # Flatpak apps
+# configs/programs.yaml
+pacman: [git, curl]
+essential: { default: [code], minimal: [nano] }
+desktop_environments: { kde: [dolphin], gnome: [nautilus] }
+aur: [yay]
+flatpak: [com.spotify.Client]
 ```
 
-Gaming packages live in [`configs/gaming_mode.yaml`](configs/gaming_mode.yaml).
-
-### Other config files
 | File | Purpose |
 |------|---------|
-| `.zshrc` | Zsh shell configuration (Oh-My-Zsh) |
-| `starship.toml` | Starship prompt theme |
-| `config.jsonc` | Fastfetch system-info display |
-| `MangoHud.conf` | Gaming overlay config |
+| `configs/programs.yaml` | Packages |
+| `configs/gaming_mode.yaml` | Gaming |
+| `configs/.zshrc` | Zsh |
+| `configs/starship.toml` | Prompt |
+| `configs/MangoHud.conf` | Overlay |
 
 ---
 
-## Hardware Support
+## 🖥️ Hardware
 
-| Component | Supported |
-|-----------|-----------|
-| **CPU** | Intel & AMD (microcode + tuning) |
-| **GPU** | AMD, Intel, NVIDIA, plus VM (QXL/virtio/VMware) |
-| **Storage** | NVMe, SSD, HDD |
-| **Form factor** | Desktop, Laptop, VM |
-| **Laptops** | 15+ brands with manufacturer-specific setups |
-| **Bootloaders** | GRUB, systemd-boot, Limine (+ Snapper integration) |
-| **Desktops** | KDE Plasma 6+, GNOME 46+, Cosmic |
+`Intel/AMD` (µcode) · `AMD/Intel/NVIDIA + QXL/virtio/VMware` · `NVMe/SSD/HDD` · `Laptop 15+ brands` · `VM/headless` auto-detected · `UEFI/BIOS`
 
 ---
 
-## Troubleshooting
+## 🆘 Troubleshooting
 
-| Issue | Fix |
-|-------|-----|
-| Install interrupted | Re-run `./install.sh` — it resumes from the saved state |
-| No internet | Check `ping archlinux.org`, then re-run |
-| Package install failure | Check the install log below |
-| Not enough disk space | Free 2 GB+ and retry |
+| Problem | Fix |
+|---------|-----|
+| Interrupted | `./install.sh` resumes |
+| No internet | `ping 8.8.8.8` → check DNS/cable, re-run |
+| Disk full | Free 2 GB+ |
+| Log | `/var/tmp/archinstaller.log` + `.state` |
 
-### Logs & state
+---
+
+## 🤝 Contribute
+
 ```bash
-/var/tmp/archinstaller.log     # Full installation log
-/var/tmp/archinstaller.state   # Progress/resume tracking
+git checkout -b feat/my-feature
+# keep focused, test on VM
+# PR with what & why
 ```
 
-> Logs/state live in `/var/tmp`, so they survive reboots and installs can resume. Legacy `/tmp` copies are migrated automatically.
-
----
-
-## Contributing
-
-Contributions are welcome! To keep things clean:
-
-1. Fork the repo and create a branch (`git checkout -b feature/my-feature`)
-2. Keep changes focused and well-tested
-3. Open a pull request describing what & why
-
-Found a bug or want a feature? [Open an issue](https://github.com/GAndromidas/archinstaller/issues).
-
----
-
-## Project Status
-
-| Area | Status |
-|------|--------|
-| Core installer | Production ready |
-| Hardware detection | Stable |
-| Security hardening | Active & on by default |
-| Gaming mode | Tested |
-| Server mode | Production ready |
-| Resume / logging | Working |
-
----
-
-## License
-
-MIT — see the [LICENSE](LICENSE) file.
-
-You're free to use, modify, and distribute this for personal or commercial purposes.
+[Open an issue](https://github.com/GAndromidas/archinstaller/issues) for bugs/ideas.
 
 ---
 
 <div align="center">
 
-Built for the Arch Linux community. If this saved you time, consider giving it a ⭐
+**MIT** — [LICENSE](LICENSE) · Built for Arch users. ⭐ if it saved you time.
 
 </div>

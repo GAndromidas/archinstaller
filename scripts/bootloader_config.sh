@@ -213,22 +213,45 @@ is_secureboot_active() {
   [[ "$last" == "1" ]]
 }
 
-# Write kernel parameters to UKI /etc/kernel/cmdline
+# build_file_cmdline <current-file-content> — echo the merged ROOTFUL cmdline
+# for /etc/kernel/cmdline. That file feeds mkinitcpio UKI, limine-entry-tool
+# AND limine-snapper-sync snapshot generation: all three need root= IN the
+# file (a rootless file poisons generated snapshot entries into unbootable
+# "Failed to mount '' on real root" ones). Existing root=/rw identifiers are
+# proven (system boots with them) and kept; live-detected values fill gaps
+# only, so re-runs are idempotent and never duplicate root=. Fails (no
+# output) when no root can be established — callers must skip the write.
+build_file_cmdline() {
+  local current="$1"
+  local full managed_part
+  full=$(get_kernel_params) || return 1
+  managed_part="$full"
+  if echo " $current " | grep -qE ' root=[^ ]+ '; then
+    managed_part=$(echo "$managed_part" | tr ' ' '\n' | grep -vE '^root=' | tr '\n' ' ' || true)
+  fi
+  if echo " $current " | grep -qE '(^| )rw( |$)'; then
+    managed_part=$(echo "$managed_part" | tr ' ' '\n' | grep -vE '^rw$' | tr '\n' ' ' || true)
+  fi
+  local merged
+  merged=$(merge_kernel_params "$current" "$managed_part")
+  merged=$(echo "$merged" | tr -s ' ' | sed 's/^ //; s/ $//')
+  if ! merged=$(ensure_root_rw "$merged"); then
+    return 1
+  fi
+  echo "$merged"
+}
+
+# Write kernel parameters to UKI /etc/kernel/cmdline (rootful: mkinitcpio and
+# downstream snapshot generators need root= IN this file)
 configure_uki_cmdline() {
   local cmdline_file="/etc/kernel/cmdline"
-  local params
-  # cmdline-only here: root=/rw are unmanaged (preserved from the existing
-  # file) and re-added by ensure_root_rw below. Passing the full params would
-  # duplicate root= and rw on every run.
-  params=$(get_kernel_params --cmdline-only)
 
   local current_params=""
   if [[ -f "$cmdline_file" ]]; then
     current_params=$(sudo cat "$cmdline_file" 2>/dev/null || echo "")
   fi
   local merged
-  merged=$(merge_kernel_params "$current_params" "$params")
-  if ! merged=$(ensure_root_rw "$merged"); then
+  if ! merged=$(build_file_cmdline "$current_params"); then
     log_error "Refusing to write rootless UKI cmdline — leaving $cmdline_file untouched."
     return 1
   fi
@@ -263,14 +286,15 @@ configure_uki_cmdline() {
 # bootloaders (refind/efistub) whose cmdline lives in firmware entries.
 configure_uki_cmdline_note_only() {
   local cmdline_file="/etc/kernel/cmdline"
-  local unified
-  unified=$(get_kernel_params --cmdline-only)
   local current=""
   if sudo test -f "$cmdline_file" 2>/dev/null; then
     current=$(sudo cat "$cmdline_file" 2>/dev/null || echo "")
   fi
   local merged
-  merged=$(merge_kernel_params "$current" "$unified")
+  if ! merged=$(build_file_cmdline "$current"); then
+    log_error "Refusing to write rootless $cmdline_file — leaving it untouched."
+    return 1
+  fi
   if [[ "$current" != "$merged" ]]; then
     [[ -n "$current" ]] && sudo cp "$cmdline_file" "${cmdline_file}.backup.$(date +%Y%m%d_%H%M%S)"
     echo "$merged" | sudo tee "$cmdline_file" >/dev/null
@@ -893,10 +917,15 @@ _limine_append_snapshots_marker() {
   printf '\n  //Snapshots\n' | sudo tee -a "$1" >/dev/null
 }
 
-# patch_limine_cmdlines <conf> <unified> — merge unified params into EVERY
-# cmdline: line (base + snapshot entries). Lines that can't be rooted are
-# skipped individually (left untouched); a rootless entry boots into
-# "Failed to mount '' on real root", so blanking is never an option.
+# patch_limine_cmdlines <conf> <unified> — merge unified params into BASE
+# entry cmdline: lines. Snapshot entries (rootflags pointing into
+# /@/.snapshots) belong to limine-snapper-sync: it derives them from the base
+# entries at sync time, so patching them here would corrupt their subvol AND
+# fight the watcher. They heal automatically on the next sync once the base
+# and /etc/kernel/cmdline are correct.
+# Lines that can't be rooted are skipped individually (left untouched); a
+# rootless entry boots into "Failed to mount '' on real root", so blanking
+# is never an option.
 patch_limine_cmdlines() {
   local conf="$1" unified="$2"
   local entry_lns=()
@@ -905,10 +934,15 @@ patch_limine_cmdlines() {
     return 0
   fi
   sudo cp "$conf" "${conf}.backup.$(date +%Y%m%d_%H%M%S)"
-  local patched=0 skipped=0
+  local patched=0 skipped=0 snap_skipped=0
   local ln existing merged indent
   for ln in "${entry_lns[@]}"; do
     existing=$(sudo sed -n "${ln}p" "$conf" 2>/dev/null | sed -E 's/^[[:space:]]*cmdline:[[:space:]]*//')
+    if echo "$existing" | grep -q '/\.snapshots'; then
+      log_to_file "Limine $conf line $ln is a snapshot entry — left for limine-snapper-sync."
+      ((snap_skipped++))
+      continue
+    fi
     merged=$(merge_kernel_params "$existing" "$unified")
     if ! merged=$(ensure_root_rw "$merged"); then
       log_error "Skipping $conf line $ln: cannot ensure root= — left untouched."
@@ -920,7 +954,7 @@ patch_limine_cmdlines() {
     log_to_file "Limine $conf line $ln cmdline: $merged"
     ((patched++))
   done
-  log_success "Patched $patched Limine cmdline line(s) ($skipped skipped) in $conf"
+  log_success "Patched $patched base cmdline line(s) ($skipped refused, $snap_skipped snapshot-owned) in $conf"
 }
 
 # Wire the overlayfs initramfs hook from limine-mkinitcpio-hook so booting a
@@ -1345,20 +1379,24 @@ configure_limine_snapper() {
   step "Updating Limine kernel parameters..."
   local unified_cmdline
   unified_cmdline=$(get_kernel_params --cmdline-only)
+  # Rootful shared file: snapshot generation derives from it, so it must
+  # carry root= (a rootless file poisons every new snapshot entry).
   local cmdline_file="/etc/kernel/cmdline"
   local current_cmdline=""
   if sudo test -f "$cmdline_file" 2>/dev/null; then
     current_cmdline=$(sudo cat "$cmdline_file" 2>/dev/null || echo "")
   fi
   local merged_cmdline
-  merged_cmdline=$(merge_kernel_params "$current_cmdline" "$unified_cmdline")
-  if [[ "$current_cmdline" != "$merged_cmdline" ]]; then
+  if ! merged_cmdline=$(build_file_cmdline "$current_cmdline"); then
+    log_error "Refusing to write rootless $cmdline_file — leaving it untouched."
+  elif [[ "$current_cmdline" != "$merged_cmdline" ]]; then
     [[ -n "$current_cmdline" ]] && sudo cp "$cmdline_file" "${cmdline_file}.backup.$(date +%Y%m%d_%H%M%S)"
     echo "$merged_cmdline" | sudo tee "$cmdline_file" >/dev/null
     log_success "Updated $cmdline_file"
   else
     log_info "$cmdline_file already up to date"
   fi
+  log_to_file "/etc/kernel/cmdline value: ${merged_cmdline:-<unchanged>}"
 
   # Secure Boot with enrolled config checksum: editing limine.conf (or the
   # binary) breaks verification. Warn and skip file edits; packages/snapper
@@ -1398,18 +1436,6 @@ configure_limine_snapper() {
     log_warning "Limine config not found at $limine_conf — skipping kernel parameter update."
   fi
 
-  # Final verification: every cmdline must name a root device.
-  if sudo test -f "$limine_conf" 2>/dev/null; then
-    local bad_lines
-    bad_lines=$(sudo grep -E '^[[:space:]]*cmdline:' "$limine_conf" 2>/dev/null | grep -vE 'root=[^ ]+' || true)
-    if [[ -n "$bad_lines" ]]; then
-      log_error "Rootless cmdline lines remain in $limine_conf (NOT booted from these!):"
-      echo "$bad_lines" | while IFS= read -r bl; do log_error "  $bl"; done
-    else
-      log_success "All Limine cmdline entries name a root device."
-    fi
-  fi
-
   if [[ "$want_snapper" == true ]]; then
     if sudo test -f "$limine_conf" 2>/dev/null && ! sudo grep -q 'Snapshots' "$limine_conf" 2>/dev/null; then
       with_limine_lock _limine_append_snapshots_marker "$limine_conf"
@@ -1417,7 +1443,7 @@ configure_limine_snapper() {
     fi
 
     if command -v limine-snapper-sync &>/dev/null; then
-      log_info "Running limine-snapper-sync..."
+      log_info "Running limine-snapper-sync (also heals stale snapshot cmdlines from the fixed base)..."
       if sudo limine-snapper-sync >>"$INSTALL_LOG" 2>&1; then
         log_success "limine-snapper-sync completed."
       else
@@ -1428,6 +1454,19 @@ configure_limine_snapper() {
     if systemctl list-unit-files 2>/dev/null | grep -q limine-snapper-sync; then
       sudo systemctl enable --now limine-snapper-sync.service 2>/dev/null || true
       log_success "limine-snapper-sync.service enabled."
+    fi
+  fi
+
+  # Final verification AFTER the sync above: every cmdline must name a root
+  # device. Anything still rootless is NOT safe to boot.
+  if sudo test -f "$limine_conf" 2>/dev/null; then
+    local bad_lines
+    bad_lines=$(sudo grep -E '^[[:space:]]*cmdline:' "$limine_conf" 2>/dev/null | grep -vE 'root=[^ ]+' || true)
+    if [[ -n "$bad_lines" ]]; then
+      log_error "Rootless cmdline lines remain in $limine_conf — DO NOT boot these entries:"
+      echo "$bad_lines" | while IFS= read -r bl; do log_error "  $bl"; done
+    else
+      log_success "All Limine cmdline entries name a root device."
     fi
   fi
 

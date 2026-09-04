@@ -339,12 +339,18 @@ configure_boot() {
 
   run_step "Renaming dated kernel entries to simple format" rename_dated_kernel_entries
 
-  if [ -n "$loader_conf" ] && [ -f "$loader_conf" ]; then
+  if [ -n "$loader_conf" ] && sudo test -f "$loader_conf" 2>/dev/null; then
     set_loader_config "timeout" "3"
     set_loader_config "console-mode" "max"
     ui_info "Set timeout to 3s and console-mode to max (optimal settings)"
   else
-    log_warning "loader.conf not found. Skipping loader.conf configuration for systemd-boot."
+    # /boot is 700 after archinstall, bare [ -f ] fails - try to create via set_loader_config
+    if [ -n "$loader_conf" ] && set_loader_config "timeout" "3"; then
+      set_loader_config "console-mode" "max"
+      ui_info "Set timeout to 3s and console-mode to max (optimal settings) - created loader.conf"
+    else
+      log_warning "loader.conf not found. Skipping loader.conf configuration for systemd-boot."
+    fi
   fi
 
   # Update kernel options in all entries with unified params
@@ -575,7 +581,7 @@ rename_dated_kernel_entries() {
       local simple_path="$entries_dir/$simple_name"
       log_info "Regex matched - kernel type: $kernel_type, simple name: $simple_name"
 
-      if [[ -f "$simple_path" ]]; then
+      if sudo test -f "$simple_path" 2>/dev/null; then
         log_warning "Simple entry $simple_name already exists, skipping rename of $entry_name"
         continue
       fi
@@ -620,7 +626,7 @@ check_renaming_conflicts() {
       local simple_name="${kernel_type}.conf"
       local simple_path="$entries_dir/$simple_name"
 
-      if [[ -f "$simple_path" ]]; then
+      if sudo test -f "$simple_path" 2>/dev/null; then
         log_warning "Conflict: Both $entry_name and $simple_name exist"
         conflicts_found=true
       fi
@@ -795,8 +801,14 @@ set_loader_config() {
 
     if [ -z "$loader_config" ]; then
         log_warning "loader.conf not found in standard paths, trying derived path..."
-        if [ -n "$entries_dir" ]; then
-          local derived_conf="$(dirname "$entries_dir")/loader.conf"
+        local entries_dir_derived
+        entries_dir_derived=$(find_systemd_boot_entries_dir 2>/dev/null || true)
+        # fallback: entries_dir from caller scope if find fails (700 /boot already handled by find)
+        if [ -z "$entries_dir_derived" ] && [ -n "${entries_dir:-}" ]; then
+            entries_dir_derived="$entries_dir"
+        fi
+        if [ -n "$entries_dir_derived" ]; then
+          local derived_conf="$(dirname "$entries_dir_derived")/loader.conf"
           if sudo test -f "$derived_conf" 2>/dev/null; then
             loader_config="$derived_conf"
           else
@@ -811,28 +823,38 @@ set_loader_config() {
         return 1
     fi
 
-    local current_content
-    current_content=$(sudo cat "$loader_config" 2>/dev/null)
-    if [ $? -ne 0 ]; then
-        log_error "Failed to read $loader_config for key '$key'"
-        return 1
+    local current_content cat_status=0
+    current_content=$(sudo cat "$loader_config" 2>/dev/null) || cat_status=$?
+    if [ $cat_status -ne 0 ]; then
+        if sudo test -f "$loader_config" 2>/dev/null; then
+            log_error "Failed to read $loader_config for key '$key' (cat exit $cat_status)"
+            return 1
+        else
+            # File doesn't exist yet (700 /boot, first run) -> create from scratch
+            current_content=""
+        fi
     fi
 
     local new_content
 
     # Check if the key exists, potentially commented out
+    # Matches: timeout 1, #timeout 1, #console-mode keep, console-mode max
     if echo "$current_content" | grep -qE "^[#]*${key}[[:space:]]"; then
-        # Replace existing or uncomment and replace
-        new_content=$(echo "$current_content" | sudo sed "s/^[#]*${key}[[:space:]].*/${key} ${value}/")
+        # Replace existing or uncomment and replace (handles #console-mode keep -> console-mode max)
+        new_content=$(echo "$current_content" | sed "s/^[#]*${key}[[:space:]].*/${key} ${value}/")
     else
         # Append new key-value pair if not found
-        new_content="${current_content}
+        if [ -z "$current_content" ]; then
+            new_content="${key} ${value}"
+        else
+            new_content="${current_content}
 ${key} ${value}"
+        fi
     fi
 
-    # Ensure directory exists
+    # Ensure directory exists (needs sudo: /boot is 700)
     local target_dir=$(dirname "$loader_config")
-    if [ ! -d "$target_dir" ]; then
+    if ! sudo test -d "$target_dir" 2>/dev/null; then
         sudo mkdir -p "$target_dir" 2>/dev/null || {
             log_error "Failed to create directory $target_dir"
             return 1

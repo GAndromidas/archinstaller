@@ -358,8 +358,11 @@ configure_boot() {
 
   run_step "Checking kernel options consistency" check_kernel_options_consistency
 
-  # Btrfs-assistant profile for all bootloaders: 1 daily, 1 boot (enabled), others 0, keep 8 (from 50)
-  if is_btrfs_system 2>/dev/null; then
+  # Universal snapper stack for all bootloaders (btrfs-assistant/snap-pac) when snapper present
+  # Robust, not limine-only; AUR limine-snapper-sync stays limine-only
+  if is_btrfs_system 2>/dev/null && pacman -Q snapper &>/dev/null; then
+    run_step "Configuring Btrfs-Assistant snapshot limits" ensure_snapper_aux_universal
+  elif is_btrfs_system 2>/dev/null; then
     run_step "Configuring Btrfs-Assistant snapshot limits" apply_btrfs_assistant_profile
   fi
 }
@@ -799,8 +802,10 @@ configure_grub() {
         log_success "GRUB configured to remember the last chosen boot entry."
     fi
 
-    # Btrfs-assistant profile for all bootloaders: 1 daily, 1 boot (enabled), others 0, keep 8 (from 50)
-    if is_btrfs_system 2>/dev/null; then
+    # Universal snapper stack for all bootloaders (btrfs-assistant/snap-pac) when snapper present
+    if is_btrfs_system 2>/dev/null && pacman -Q snapper &>/dev/null; then
+      run_step "Configuring Btrfs-Assistant snapshot limits" ensure_snapper_aux_universal
+    elif is_btrfs_system 2>/dev/null; then
       run_step "Configuring Btrfs-Assistant snapshot limits" apply_btrfs_assistant_profile
     fi
 }
@@ -995,6 +1000,32 @@ patch_limine_cmdlines() {
     ((patched++))
   done
   log_success "Patched $patched base cmdline line(s) ($skipped refused, $snap_skipped snapshot-owned) in $conf"
+}
+
+# Universal Snapper stack for ALL bootloaders when snapper is present (btrfs)
+# Installs btrfs-assistant (GUI) + snap-pac (pacman hook) from extra (not AUR),
+# then applies ArchWiki profile. Limine-specific AUR limine-snapper-sync stays limine-only.
+ensure_snapper_aux_universal() {
+  if ! pacman -Q snapper &>/dev/null; then
+    return 0
+  fi
+  if ! is_btrfs_system 2>/dev/null; then
+    return 0
+  fi
+  local pkgs=()
+  pacman -Q snap-pac &>/dev/null || pkgs+=(snap-pac)
+  # btrfs-assistant is GUI - install on desktop, skip headless server
+  if ! is_headless_system 2>/dev/null; then
+    pacman -Q btrfs-assistant &>/dev/null || pkgs+=(btrfs-assistant)
+  fi
+  if [[ ${#pkgs[@]} -gt 0 ]]; then
+    log_info "Snapper detected — ensuring snap-pac/btrfs-assistant for all bootloaders: ${pkgs[*]}"
+    install_packages_quietly "${pkgs[@]}" 2>>"$INSTALL_LOG" || log_warning "Failed to install snapper aux: ${pkgs[*]}"
+  else
+    log_info "Snapper aux packages (snap-pac/btrfs-assistant) already present"
+  fi
+  # Always ensure profile even if packages already present
+  apply_btrfs_assistant_profile
 }
 
 # Shared Btrfs-Assistant profile for ALL bootloaders (systemd-boot, GRUB, Limine)
@@ -1232,7 +1263,8 @@ configure_limine_snapper() {
     configure_limine_overlayfs || true
   fi
 
-  # Configure Snapper (btrfs only) - shared profile for ALL bootloaders (Daily 1, Boot 1, others 0, Number 8)
+  # Configure Snapper (btrfs only) - universal stack (btrfs-assistant/snap-pac) for all bootloaders
+  # Limine-specific AUR sync (limine-snapper-sync) stays limine-only, but btrfs-assistant profile is shared
   if [[ "$want_snapper" == true ]]; then
     step "Configuring Snapper..."
     if ! mountpoint -q /.snapshots 2>/dev/null; then
@@ -1241,8 +1273,8 @@ configure_limine_snapper() {
     mountpoint -q /.snapshots 2>/dev/null || \
       log_warning "/.snapshots not mounted yet; will mount on next boot."
 
-    # Apply unified btrfs-assistant profile (also used for systemd-boot/GRUB via apply_btrfs_assistant_profile)
-    apply_btrfs_assistant_profile
+    # Universal snapper aux (btrfs-assistant/snap-pac) + ArchWiki profile - not limine-only
+    ensure_snapper_aux_universal
 
     sudo systemctl enable --now snapper-timeline.timer 2>/dev/null || true
     sudo systemctl enable --now snapper-cleanup.timer 2>/dev/null || true

@@ -463,7 +463,7 @@ check_kernel_options_consistency() {
 
   for entry in "${kernel_entries[@]}"; do
     local entry_name=$(basename "$entry")
-    local current_options=$(grep "^options " "$entry" | sed 's/^options //' || echo "")
+    local current_options=$(sudo grep "^options " "$entry" 2>/dev/null | sed 's/^options //' || echo "")
     options_list+=("$current_options")
     entry_names+=("$entry_name")
   done
@@ -523,7 +523,7 @@ sync_all_kernel_options() {
   fi
 
   local standard_entry="${kernel_entries[0]}"
-  local standard_options=$(grep "^options " "$standard_entry" | sed 's/^options //' || echo "")
+  local standard_options=$(sudo grep "^options " "$standard_entry" 2>/dev/null | sed 's/^options //' || echo "")
 
   if [[ -z "$standard_options" ]]; then
     log_warning "No options found in standard entry: $(basename "$standard_entry")"
@@ -542,12 +542,12 @@ sync_all_kernel_options() {
       continue
     fi
 
-    local current_options=$(grep "^options " "$entry" | sed 's/^options //' || echo "")
+    local current_options=$(sudo grep "^options " "$entry" 2>/dev/null | sed 's/^options //' || echo "")
 
     if [[ "$current_options" != "$standard_options" ]]; then
       local temp_file=$(mktemp)
       trap 'rm -f "$temp_file"' RETURN
-      grep -v "^options " "$entry" > "$temp_file"
+      sudo grep -v "^options " "$entry" 2>/dev/null > "$temp_file" || grep -v "^options " "$entry" 2>/dev/null > "$temp_file" || true
       echo "options $standard_options" >> "$temp_file"
       sudo mv "$temp_file" "$entry"
       log_success "Synced options in $entry_name"

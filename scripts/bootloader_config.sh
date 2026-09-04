@@ -1065,7 +1065,31 @@ configure_limine_theme() {
     log_info "Limine theme already present in $conf"
     return 0
   fi
-  # Theme header - no wallpaper image required (avoids missing boot():/limine-splash.png)
+  # Handle background.png from configs -> ESP (FAT) for Limine wallpaper (best practice: boot():/background.png on ESP)
+  local wallpaper_line=""
+  local bg_src="$SCRIPT_DIR/../configs/background.png"
+  if [[ -f "$bg_src" ]]; then
+    local esp_for_bg
+    esp_for_bg=$(findmnt -n -o TARGET -t vfat 2>/dev/null | head -1 || findmnt -n -o TARGET /boot 2>/dev/null || echo "/boot")
+    local bg_dst=""
+    for cand in "$esp_for_bg/background.png" "$esp_for_bg/limine/background.png" "/boot/background.png"; do
+      if sudo mkdir -p "$(dirname "$cand")" 2>/dev/null && sudo cp "$bg_src" "$cand" 2>/dev/null && sudo test -f "$cand" 2>/dev/null; then
+        bg_dst="boot():/background.png"
+        log_success "Copied Limine wallpaper to $cand (2752x1536, Catppuccin Mocha)"
+        # Also ensure limine dir copy for fallback boot():/limine/background.png
+        if [[ "$cand" == "$esp_for_bg/background.png" ]]; then
+          sudo mkdir -p "$esp_for_bg/limine" 2>/dev/null && sudo cp "$bg_src" "$esp_for_bg/limine/background.png" 2>/dev/null || true
+        fi
+        break
+      fi
+    done
+    if [[ -n "$bg_dst" ]]; then
+      wallpaper_line="wallpaper: $bg_dst
+backdrop: 1e1e2e
+"
+    fi
+  fi
+  # Theme header - wallpaper optional (handled above, falls back to solid term_background if no image)
   local theme="# Archinstaller Limine theme - Catppuccin Mocha
 # Better looking, clean dark, Arch blue accent
 timeout: 3
@@ -1073,7 +1097,7 @@ graphics: yes
 interface_branding: Arch Linux
 interface_branding_colour: 89b4fa
 interface_help_colour: 6c7086
-wallpaper_style: stretched
+${wallpaper_line}wallpaper_style: stretched
 term_palette: 1e1e2e;f38ba8;a6e3a1;f9e2af;89b4fa;f5c2e7;94e2d5;cdd6f4
 term_palette_bright: 585b70;f38ba8;a6e3a1;f9e2af;89b4fa;f5c2e7;94e2d5;cdd6f4
 term_background: 1e1e2e
@@ -1087,7 +1111,7 @@ term_margin_gradient: 4
   if sudo test -f "$conf" 2>/dev/null; then
     existing=$(sudo cat "$conf" 2>/dev/null || echo "")
     # Remove existing global theme keys + timeout to avoid duplicates, keep entries
-    existing=$(echo "$existing" | grep -vE "^\s*(timeout:|graphics:|interface_branding|interface_help|wallpaper|term_palette|term_background|term_foreground|term_margin)" || true)
+    existing=$(echo "$existing" | grep -vE "^\s*(timeout:|graphics:|interface_branding|interface_help|wallpaper|backdrop|term_palette|term_background|term_foreground|term_margin)" || true)
     # Trim leading blank lines
     existing=$(echo "$existing" | sed '/./,$!d' || true)
   fi

@@ -147,8 +147,9 @@ check_system_compatibility() {
         issues+=("No internet connection")
     fi
     
-    # Check bootloader compatibility
-    if [ ! -d "/boot" ]; then
+    # Check bootloader compatibility (sudo: archinstall may lock /boot to
+    # root-only, which bare [ -d ] reports as missing)
+    if ! sudo test -d "/boot" 2>/dev/null; then
         issues+=("Boot directory not found")
     fi
     

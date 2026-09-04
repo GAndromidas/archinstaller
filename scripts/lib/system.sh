@@ -114,10 +114,15 @@ detect_bootloader() {
     # limine.conf alongside the EFI binary, plus a 99-limine.hook pacman hook.
     # NOTE: <esp>/EFI/BOOT/ alone is NOT a signal (systemd-boot uses it too) —
     # only limine.conf in these locations counts.
+    # NOTE: every ESP-candidate test uses sudo. Official archinstall locks
+    # /boot (and sometimes the ESP mountpoint) down to root-only, so bare
+    # [ -f/-d ] checks silently miss everything and detection falls through.
     if sudo test -f /boot/EFI/arch-limine/limine.conf 2>/dev/null || \
        sudo test -f /boot/EFI/BOOT/limine.conf 2>/dev/null || \
-       [ -f "/boot/efi/EFI/arch-limine/limine.conf" ] || [ -f "/boot/efi/EFI/BOOT/limine.conf" ] || \
-       [ -f "/efi/EFI/arch-limine/limine.conf" ] || [ -f "/efi/EFI/BOOT/limine.conf" ] || \
+       sudo test -f /boot/efi/EFI/arch-limine/limine.conf 2>/dev/null || \
+       sudo test -f /boot/efi/EFI/BOOT/limine.conf 2>/dev/null || \
+       sudo test -f /efi/EFI/arch-limine/limine.conf 2>/dev/null || \
+       sudo test -f /efi/EFI/BOOT/limine.conf 2>/dev/null || \
        sudo test -f /boot/limine.conf 2>/dev/null || sudo test -f /boot/limine/limine.conf 2>/dev/null || \
        sudo test -f /boot/efi/limine.conf 2>/dev/null || sudo test -f /efi/limine.conf 2>/dev/null || \
        sudo test -f /limine/limine.conf 2>/dev/null || sudo test -f /limine.conf 2>/dev/null || \
@@ -126,18 +131,19 @@ detect_bootloader() {
        command -v limine-snapper-sync &>/dev/null; then
         bootloader="limine"
     elif sudo test -d /boot/grub 2>/dev/null || sudo test -d /boot/grub2 2>/dev/null || \
-       [ -d "/boot/efi/EFI/grub" ] || [ -d "/efi/EFI/grub" ]; then
+       sudo test -d /boot/efi/EFI/grub 2>/dev/null || sudo test -d /efi/EFI/grub 2>/dev/null; then
         bootloader="grub"
     # rEFInd (official archinstall deploys to <esp>/EFI/refind/)
     elif sudo test -f /boot/EFI/refind/refind_x64.efi 2>/dev/null || \
-       [ -f "/boot/efi/EFI/refind/refind_x64.efi" ] || [ -f "/efi/EFI/refind/refind_x64.efi" ] || \
+       sudo test -f /boot/efi/EFI/refind/refind_x64.efi 2>/dev/null || \
+       sudo test -f /efi/EFI/refind/refind_x64.efi 2>/dev/null || \
        sudo test -f /boot/EFI/refind/refind.conf 2>/dev/null || \
        sudo efibootmgr 2>/dev/null | grep -qi "rEFInd"; then
         bootloader="refind"
     # Check for active systemd-boot (loader entries + loader.conf)
-    elif sudo test -d /boot/loader/entries 2>/dev/null || [ -d "/efi/loader/entries" ] || \
-         sudo test -f /boot/loader/loader.conf 2>/dev/null || [ -f "/efi/loader/loader.conf" ] || \
-         [ -d "/boot/EFI/systemd" ] || [ -d "/efi/EFI/systemd" ] || \
+    elif sudo test -d /boot/loader/entries 2>/dev/null || sudo test -d /efi/loader/entries 2>/dev/null || \
+         sudo test -f /boot/loader/loader.conf 2>/dev/null || sudo test -f /efi/loader/loader.conf 2>/dev/null || \
+         sudo test -d /boot/EFI/systemd 2>/dev/null || sudo test -d /efi/EFI/systemd 2>/dev/null || \
          sudo test -d /boot/loader 2>/dev/null; then
         bootloader="systemd-boot"
     # EFISTUB: kernels live directly on a FAT /boot with no bootloader
@@ -151,7 +157,7 @@ detect_bootloader() {
     elif command -v grub-mkconfig &>/dev/null || pacman -Q grub &>/dev/null 2>&1; then
         bootloader="grub"
     elif command -v bootctl &>/dev/null || pacman -Q systemd-boot &>/dev/null 2>&1 || \
-         [ -d "/boot/EFI/BOOT" ] || [ -d "/efi/EFI/BOOT" ]; then
+         sudo test -d /boot/EFI/BOOT 2>/dev/null || sudo test -d /efi/EFI/BOOT 2>/dev/null; then
         bootloader="systemd-boot"
     # Tier 3: Fallback based on firmware / distro
     elif [ -d /sys/firmware/efi ]; then
@@ -188,17 +194,18 @@ is_uki_system() {
         result="true"
     fi
 
-    # Method 2: systemd-boot entries reference .efi files (not vmlinuz)
+    # Method 2: systemd-boot entries reference .efi files (not vmlinuz).
+    # sudo: entry files live under /boot, which archinstall may lock to 700.
     local entries_dir
     if [[ "$result" == "false" ]]; then
         entries_dir=$(find_systemd_boot_entries_dir)
         if [[ -n "$entries_dir" ]]; then
             while IFS= read -r -d '' entry; do
-                if grep -qE "^\s*efi\s+/" "$entry" 2>/dev/null; then
+                if sudo grep -qE "^\s*efi\s+/" "$entry" 2>/dev/null; then
                     result="true"
                     break
                 fi
-            done < <(find "$entries_dir" -name "*.conf" -print0 2>/dev/null)
+            done < <(sudo find "$entries_dir" -name "*.conf" -print0 2>/dev/null)
         fi
     fi
 

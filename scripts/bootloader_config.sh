@@ -92,12 +92,15 @@ get_kernel_params() {
     return 0
   fi
 
-  # Full cmdline with root device
-  local root_uuid=$(findmnt -n -o UUID / 2>/dev/null || echo "")
+  # Full cmdline with root device (fallback chain; a rootless full cmdline
+  # boots into "Failed to mount '' on real root", so fail loudly instead)
+  local root_uuid=""
+  root_uuid=$(detect_root_uuid || true)
   if [[ -n "$root_uuid" ]]; then
     echo "root=UUID=$root_uuid rw $params"
   else
-    echo "$params"
+    log_error "Cannot determine root filesystem UUID for full cmdline."
+    return 1
   fi
 }
 
@@ -150,15 +153,41 @@ merge_kernel_params() {
   echo "${out[*]}"
 }
 
+# detect_root_uuid — echo the live root filesystem UUID for root=UUID=.
+# Fallback chain: findmnt, then blkid on the backing device (covers odd
+# btrfs-subvolume and mapper layouts). Fails loudly when undetectable.
+detect_root_uuid() {
+  local uuid src
+  uuid=$(findmnt -n -o UUID / 2>/dev/null || true)
+  if [[ -n "$uuid" ]]; then
+    echo "$uuid"
+    return 0
+  fi
+  src=$(findmnt -n -o SOURCE / 2>/dev/null | cut -d'[' -f1 || true)
+  if [[ -n "$src" ]]; then
+    uuid=$(sudo blkid -s UUID -o value "$src" 2>/dev/null || true)
+    if [[ -n "$uuid" ]]; then
+      echo "$uuid"
+      return 0
+    fi
+  fi
+  return 1
+}
+
 # ensure_root_rw <cmdline> — echo cmdline with root= and rw present (added from
 # live system only when missing; existing values always win).
+# FAILS (return 1, no output) when no root= exists and none is detectable:
+# writing a rootless entry cmdline boots into "Failed to mount '' on real
+# root", so callers must skip the write instead.
 ensure_root_rw() {
   local merged="$1"
   if ! echo " $merged " | grep -qE ' root=[^ ]+ '; then
     local root_uuid
-    root_uuid=$(findmnt -n -o UUID / 2>/dev/null || echo "")
-    if [[ -n "$root_uuid" ]]; then
+    if root_uuid=$(detect_root_uuid); then
       merged="root=UUID=$root_uuid${merged:+ $merged}"
+    else
+      log_error "Cannot determine root filesystem UUID — refusing to write a rootless cmdline."
+      return 1
     fi
   fi
   if ! echo " $merged " | grep -qE '(^| )rw( |$)'; then
@@ -199,7 +228,10 @@ configure_uki_cmdline() {
   fi
   local merged
   merged=$(merge_kernel_params "$current_params" "$params")
-  merged=$(ensure_root_rw "$merged")
+  if ! merged=$(ensure_root_rw "$merged"); then
+    log_error "Refusing to write rootless UKI cmdline — leaving $cmdline_file untouched."
+    return 1
+  fi
 
   if [[ "$current_params" == "$merged" ]]; then
     log_info "UKI cmdline already configured"
@@ -209,6 +241,7 @@ configure_uki_cmdline() {
     echo "$merged" | sudo tee "$cmdline_file" >/dev/null
     log_success "UKI cmdline written: $merged"
   fi
+  log_to_file "UKI cmdline value: $merged"
 
   # Plymouth presets/hooks belong to archinstall — not touched here.
 
@@ -307,31 +340,36 @@ update_systemd_boot_options() {
   fi
 
   local updated=0
-  for entry in "$entries_dir"/*.conf; do
-    [ -f "$entry" ] || continue
-    [[ "$(basename "$entry")" == *fallback* ]] && continue
-
+  local entry
+  # sudo find: user-side globs return nothing when archinstall locks /boot to
+  # root-only, which previously made this loop silently skip every entry.
+  while IFS= read -r -d '' entry; do
     # Merge with the existing options line: preserves archinstall-written
     # root= (UUID OR PARTUUID), cryptdevice, resume, etc.; only managed keys
     # are replaced.
     local existing=""
-    if grep -q "^options " "$entry"; then
-      existing=$(grep "^options " "$entry" | sed 's/^options //')
+    if sudo grep -q "^options " "$entry" 2>/dev/null; then
+      existing=$(sudo grep "^options " "$entry" 2>/dev/null | sed 's/^options //')
     fi
 
-    # Build new options line
+    # Build new options line (refuse rootless: a missing root= boots into
+    # "Failed to mount '' on real root" — skip the entry instead)
     local new_options
     new_options=$(merge_kernel_params "$existing" "$new_params")
-    new_options=$(ensure_root_rw "$new_options")
+    if ! new_options=$(ensure_root_rw "$new_options"); then
+      log_error "Skipping $(basename "$entry"): cannot ensure root= — entry left untouched."
+      continue
+    fi
+    log_to_file "Entry $(basename "$entry") options: $new_options"
 
     # Update or add options line
-    if grep -q "^options " "$entry"; then
+    if sudo grep -q "^options " "$entry" 2>/dev/null; then
       sudo sed -i "s|^options .*|options $new_options|" "$entry"
     else
       echo "options $new_options" | sudo tee -a "$entry" >/dev/null
     fi
     ((updated++))
-  done
+  done < <(sudo find "$entries_dir" -maxdepth 1 -name "*.conf" ! -name "*fallback*" -print0 2>/dev/null)
 
   [[ $updated -gt 0 ]] && log_success "Updated kernel options in $updated systemd-boot entries"
 }
@@ -350,7 +388,7 @@ check_kernel_options_consistency() {
   local kernel_entries=()
   while IFS= read -r -d $'\0' entry; do
     kernel_entries+=("$entry")
-  done < <(find "$entries_dir" -name "*.conf" ! -name "*fallback*" -print0)
+  done < <(sudo find "$entries_dir" -name "*.conf" ! -name "*fallback*" -print0 2>/dev/null)
 
   if [[ ${#kernel_entries[@]} -eq 0 ]]; then
     log_warning "No kernel entries found to check"
@@ -423,7 +461,7 @@ sync_all_kernel_options() {
   local kernel_entries=()
   while IFS= read -r -d $'\0' entry; do
     kernel_entries+=("$entry")
-  done < <(find "$entries_dir" -name "*.conf" ! -name "*fallback*" -print0)
+  done < <(sudo find "$entries_dir" -name "*.conf" ! -name "*fallback*" -print0 2>/dev/null)
 
   if [[ ${#kernel_entries[@]} -eq 0 ]]; then
     log_warning "No kernel entries found to sync"
@@ -490,7 +528,7 @@ rename_dated_kernel_entries() {
   local dated_entries=()
   while IFS= read -r -d '' entry; do
     dated_entries+=("$entry")
-  done < <(find "$entries_dir" -name "*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]_[0-9][0-9]-[0-9][0-9]-[0-9][0-9]_*.conf" ! -name "*fallback*" -print0 2>/dev/null)
+  done < <(sudo find "$entries_dir" -name "*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]_[0-9][0-9]-[0-9][0-9]-[0-9][0-9]_*.conf" ! -name "*fallback*" -print0 2>/dev/null)
 
   log_info "Boot entries directory: $entries_dir"
   log_info "Found ${#dated_entries[@]} dated kernel entries"
@@ -499,7 +537,7 @@ rename_dated_kernel_entries() {
     log_info "No dated kernel entries found — entries already in simple format"
     # List all .conf files for debugging
     log_info "All entries in directory:"
-    find "$entries_dir" -name "*.conf" -exec basename {} \; 2>/dev/null | while read -r f; do
+    sudo find "$entries_dir" -name "*.conf" -exec basename {} \; 2>/dev/null | while read -r f; do
       log_info "  - $f"
     done
     return 0
@@ -578,18 +616,20 @@ validate_kernel_entry() {
   local entry="$1"
 
   # Title field is optional (archinstall entries don't have it)
-  # Only check for essential fields: linux and initrd
-  if ! grep -q "^linux " "$entry"; then
+  # Only check for essential fields: linux and initrd.
+  # sudo: entries live under /boot, which archinstall may lock to 700 —
+  # bare grep would fail and wrongly reject every entry.
+  if ! sudo grep -q "^linux " "$entry" 2>/dev/null; then
     log_warning "Entry $(basename "$entry") missing linux field"
     return 1
   fi
 
-  if ! grep -q "^initrd " "$entry"; then
+  if ! sudo grep -q "^initrd " "$entry" 2>/dev/null; then
     log_warning "Entry $(basename "$entry") missing initrd field"
     return 1
   fi
 
-  if ! grep -q "^options " "$entry"; then
+  if ! sudo grep -q "^options " "$entry" 2>/dev/null; then
     log_warning "Entry $(basename "$entry") missing options field"
     return 1
   fi
@@ -602,7 +642,7 @@ update_loader_conf_references() {
   local new_name="$2"
   local loader_config=""
   for f in "/boot/loader/loader.conf" "/efi/loader/loader.conf" "/boot/efi/loader/loader.conf"; do
-    if [ -f "$f" ]; then
+    if sudo test -f "$f" 2>/dev/null; then
       loader_config="$f"
       break
     fi
@@ -612,7 +652,7 @@ update_loader_conf_references() {
     return 0
   fi
 
-  if grep -q "^default $old_name$" "$loader_config"; then
+  if sudo grep -q "^default $old_name$" "$loader_config" 2>/dev/null; then
     sudo sed -i "s|^default $old_name$|default $new_name|" "$loader_config"
     log_success "Updated loader.conf reference: $old_name -> $new_name"
   fi
@@ -661,7 +701,7 @@ configure_grub() {
     ui_info "Kernel parameters: $grub_merged"
 
     local KERNELS=()
-    mapfile -t KERNELS < <(ls /boot/vmlinuz-* 2>/dev/null | sed 's|/boot/vmlinuz-||g')
+    mapfile -t KERNELS < <(sudo ls /boot/vmlinuz-* 2>/dev/null | sed 's|/boot/vmlinuz-||g')
     if [[ ${#KERNELS[@]} -eq 0 ]]; then
         log_error "No kernels found in /boot."
         return 1
@@ -843,15 +883,44 @@ with_limine_lock() {
 }
 
 # Helpers executed under with_limine_lock (must be plain functions, same shell)
-_limine_replace_cmdline() {
-  local conf="$1" value="$2"
-  sudo cp "$conf" "${conf}.backup.$(date +%Y%m%d_%H%M%S)"
-  # Params contain / (rootflags) but no | or & — pipe delimiter is safe.
-  sudo sed -i -E "s|^([[:space:]]*cmdline:).*|\1 $value|" "$conf"
+# Kernel cmdline tokens never contain | or & — pipe delimiter is safe below.
+_limine_replace_line() {
+  local conf="$1" ln="$2" content="$3"
+  sudo sed -i "${ln}s|^.*|$content|" "$conf"
 }
 
 _limine_append_snapshots_marker() {
   printf '\n  //Snapshots\n' | sudo tee -a "$1" >/dev/null
+}
+
+# patch_limine_cmdlines <conf> <unified> — merge unified params into EVERY
+# cmdline: line (base + snapshot entries). Lines that can't be rooted are
+# skipped individually (left untouched); a rootless entry boots into
+# "Failed to mount '' on real root", so blanking is never an option.
+patch_limine_cmdlines() {
+  local conf="$1" unified="$2"
+  local entry_lns=()
+  mapfile -t entry_lns < <(sudo grep -nE '^[[:space:]]*cmdline:' "$conf" 2>/dev/null | cut -d: -f1)
+  if [ ${#entry_lns[@]} -eq 0 ]; then
+    return 0
+  fi
+  sudo cp "$conf" "${conf}.backup.$(date +%Y%m%d_%H%M%S)"
+  local patched=0 skipped=0
+  local ln existing merged indent
+  for ln in "${entry_lns[@]}"; do
+    existing=$(sudo sed -n "${ln}p" "$conf" 2>/dev/null | sed -E 's/^[[:space:]]*cmdline:[[:space:]]*//')
+    merged=$(merge_kernel_params "$existing" "$unified")
+    if ! merged=$(ensure_root_rw "$merged"); then
+      log_error "Skipping $conf line $ln: cannot ensure root= — left untouched."
+      ((skipped++))
+      continue
+    fi
+    indent=$(sudo sed -n "${ln}p" "$conf" 2>/dev/null | sed -E 's/^([[:space:]]*cmdline:).*/\1/')
+    with_limine_lock _limine_replace_line "$conf" "$ln" "$indent $merged"
+    log_to_file "Limine $conf line $ln cmdline: $merged"
+    ((patched++))
+  done
+  log_success "Patched $patched Limine cmdline line(s) ($skipped skipped) in $conf"
 }
 
 # Wire the overlayfs initramfs hook from limine-mkinitcpio-hook so booting a
@@ -1149,10 +1218,13 @@ configure_limine_snapper() {
     # them — same layout rule archinstall itself enforces.
     if [[ "$esp_mount" == "/boot" ]]; then
       local fresh_kernels=()
-      mapfile -t fresh_kernels < <(ls /boot/vmlinuz-* 2>/dev/null | sed 's|/boot/vmlinuz-||g')
+      mapfile -t fresh_kernels < <(sudo ls /boot/vmlinuz-* 2>/dev/null | sed 's|/boot/vmlinuz-||g')
       if [[ ${#fresh_kernels[@]} -gt 0 ]]; then
         local full_params
-        full_params=$(get_kernel_params)
+        if ! full_params=$(get_kernel_params) || ! echo " $full_params " | grep -qE ' root=[^ ]+ '; then
+          log_error "Cannot build a rooted cmdline — refusing to write a rootless fresh limine.conf."
+          return 1
+        fi
         {
           echo "timeout: 3"
           local k
@@ -1308,21 +1380,34 @@ configure_limine_snapper() {
     else
       log_warning "limine-update returned an error."
     fi
-  elif [[ "$skip_conf_edit" == true ]]; then
-    : # warned above
+  fi
+
+  # Patch EVERY cmdline: line in limine.conf (base + snapshot entries), even
+  # after limine-update just regenerated them: tools write entries from their
+  # own sources and can drop root=, which boots into "Failed to mount '' on
+  # real root". Lines that can't be rooted are LEFT UNTOUCHED, never blanked.
+  if [[ "$skip_conf_edit" == true ]]; then
+    : # warned above (Secure Boot enrolled config)
   elif sudo test -f "$limine_conf" 2>/dev/null; then
     if sudo grep -qE '^[[:space:]]*cmdline:' "$limine_conf" 2>/dev/null; then
-      local existing_cmdline merged_full
-      existing_cmdline=$(sudo grep -E '^[[:space:]]*cmdline:' "$limine_conf" 2>/dev/null | head -1 | sed -E 's/^[[:space:]]*cmdline:[[:space:]]*//')
-      merged_full=$(merge_kernel_params "$existing_cmdline" "$(get_kernel_params --cmdline-only)")
-      merged_full=$(ensure_root_rw "$merged_full")
-      with_limine_lock _limine_replace_cmdline "$limine_conf" "$merged_full"
-      log_success "Updated kernel cmdline in $limine_conf"
+      patch_limine_cmdlines "$limine_conf" "$unified_cmdline"
     else
       log_warning "No cmdline entries in $limine_conf — leaving it untouched."
     fi
   else
     log_warning "Limine config not found at $limine_conf — skipping kernel parameter update."
+  fi
+
+  # Final verification: every cmdline must name a root device.
+  if sudo test -f "$limine_conf" 2>/dev/null; then
+    local bad_lines
+    bad_lines=$(sudo grep -E '^[[:space:]]*cmdline:' "$limine_conf" 2>/dev/null | grep -vE 'root=[^ ]+' || true)
+    if [[ -n "$bad_lines" ]]; then
+      log_error "Rootless cmdline lines remain in $limine_conf (NOT booted from these!):"
+      echo "$bad_lines" | while IFS= read -r bl; do log_error "  $bl"; done
+    else
+      log_success "All Limine cmdline entries name a root device."
+    fi
   fi
 
   if [[ "$want_snapper" == true ]]; then
@@ -1439,8 +1524,25 @@ HELPER_EOF
 # MAIN EXECUTION (dispatch AFTER all function definitions)
 # ============================================================================
 
+# Report ESP/boot readability up front: on archinstall systems /boot is often
+# root-only, and every silent "not found, skipping" below traces back to this.
+report_boot_access() {
+  local esp
+  esp=$(detect_esp_mount || echo "unknown")
+  log_info "ESP mountpoint: $esp"
+  local perms
+  perms=$(sudo stat -c '%a %U:%G' /boot 2>/dev/null || echo "unreadable")
+  log_info "/boot perms: $perms"
+  if sudo ls /boot >/dev/null 2>&1; then
+    log_info "/boot readable via sudo — privileged reads enabled."
+  else
+    log_error "/boot NOT readable even via sudo — bootloader tuning will be skipped."
+  fi
+}
+
 # Bootloader-specific configuration (kernel params + bootloader settings)
 log_info "Detected bootloader: $BOOTLOADER"
+report_boot_access
 if is_encrypted_root; then
   log_info "Encrypted root detected — existing crypt device parameters will be preserved, never replaced."
 fi

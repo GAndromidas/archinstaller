@@ -1321,7 +1321,7 @@ configure_limine_snapper() {
   local limine_dir="" limine_conf=""
   local d
   for d in "$esp_mount/EFI/arch-limine" "$esp_mount/EFI/BOOT" "$esp_mount/EFI/limine" \
-           "$esp_mount/limine" /boot/limine; do
+           "$esp_mount/limine" /boot/limine /boot; do
     if sudo test -f "$d/BOOTX64.EFI" 2>/dev/null || sudo test -f "$d/BOOTIA32.EFI" 2>/dev/null || \
        sudo test -f "$d/BOOTAA64.EFI" 2>/dev/null || sudo test -f "$d/limine_x64.efi" 2>/dev/null || \
        sudo test -f "$d/limine.conf" 2>/dev/null; then
@@ -1411,19 +1411,25 @@ configure_limine_snapper() {
     fi
   fi
 
-  # Apply Limine theme for better looking boot menu (Catppuccin Mocha, Arch blue)
-  # Handles 700 /boot via privileged write + FAT32 mutex, idempotent
-  if [[ -n "${limine_conf:-}" ]] && sudo test -f "$limine_conf" 2>/dev/null; then
-    configure_limine_theme "$limine_conf"
-  elif [[ -n "${limine_dir:-}" ]]; then
-    for _lc in "$limine_dir/limine.conf" "$limine_dir/../limine.conf" "/boot/limine.conf" "/boot/limine/limine.conf"; do
+  # Apply Limine theme for better looking boot menu - handles all locations including /boot/limine.conf (user's case)
+  # Robust for 700 /boot via privileged write + FAT32 mutex, idempotent, handles auto-generated limine-entry-tool
+  {
+    local _theme_targets=()
+    [[ -n "${limine_conf:-}" ]] && _theme_targets+=("$limine_conf")
+    [[ -n "${limine_dir:-}" ]] && _theme_targets+=("$limine_dir/limine.conf")
+    _theme_targets+=("/boot/limine.conf" "/boot/limine/limine.conf" "$esp_mount/limine.conf" "$esp_mount/EFI/limine/limine.conf" "$esp_mount/EFI/BOOT/limine.conf" "/boot/EFI/limine/limine.conf")
+    local _seen=" "
+    local _lc
+    for _lc in "${_theme_targets[@]}"; do
+      [[ -n "$_lc" ]] || continue
+      if [[ "$_seen" == *" $_lc "* ]]; then continue; fi
+      _seen+="$_lc "
       if sudo test -f "$_lc" 2>/dev/null; then
         configure_limine_theme "$_lc"
-        break
       fi
     done
-    unset _lc
-  fi
+    unset _lc _theme_targets _seen
+  }
 
   # Ensure an NVRAM entry exists pointing at the REAL install dir (firmware
   # entries get wiped by updates/resets; archinstall skips this for removable

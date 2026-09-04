@@ -1102,9 +1102,9 @@ backdrop: 05142a
   fi
   # Theme header - polished, wallpaper optional (falls back to solid term_background if no image)
   local theme="# Arch Linux Limine theme
-# Clean dark, blue accent, Arch branding
+# Clean dark, blue accent, Arch branding - transparent to show background.png
 timeout: 3
-default_entry: 1
+default_entry: Arch Linux/linux
 hash_mismatch_panic: no
 graphics: yes
 quiet: no

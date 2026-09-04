@@ -15,6 +15,10 @@ pacman:
       description: "Matrix-style terminal animation"
     - name: cpupower
       description: "CPU frequency scaling tools"
+    - name: cups
+      description: "Printing system (socket-activated)"
+    - name: cups-filters
+      description: "CUPS print filters and drivers"
     - name: dosfstools
       description: "DOS filesystem utilities"
     - name: duf
@@ -37,8 +41,6 @@ pacman:
       description: "Network discovery and security auditing"
     - name: noto-fonts-extra
       description: "Additional Noto fonts"
-    - name: plymouth
-      description: "Graphical boot splash screen"
     - name: power-profiles-daemon
       description: "Power profile management daemon"
     - name: samba
@@ -69,8 +71,6 @@ essential:
       description: "FTP client for file transfers"
     - name: gnome-boxes
       description: "Virtualization GUI using QEMU/KVM"
-    - name: kdenlive
-      description: "Video editor for KDE"
     - name: libreoffice-fresh
       description: "Full-featured office suite"
   minimal:
@@ -156,6 +156,7 @@ desktop_environments:
       - kate
       - kde-gtk-config
       - kdeconnect
+      - kdenlive
       - kdeplasma-addons
       - kinfocenter
       - kio-admin
@@ -168,6 +169,7 @@ desktop_environments:
       - plasma-pa
       - plasma-systemmonitor
       - powerdevil
+      - print-manager
       - python-pyqt6
       - qbittorrent
       - spectacle

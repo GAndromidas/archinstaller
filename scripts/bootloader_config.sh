@@ -7,6 +7,10 @@ source "$SCRIPT_DIR/common.sh"
 # --- Bootloader detection ---
 BOOTLOADER=$(detect_bootloader)
 
+# Slow full initramfs rebuilds are collected here and run exactly once at the
+# end of this step (UKI cmdline changes, overlayfs hook wiring, ...).
+NEEDS_INITRAMFS_REBUILD=false
+
 # ============================================================================
 # UNIFIED KERNEL PARAMETERS
 # ============================================================================
@@ -23,10 +27,10 @@ get_kernel_params() {
   # Base parameters (all systems)
   params="quiet loglevel=3 nowatchdog"
 
-  # Plymouth splash (hide boot text, show progress)
-  if command -v plymouth-set-default-theme &>/dev/null || pacman -Qi plymouth &>/dev/null 2>&1; then
-    params="$params splash vt.global_cursor_default=0"
-  fi
+  # Hide boot text so the Plymouth theme (installed and configured by
+  # archinstall) shows instead. Harmless when Plymouth is absent, and merge
+  # dedups it on re-runs.
+  params="$params splash vt.global_cursor_default=0"
 
   # GPU-specific parameters
   local gpu_vendor=""
@@ -206,38 +210,7 @@ configure_uki_cmdline() {
     log_success "UKI cmdline written: $merged"
   fi
 
-  # Add --splash to mkinitcpio preset if Plymouth is installed (ArchWiki: UKI + Plymouth)
-  # Per ArchWiki: add --splash=<bmp> to *PRESET*_options= lines
-  if pacman -Qi plymouth &>/dev/null 2>&1; then
-    local splash_bmp="/usr/share/systemd/bootctl/splash-arch.bmp"
-    if [[ -f "$splash_bmp" ]] && [[ -d /etc/mkinitcpio.d ]]; then
-      local preset
-      for preset in /etc/mkinitcpio.d/*.preset; do
-        [[ -f "$preset" ]] || continue
-        if grep -q '\-\-splash' "$preset" 2>/dev/null; then
-          continue
-        fi
-        # Handle uncommented default_options lines
-        if grep -q '^default_options=' "$preset" 2>/dev/null; then
-          sudo sed -i "s|^default_options=.*|& --splash=${splash_bmp}|" "$preset" 2>/dev/null && \
-            log_info "Added --splash to $preset" || \
-            log_warning "Failed to add --splash to $preset"
-        # Handle commented-out default_options (uncomment and add --splash)
-        elif grep -q '^#default_options=' "$preset" 2>/dev/null; then
-          sudo sed -i "s|^#default_options=.*|default_options=\"--splash=${splash_bmp}\"|" "$preset" 2>/dev/null && \
-            log_info "Uncommented default_options with --splash in $preset" || \
-            log_warning "Failed to update $preset"
-        # No default_options line at all — add one
-        else
-          echo "default_options=\"--splash=${splash_bmp}\"" | sudo tee -a "$preset" >/dev/null 2>&1 && \
-            log_info "Added default_options with --splash to $preset" || \
-            log_warning "Failed to add default_options to $preset"
-        fi
-      done
-    elif [[ ! -f "$splash_bmp" ]]; then
-      log_warning "Splash bitmap not found at $splash_bmp — Plymouth splash may not display during early boot"
-    fi
-  fi
+  # Plymouth presets/hooks belong to archinstall — not touched here.
 
   # Ensure /boot/efi/EFI/Linux directory exists for UKI output
   local esp_mount
@@ -249,15 +222,8 @@ configure_uki_cmdline() {
       log_warning "Failed to create $uki_dir"
   fi
 
-  # Regenerate UKI images if mkinitcpio presets exist
-  if [[ -d /etc/mkinitcpio.d ]]; then
-    ui_info "Regenerating UKI images..."
-    if sudo mkinitcpio -P 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
-      log_success "UKI images regenerated"
-    else
-      log_warning "UKI image regeneration had issues — check mkinitcpio presets"
-    fi
-  fi
+  # Defer the (slow) full rebuild: collected once at end of step 6.
+  NEEDS_INITRAMFS_REBUILD=true
 }
 
 # Sync /etc/kernel/cmdline only (no image rebuild) for NVRAM-managed
@@ -858,6 +824,77 @@ detect_esp_mount() {
   echo "$esp"
 }
 
+# Run a command while holding the limine-snapper-sync FAT32 mutex, so our
+# limine.conf edits can't race the watcher/service mid-write (FAT32 has no
+# journaling — a torn write = unbootable menu). No-op if the lib isn't
+# installed yet. Usage: with_limine_lock func arg1...
+with_limine_lock() {
+  if [[ -r /usr/lib/limine/limine-mutex ]]; then
+    # shellcheck disable=SC1091
+    source /usr/lib/limine/limine-mutex
+    mutex_lock "archinstaller"
+    "$@"
+    local rc=$?
+    mutex_unlock || true
+    return $rc
+  else
+    "$@"
+  fi
+}
+
+# Helpers executed under with_limine_lock (must be plain functions, same shell)
+_limine_replace_cmdline() {
+  local conf="$1" value="$2"
+  sudo cp "$conf" "${conf}.backup.$(date +%Y%m%d_%H%M%S)"
+  # Params contain / (rootflags) but no | or & — pipe delimiter is safe.
+  sudo sed -i -E "s|^([[:space:]]*cmdline:).*|\1 $value|" "$conf"
+}
+
+_limine_append_snapshots_marker() {
+  printf '\n  //Snapshots\n' | sudo tee -a "$1" >/dev/null
+}
+
+# Wire the overlayfs initramfs hook from limine-mkinitcpio-hook so booting a
+# read-only snapshot actually works (GDM and other writers fail without a
+# writable layer). Upstream rule: btrfs-overlayfs after filesystems for
+# busybox/udev hooks, sd-btrfs-overlayfs for the systemd hook.
+configure_limine_overlayfs() {
+  local mkconf="/etc/mkinitcpio.conf"
+  if ! command -v mkinitcpio &>/dev/null || [[ ! -f "$mkconf" ]]; then
+    log_info "mkinitcpio not in use — skipping overlayfs hook setup"
+    return 0
+  fi
+  if ! pacman -Qi limine-mkinitcpio-hook &>/dev/null 2>&1; then
+    return 0
+  fi
+
+  # Upstream rule: <name>-overlayfs goes after filesystems; only the hook
+  # NAME differs (sd- variant for the systemd hook, plain for busybox/udev).
+  local hook=""
+  if grep -q "^HOOKS=.*\bsystemd\b" "$mkconf"; then
+    hook="sd-btrfs-overlayfs"
+    [[ -f /usr/lib/initcpio/install/sd-btrfs-overlayfs ]] || { log_warning "$hook hook file missing — skipping"; return 0; }
+  else
+    hook="btrfs-overlayfs"
+    [[ -f /usr/lib/initcpio/install/btrfs-overlayfs ]] || { log_warning "$hook hook file missing — skipping"; return 0; }
+  fi
+
+  if grep -q "^HOOKS=.*\b$hook\b" "$mkconf"; then
+    log_info "$hook already present in mkinitcpio HOOKS"
+    return 0
+  fi
+
+  validate_config_file "$mkconf" >/dev/null 2>&1 || true
+  if sudo sed -i "s/^\(HOOKS=.*\bfilesystems\b\)/\1 $hook/" "$mkconf" && \
+     grep -q "^HOOKS=.*\b$hook\b" "$mkconf"; then
+    log_success "Added $hook after filesystems in mkinitcpio (read-only snapshots can boot)"
+    # Defer the (slow) full rebuild: collected once at end of step 6.
+    NEEDS_INITRAMFS_REBUILD=true
+  else
+    log_warning "Failed to add $hook to mkinitcpio HOOKS"
+  fi
+}
+
 # Install an AUR package using whatever helper is available.
 # Returns 0 on success (or already installed), 1 otherwise. Never exits.
 limine_install_aur_pkg() {
@@ -918,7 +955,8 @@ configure_limine_snapper() {
   if [[ "$want_snapper" == true ]]; then
     repo_pkgs+=(btrfs-progs snapper)
   fi
-  if ! sudo pacman -Sy --needed --noconfirm "${repo_pkgs[@]}" >>"$INSTALL_LOG" 2>&1; then
+  # Full -Syu (never bare -Sy: partial upgrades break Arch).
+  if ! sudo pacman -Syu --needed --noconfirm "${repo_pkgs[@]}" >>"$INSTALL_LOG" 2>&1; then
     log_error "Failed to install required packages: ${repo_pkgs[*]}"
     return 1
   fi
@@ -939,6 +977,9 @@ configure_limine_snapper() {
         limine_install_aur_pkg "limine-mkinitcpio-hook" || true
       fi
     fi
+    # Overlayfs hook AFTER the hook package exists: makes read-only snapshots
+    # bootable (GDM and other writers fail without a writable layer).
+    configure_limine_overlayfs || true
   fi
 
   # Configure Snapper (btrfs only)
@@ -1157,10 +1198,18 @@ configure_limine_snapper() {
     }
 
     limine_set_default_key "TARGET_OS_NAME" "\"$os_name\""
-    limine_set_default_key "MAX_SNAPSHOT_ENTRIES" "10"
+    # auto prunes by boot-partition usage (upstream default) instead of a hard
+    # cap; LIMIT 80 stays stricter than upstream's 85.
+    limine_set_default_key "MAX_SNAPSHOT_ENTRIES" "auto"
     limine_set_default_key "LIMIT_USAGE_PERCENT" "80"
     limine_set_default_key "ESP_PATH" "\"$esp_path_val\""
+    # replace is upstream's default and the right method for Arch @-subvolume
+    # layouts (rsync also works; snapper/opensuse needs an OpenSUSE layout).
+    limine_set_default_key "RESTORE_METHOD" "replace"
+    # Skip snapper's config autodetect on every run — we always use root.
+    limine_set_default_key "SNAPPER_CONFIG_NAME" "root"
     limine_set_default_key "SNAPSHOT_FORMAT_CHOICE" "8"
+    # sha256 via coreutils is always present; xxhash needs an extra package.
     limine_set_default_key "HASH_FUNCTION" "sha256"
     limine_set_default_key "COMMANDS_BEFORE_SAVE" "\"\""
     limine_set_default_key "COMMANDS_AFTER_SAVE" "\"\""
@@ -1219,9 +1268,7 @@ configure_limine_snapper() {
       existing_cmdline=$(sudo grep -E '^[[:space:]]*cmdline:' "$limine_conf" 2>/dev/null | head -1 | sed -E 's/^[[:space:]]*cmdline:[[:space:]]*//')
       merged_full=$(merge_kernel_params "$existing_cmdline" "$(get_kernel_params --cmdline-only)")
       merged_full=$(ensure_root_rw "$merged_full")
-      sudo cp "$limine_conf" "${limine_conf}.backup.$(date +%Y%m%d_%H%M%S)"
-      # Params contain / (rootflags) but no | or & — pipe delimiter is safe.
-      sudo sed -i -E "s|^([[:space:]]*cmdline:).*|\1 $merged_full|" "$limine_conf"
+      with_limine_lock _limine_replace_cmdline "$limine_conf" "$merged_full"
       log_success "Updated kernel cmdline in $limine_conf"
     else
       log_warning "No cmdline entries in $limine_conf — leaving it untouched."
@@ -1232,7 +1279,7 @@ configure_limine_snapper() {
 
   if [[ "$want_snapper" == true ]]; then
     if sudo test -f "$limine_conf" 2>/dev/null && ! sudo grep -q 'Snapshots' "$limine_conf" 2>/dev/null; then
-      printf '\n  //Snapshots\n' | sudo tee -a "$limine_conf" >/dev/null
+      with_limine_lock _limine_append_snapshots_marker "$limine_conf"
       log_success "Added //Snapshots marker to $limine_conf."
     fi
 
@@ -1295,9 +1342,9 @@ case "${1:-help}" in
         limine-snapper-sync 2>/dev/null || true
         ;;
     restore|r)
-        echo -e "${YELLOW}Restore available when booted into a snapshot.${NC}"
-        echo "  sudo limine-snapper-restore <snapshot-id>"
-        echo "  sudo snapper -c root rollback"
+        echo -e "${YELLOW}Boot into a snapshot from the Limine menu first, then restore.${NC}"
+        echo "  sudo limine-snapper-restore    # guided restore (recommended)"
+        echo "  (snapper rollback only works on OpenSUSE-style layouts)"
         ;;
     fix)
         CONF=$(find /boot -maxdepth 2 -name "limine.conf" 2>/dev/null | head -1)
@@ -1366,4 +1413,18 @@ elif [ "$BOOTLOADER" = "refind" ] || [ "$BOOTLOADER" = "efistub" ]; then
 else
     log_warning "No bootloader detected or bootloader is unsupported. Defaulting to systemd-boot configuration."
     configure_boot
+fi
+
+# Single collected initramfs rebuild for the whole step (was up to 3× -P).
+if [[ "$NEEDS_INITRAMFS_REBUILD" == true ]]; then
+  if [[ -d /etc/mkinitcpio.d ]] && command -v mkinitcpio &>/dev/null; then
+    ui_info "Regenerating initramfs (all pending step-6 changes)..."
+    if sudo mkinitcpio -P 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
+      log_success "Initramfs regenerated"
+    else
+      log_warning "Initramfs regeneration had issues — check mkinitcpio presets"
+    fi
+  else
+    log_info "Initramfs rebuild requested but mkinitcpio not in use — skipping"
+  fi
 fi

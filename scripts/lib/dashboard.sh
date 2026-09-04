@@ -7,20 +7,20 @@ set -uo pipefail
 # step updates. No external dependencies (gum optional elsewhere).
 # ============================================================================
 
-DASHBOARD_START_TIME=0
+DASHBOARD_START_SEC=-1
 DASHBOARD_STEP_TIMES=()
 DASHBOARD_STEP_NAMES=()
 DASHBOARD_STEP_STATUSES=()
 DASHBOARD_STEP_ROWS=()
 DASHBOARD_INNER_W=60
 DASHBOARD_CURRENT_STEP=0
-DASHBOARD_STEP_START=0
+DASHBOARD_STEP_SEC=-1
 DASHBOARD_FRAME_END=0
 DASHBOARD_ROW_OFFSET=0
 
 dashboard_init() {
     clear
-    DASHBOARD_STEP_START=0
+    DASHBOARD_STEP_SEC=-1
     DASHBOARD_STEP_TIMES=()
     DASHBOARD_STEP_NAMES=()
     DASHBOARD_STEP_STATUSES=()
@@ -88,7 +88,7 @@ dashboard_init() {
     DASHBOARD_FRAME_END=$row
 
     # Start timer AFTER frame is drawn so init overhead isn't counted
-    DASHBOARD_START_TIME=$(date +%s)
+    DASHBOARD_START_SEC=$SECONDS
 
     tput cup $((DASHBOARD_ROW_OFFSET + DASHBOARD_FRAME_END + 1)) 0
 }
@@ -102,7 +102,7 @@ dashboard_step() {
     DASHBOARD_STEP_NAMES[$num]="$name"
     DASHBOARD_STEP_TIMES[$num]=0
     DASHBOARD_STEP_STATUSES[$num]="running"
-    DASHBOARD_STEP_START=$(date +%s)
+    DASHBOARD_STEP_SEC=$SECONDS
 
     local pct=$(( (num - 1) * 100 / total ))
 
@@ -167,7 +167,7 @@ dashboard_run() {
 
 dashboard_ok() {
     local elapsed=0
-    [ "$DASHBOARD_STEP_START" -gt 0 ] && elapsed=$(($(date +%s) - DASHBOARD_STEP_START))
+    [ "$DASHBOARD_STEP_SEC" -ge 0 ] && elapsed=$((SECONDS - DASHBOARD_STEP_SEC))
     (( elapsed < 0 )) && elapsed=0
     local num=$DASHBOARD_CURRENT_STEP
     local w=$DASHBOARD_INNER_W
@@ -189,7 +189,7 @@ dashboard_ok() {
 
 dashboard_fail() {
     local elapsed=0
-    [ "$DASHBOARD_STEP_START" -gt 0 ] && elapsed=$(($(date +%s) - DASHBOARD_STEP_START))
+    [ "$DASHBOARD_STEP_SEC" -ge 0 ] && elapsed=$((SECONDS - DASHBOARD_STEP_SEC))
     (( elapsed < 0 )) && elapsed=0
     local num=$DASHBOARD_CURRENT_STEP
     local w=$DASHBOARD_INNER_W
@@ -233,7 +233,7 @@ dashboard_skip() {
 dashboard_warn() {
     local msg="${1:-Warning}"
     local elapsed=0
-    [ "$DASHBOARD_STEP_START" -gt 0 ] && elapsed=$(($(date +%s) - DASHBOARD_STEP_START))
+    [ "$DASHBOARD_STEP_SEC" -ge 0 ] && elapsed=$((SECONDS - DASHBOARD_STEP_SEC))
     (( elapsed < 0 )) && elapsed=0
     local num=$DASHBOARD_CURRENT_STEP
     local w=$DASHBOARD_INNER_W
@@ -269,11 +269,9 @@ dashboard_finish() {
         esac
     done
 
-    local now
-    now=$(date +%s)
     local wall_time=0
-    if [[ "$DASHBOARD_START_TIME" -gt 0 ]]; then
-        wall_time=$(( now - DASHBOARD_START_TIME ))
+    if [[ "$DASHBOARD_START_SEC" -ge 0 ]]; then
+        wall_time=$(( SECONDS - DASHBOARD_START_SEC ))
     fi
     (( wall_time < 0 )) && wall_time=0
     local cols

@@ -9,8 +9,6 @@ CONFIGS_DIR="$ARCHINSTALLER_ROOT/configs"
 
 source "$SCRIPT_DIR/common.sh"
 
-export SUDO_ASKPASS= # Force sudo to prompt in terminal, not via GUI
-
 # ===== Globals =====
 PROGRAMS_ERRORS=()
 PROGRAMS_INSTALLED=()

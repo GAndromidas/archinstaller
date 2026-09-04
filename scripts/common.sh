@@ -212,10 +212,13 @@ atomic_write() {
 # ============================================================================
 
 
-# Format time display helper function
+# Format time display helper function (durations are second-resolution, so a
+# zero reading means "under a second", not "instant")
 format_time() {
   local seconds=$1
-  if [ "$seconds" -lt 60 ]; then
+  if [ "$seconds" -le 0 ]; then
+    echo "<1s"
+  elif [ "$seconds" -lt 60 ]; then
     echo "${seconds}s"
   elif [ "$seconds" -lt 3600 ]; then
     local minutes=$((seconds / 60))

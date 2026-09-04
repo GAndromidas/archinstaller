@@ -21,8 +21,8 @@ setup_firewall_and_services() {
   # Then handle services
   run_step "Enabling system services" enable_services
 
-  # Configure Plymouth boot splash
-  run_step "Configuring Plymouth boot splash" configure_plymouth
+  # Plymouth theme/hooks/initramfs belong to archinstall — only the kernel
+  # splash params (step 6) are managed here.
 }
 
 configure_firewalld() {
@@ -93,7 +93,9 @@ configure_ufw() {
 configure_user_groups() {
   step "Configuring user groups"
 
-  local groups=("wheel" "video" "storage" "optical" "scanner" "lp" "rfkill")
+  # render covers /dev/dri/renderD* (VA-API/hardware decode); video alone is
+  # not enough there, and logind ACLs don't cover every consumer.
+  local groups=("wheel" "video" "render" "storage" "optical" "scanner" "lp" "rfkill")
 
   for group in "${groups[@]}"; do
     if getent group "$group" >/dev/null; then
@@ -134,6 +136,75 @@ setup_snapper_integration() {
     install_packages_quietly "${snapper_pkgs[@]}"
   else
     log_info "snapper integration packages already installed"
+  fi
+
+  # Snapshot schedule (both modes — pure systemd, no GUI needed)
+  configure_snapper_schedule
+}
+
+# Snapshot schedule for snapper: one "boot" snapshot at startup plus one
+# "daily" snapshot (Persistent timer catches up after downtime). Both use
+# cleanup-algorithm=number so snapper-cleanup prunes them via the config's
+# NUMBER_LIMIT — no manual maintenance. btrfs-assistant (when installed)
+# picks these up automatically for browsing/rollback.
+configure_snapper_schedule() {
+  # snap-pac and the schedule below need a snapper config for /.
+  # (The Limine path in step 6 creates one; GRUB/systemd-boot paths don't.)
+  if [[ ! -f /etc/snapper/configs/root ]]; then
+    log_info "No snapper config for / — creating one..."
+    if ! sudo snapper -c root create-config / >>"$INSTALL_LOG" 2>&1; then
+      log_warning "Could not create snapper config for / — skipping snapshot schedule."
+      return 0
+    fi
+  fi
+
+  # Boot snapshot: oneshot at the end of boot. --now also takes an
+  # "initial" snapshot right after installation.
+  sudo tee /etc/systemd/system/snapper-boot-snapshot.service >/dev/null <<'EOF'
+[Unit]
+Description=Snapper snapshot at boot
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/snapper -c root create --description boot --cleanup-algorithm number
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  # Daily snapshot: timer + oneshot, Persistent so powered-off days backfill.
+  sudo tee /etc/systemd/system/snapper-daily-snapshot.service >/dev/null <<'EOF'
+[Unit]
+Description=Snapper daily snapshot
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/snapper -c root create --description daily --cleanup-algorithm number
+EOF
+  sudo tee /etc/systemd/system/snapper-daily-snapshot.timer >/dev/null <<'EOF'
+[Unit]
+Description=Daily snapper snapshot
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=30m
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  sudo systemctl daemon-reload 2>/dev/null || true
+  if sudo systemctl enable --now snapper-boot-snapshot.service >>"$INSTALL_LOG" 2>&1; then
+    log_success "Boot snapshot enabled (snapper-boot-snapshot.service)"
+  else
+    log_warning "Failed to enable snapper-boot-snapshot.service"
+  fi
+  if sudo systemctl enable --now snapper-daily-snapshot.timer >>"$INSTALL_LOG" 2>&1; then
+    log_success "Daily snapshot enabled (snapper-daily-snapshot.timer)"
+  else
+    log_warning "Failed to enable snapper-daily-snapshot.timer"
   fi
 }
 
@@ -181,12 +252,30 @@ enable_services() {
   else
 
   local services=(
-    bluetooth.service
     cronie.service
     fstrim.timer
     paccache.timer
     sshd.service
   )
+
+  # Printing (socket-activated) and firmware refresh — only when installed
+  if pacman -Qi cups &>/dev/null 2>&1; then
+    services+=(cups.socket)
+    log_info "cups.socket will be enabled for printing."
+  fi
+  if pacman -Qi fwupd &>/dev/null 2>&1; then
+    services+=(fwupd-refresh.timer)
+    log_info "fwupd-refresh.timer will be enabled for firmware updates."
+  fi
+
+  # Bluetooth only when hardware exists (or probably exists, i.e. laptops) —
+  # enabling it on BT-less desktops/VMs just logs warnings.
+  if lsusb 2>/dev/null | grep -qi bluetooth || [ -d /sys/class/bluetooth ] || is_laptop; then
+    services+=(bluetooth.service)
+    log_info "Bluetooth hardware detected — bluetooth.service will be enabled."
+  else
+    log_info "No Bluetooth hardware detected — skipping bluetooth.service."
+  fi
 
   # Check and configure virtualization guest integration (libvirt is used by virt-manager and gnome-boxes)
   if command -v virsh &>/dev/null || pacman -Q libvirt-daemon &>/dev/null 2>&1 || pacman -Q virt-manager &>/dev/null 2>&1 || pacman -Q gnome-boxes &>/dev/null 2>&1; then
@@ -211,6 +300,15 @@ enable_services() {
     log_warning "rustdesk is not installed. Skipping rustdesk.service."
   fi
 
+  # Conditionally add lactd.service if lact is installed (usually via Gaming
+  # Mode on AMD). Never enabled when absent — install source doesn't matter.
+  if pacman -Qi lact &>/dev/null 2>&1; then
+    services+=(lactd.service)
+    log_success "lactd.service will be enabled."
+  else
+    log_info "lact is not installed. Skipping lactd.service."
+  fi
+
   # Conditionally add power-profiles-daemon.service if installed
   if pacman -Qi power-profiles-daemon &>/dev/null && ! pacman -Qi tlp &>/dev/null && ! pacman -Qi auto-cpufreq &>/dev/null; then
     services+=(power-profiles-daemon.service)
@@ -226,8 +324,14 @@ enable_services() {
       if yay -S --noconfirm --needed timeshift-autosnap >>"$INSTALL_LOG" 2>&1; then
         log_success "timeshift-autosnap installed successfully"
         sudo systemctl daemon-reload
-        services+=(timeshift-autosnap.timer)
-        log_success "timeshift-autosnap.timer will be enabled for automatic snapshots."
+        # Upstream ships a hook, not necessarily a timer unit — only queue
+        # it when the unit actually exists.
+        if systemctl list-unit-files "timeshift-autosnap.timer" 2>/dev/null | grep -q "timeshift-autosnap.timer"; then
+          services+=(timeshift-autosnap.timer)
+          log_success "timeshift-autosnap.timer will be enabled for automatic snapshots."
+        else
+          log_info "No timeshift-autosnap.timer unit shipped — the pacman hook needs no enabling."
+        fi
       else
         log_error "Failed to install timeshift-autosnap from AUR"
       fi
@@ -283,106 +387,9 @@ enable_services() {
   fi
 }
 
-# Configure Plymouth boot splash
-# Hook ordering per ArchWiki:
-#   systemd: base → systemd → plymouth → (encrypt/sd-encrypt)
-#   base:    base → udev → plymouth → (encrypt)
-configure_plymouth() {
-  # Skip for server mode (no graphical boot needed)
-  if [[ "$INSTALL_MODE" == "server" ]]; then
-    log_info "Server mode — skipping Plymouth configuration"
-    return 0
-  fi
-
-  # Check if Plymouth is installed
-  if ! pacman -Qi plymouth &>/dev/null 2>&1; then
-    log_info "Plymouth not installed — skipping configuration"
-    return 0
-  fi
-
-  ui_info "Configuring Plymouth boot splash..."
-
-  # Set theme: prefer bgrt (UEFI), fallback to spinner
-  local theme="spinner"
-  if pacman -Qi plymouth-theme-bgrt &>/dev/null 2>&1; then
-    theme="bgrt"
-  elif pacman -Qi xora &>/dev/null 2>&1; then
-    theme="xora"
-  fi
-
-  # Set the Plymouth theme (also creates initramfs hook directory entries)
-  if command -v plymouth-set-default-theme &>/dev/null; then
-    sudo plymouth-set-default-theme -R "$theme" >>"$INSTALL_LOG" 2>&1 && \
-      log_success "Plymouth theme set to: $theme" || \
-      log_warning "Failed to set Plymouth theme"
-  fi
-
-  # Add plymouth hook to mkinitcpio if not present
-  local mkinitcpio_conf="/etc/mkinitcpio.conf"
-  if [[ -f "$mkinitcpio_conf" ]]; then
-    if ! grep -q "plymouth" "$mkinitcpio_conf"; then
-      if grep -q "^HOOKS=.*systemd" "$mkinitcpio_conf"; then
-        # systemd hook: add plymouth after systemd
-        sudo sed -i 's/\(HOOKS=.*systemd\)/\1 plymouth/' "$mkinitcpio_conf"
-        log_success "Added plymouth hook after systemd in mkinitcpio"
-      elif grep -q "^HOOKS=.*udev" "$mkinitcpio_conf"; then
-        # base hook: add plymouth after udev (udev MUST come before plymouth)
-        sudo sed -i 's/\(HOOKS=.*udev\)/\1 plymouth/' "$mkinitcpio_conf"
-        log_success "Added plymouth hook after udev in mkinitcpio"
-      fi
-    else
-      log_info "Plymouth hook already present in mkinitcpio"
-    fi
-
-    # Verify plymouth is positioned correctly (after udev/systemd, before encrypt)
-    if grep -q "plymouth" "$mkinitcpio_conf"; then
-      local hooks_line
-      hooks_line=$(grep "^HOOKS=" "$mkinitcpio_conf")
-      local plymouth_pos=0 udev_pos=0 systemd_pos=0 encrypt_pos=0 sdencrypt_pos=0
-      local pos=0
-      for hook in $hooks_line; do
-        ((pos++))
-        case "$hook" in
-          udev)       udev_pos=$pos ;;
-          systemd)    systemd_pos=$pos ;;
-          plymouth)   plymouth_pos=$pos ;;
-          encrypt)    encrypt_pos=$pos ;;
-          sd-encrypt) sdencrypt_pos=$pos ;;
-        esac
-      done
-      # Fix ordering: plymouth must be after udev/systemd and before encrypt/sd-encrypt
-      if [[ "$udev_pos" -gt 0 && "$plymouth_pos" -lt "$udev_pos" ]]; then
-        log_warning "Plymouth is before udev in mkinitcpio — rearranging hooks"
-        sudo sed -i 's/plymouth //' "$mkinitcpio_conf"
-        sudo sed -i 's/\(HOOKS=.*udev\)/\1 plymouth/' "$mkinitcpio_conf"
-      elif [[ "$systemd_pos" -gt 0 && "$plymouth_pos" -lt "$systemd_pos" ]]; then
-        log_warning "Plymouth is before systemd in mkinitcpio — rearranging hooks"
-        sudo sed -i 's/plymouth //' "$mkinitcpio_conf"
-        sudo sed -i 's/\(HOOKS=.*systemd\)/\1 plymouth/' "$mkinitcpio_conf"
-      fi
-      # Ensure plymouth comes before encrypt/sd-encrypt if present
-      if [[ "$encrypt_pos" -gt 0 && "$plymouth_pos" -gt "$encrypt_pos" ]]; then
-        log_warning "Plymouth is after encrypt — rearranging hooks"
-        sudo sed -i 's/plymouth //' "$mkinitcpio_conf"
-        sudo sed -i 's/\(HOOKS=.*encrypt\)/\1 plymouth/' "$mkinitcpio_conf"
-      elif [[ "$sdencrypt_pos" -gt 0 && "$plymouth_pos" -gt "$sdencrypt_pos" ]]; then
-        log_warning "Plymouth is after sd-encrypt — rearranging hooks"
-        sudo sed -i 's/plymouth //' "$mkinitcpio_conf"
-        sudo sed -i 's/\(HOOKS=.*sd-encrypt\)/\1 plymouth/' "$mkinitcpio_conf"
-      fi
-    fi
-
-    # Regenerate initramfs
-    ui_info "Regenerating initramfs with Plymouth hooks..."
-    if sudo mkinitcpio -P >>"$INSTALL_LOG" 2>&1; then
-      log_success "Initramfs regenerated with Plymouth support"
-    else
-      log_warning "Initramfs regeneration had issues"
-    fi
-  fi
-
-  log_success "Plymouth boot splash configured"
-}
+# NOTE: Plymouth theme, hooks and initramfs belong to archinstall and are
+# intentionally not managed here. Only the kernel splash params from step 6
+# apply. (configure_plymouth was removed.)
 
 detect_and_install_gpu_drivers() {
   step "Detecting and installing graphics drivers"

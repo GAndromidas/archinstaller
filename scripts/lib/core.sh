@@ -47,12 +47,13 @@ if [ -z "${GUM_PRIMARY:-}" ]; then
 fi
 
 # Global variables (/var/tmp survives reboots so resume works; /tmp does not)
+# NOTE: durations use monotonic $SECONDS (see install.sh/dashboard.sh) — never
+# wall-clock date math, which breaks across NTP/VM clock jumps.
 export INSTALL_LOG="${INSTALL_LOG:-/var/tmp/archinstaller.log}"
 STATE_FILE="${STATE_FILE:-/var/tmp/archinstaller.state}"
 ERRORS=()
 INSTALLED_PACKAGES=()
 FAILED_PACKAGES=()
-START_TIME=$(date +%s)
 
 # Rotate old log files (keep last 3 backups)
 if ! declare -f rotate_logs >/dev/null 2>&1; then

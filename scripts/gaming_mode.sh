@@ -25,7 +25,9 @@ check_and_enable_multilib() {
 	if ! grep -q "^\[multilib\]" /etc/pacman.conf; then
 		echo -e "\n[multilib]\nInclude = /etc/pacman.d/mirrorlist" | sudo tee -a /etc/pacman.conf >/dev/null
 		log_success "Enabled multilib repository for gaming mode"
-		# Sync databases to pick up multilib (single -Sy, not full -Syy)
+		# Sync-only (no -u): the repo is brand-new so databases must refresh
+		# before installs, but a second full system upgrade mid-run is waste.
+		# This is the one legitimate bare -Sy — do not "fix" into -Syu.
 		sudo pacman -Sy --noconfirm >>"$INSTALL_LOG" 2>&1
 	else
 		log_success "Multilib repository already enabled"
@@ -90,7 +92,11 @@ install_flatpak_packages() {
 		return
 	fi
 
-	flatpak_install_batch "${flatpak_gaming_programs[@]}"
+	if flatpak_install_batch "${flatpak_gaming_programs[@]}"; then
+		GAMING_INSTALLED+=("${flatpak_gaming_programs[@]}")
+	else
+		GAMING_ERRORS+=("flatpak batch (see log for per-app results)")
+	fi
 }
 
 # ===== Configuration Functions =====
@@ -128,17 +134,54 @@ enable_gamemode() {
 	fi
 }
 
+# True when an AMD GPU is present (LACT only drives AMDGPU)
+is_amd_gpu() {
+	lspci 2>/dev/null | grep -Eiq 'vga.*amd|3d.*amd|display.*amd|vga.*radeon|3d.*radeon'
+}
+
+# Drop AMD-only packages on non-AMD systems instead of installing dead weight
+filter_gpu_specific_packages() {
+	local filtered=()
+	local pkg
+	for pkg in "${pacman_gaming_programs[@]}"; do
+		if [[ "$pkg" == "lact" ]] && ! is_amd_gpu; then
+			log_info "No AMD GPU detected — skipping lact (AMDGPU-only)."
+			continue
+		fi
+		filtered+=("$pkg")
+	done
+	pacman_gaming_programs=("${filtered[@]}")
+}
+
+enable_lact() {
+	if ! is_amd_gpu; then
+		return 0
+	fi
+	if ! command -v lact &>/dev/null; then
+		log_info "lact not installed — skipping daemon setup."
+		return 0
+	fi
+	step "Enabling LACT daemon (AMD GPU control)"
+	if sudo systemctl enable --now lactd >>"$INSTALL_LOG" 2>&1; then
+		log_success "lactd enabled — open LACT to manage fan curves, clocks and power limits."
+	else
+		log_warning "Failed to enable lactd. Enable manually with: sudo systemctl enable --now lactd"
+	fi
+}
+
 # ===== Main Execution =====
 main() {
 	step "Gaming Mode Setup"
 	simple_banner "Gaming Mode"
 
-	local description="This includes popular tools like Discord, Steam, Wine, GameMode, MangoHud, Goverlay, Heroic Games Launcher, and more."
+	local description="This includes popular tools like Discord, Steam, Wine, GameMode, MangoHud, Goverlay, LACT (AMD GPU control), Heroic Games Launcher, and more."
 	
-	# Use the same robust gum_confirm pattern as other scripts
+	# Use the same robust gum_confirm pattern as other scripts.
+	# Exit 2 = declined: the installer records SKIPPED (not COMPLETED) so a
+	# later re-run offers Gaming Mode again.
 	if ! ui_confirm "Enable Gaming Mode?" "$description"; then
-		ui_info "Gaming Mode skipped."
-		return 0
+		ui_info "Gaming Mode skipped — re-run the installer anytime to enable it."
+		return 2
 	fi
 
 	ui_success "Gaming Mode enabled! Installing gaming packages and optimizations..."
@@ -150,19 +193,27 @@ main() {
 	# Crucial: Ensure multilib is actually working before attempting to install steam/wine
 	check_and_enable_multilib
 
+	# LACT is AMDGPU-only — drop it on NVIDIA/Intel/VM systems
+	filter_gpu_specific_packages
 
 	install_pacman_packages
 	install_flatpak_packages
 	configure_mangohud
+	enable_gamemode
+	enable_lact
 	
 	# Check current kernel for optimizations
 	local kernel=$(uname -r)
 	
 	log_info "Current kernel: $kernel"
 	log_info "Gaming optimizations applied via GameMode and gaming tools"
-	
-	ui_success "Gaming Mode installation complete!"
-	ui_info "Your system is now optimized for gaming with GameMode and gaming tools."
+
+	if [ ${#GAMING_ERRORS[@]} -gt 0 ]; then
+		ui_warn "Gaming Mode completed with ${#GAMING_ERRORS[@]} failure(s): ${GAMING_ERRORS[*]}"
+	else
+		ui_success "Gaming Mode installation complete!"
+		ui_info "Your system is now optimized for gaming with GameMode and gaming tools."
+	fi
 }
 
 main

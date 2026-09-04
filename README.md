@@ -47,7 +47,7 @@ It's designed around the Arch philosophy: **simple, transparent, and under your 
 - **User groups** — `wheel`, `video`, `storage`, `optical`, `scanner`, `lp`, `rfkill`
 
 ### Optional Extras
-- **Gaming Mode** — Steam, Wine, GameMode, MangoHud, Discord, Heroic & more (with multilib enabled)
+- **Gaming Mode** — Steam, Wine, GameMode, MangoHud, LACT (AMD GPU control, auto-enabled daemon), Discord, Heroic & more (with multilib enabled)
 - **Wake-on-LAN** — persistent, multi-adapter WoL for desktops (auto-skipped on laptops/VMs)
 - **Server mode** — Docker, sysctl tuning, and time sync for headless boxes
 
@@ -100,7 +100,7 @@ The installer runs through 10 steps and tracks its own progress, so an interrupt
 | 2 | Shell Setup | Zsh + Oh-My-Zsh + Starship + Fastfetch (never overwrites existing config) |
 | 3 | Yay Installation | AUR helper for community packages |
 | 4 | Programs | Mode- & DE-specific apps from YAML |
-| 5 | Gaming Mode | Optional gaming stack |
+| 5 | Gaming Mode | Optional gaming stack (incl. LACT on AMD GPUs, GameMode service) |
 | 6 | Bootloader | Kernel params for GRUB / systemd-boot / **Limine + Snapper** integration. When Limine is detected, installer configures Limine with Snapper support, enabling snapshot boot entries. |
 | 7 | System Services | Firewall, GPU drivers, power & storage tuning |
 | 8 | Fail2ban | SSH hardening |

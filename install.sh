@@ -124,7 +124,9 @@ fi
 # Initialize core library
 init_core
 
-START_TIME=$(date +%s)
+# Monotonic install timer (bash SECONDS: immune to NTP/VM wall-clock jumps,
+# which previously produced a "0 seconds" total when the clock moved back)
+START_TIME_SEC=$SECONDS
 
 # Parse flags
 VERBOSE=false
@@ -154,7 +156,7 @@ done
 export VERBOSE
 export DRY_RUN
 export INSTALL_LOG
-export START_TIME
+export START_TIME_SEC
 
 arch_ascii
 
@@ -289,6 +291,8 @@ show_resume_menu() {
       elif [[ "$step" =~ ^FAILED: ]]; then
         step_status+=("failed")
         has_failures=true
+      elif [[ "$step" =~ ^SKIPPED: ]]; then
+        step_status+=("skipped")
       else
         # Legacy format - assume completed
         step_status+=("completed")
@@ -315,6 +319,9 @@ show_resume_menu() {
             ;;
           "failed")
             gum style --foreground "$GUM_ERROR" "  [FAILED] $display_step" >/dev/null
+            ;;
+          "skipped")
+            gum style --foreground "$GUM_MUTED" "  [SKIPPED] $display_step" >/dev/null
             ;;
         esac
       done
@@ -366,6 +373,9 @@ show_resume_menu() {
             ;;
           "failed")
             echo -e "${THEME_ERROR}[FAILED]${RESET} $display_step"
+            ;;
+          "skipped")
+            echo -e "${THEME_MUTED}[SKIPPED]${RESET} $display_step"
             ;;
         esac
       done
@@ -474,11 +484,15 @@ mark_step_complete_with_progress() {
     return 1
   fi
 
-  # Write status to state file with consistent format (atomic, flock-guarded)
+  # Write status to state file with consistent format (atomic, flock-guarded).
+  # "skipped" is informational only: is_step_complete() ignores it, so a
+  # skipped optional step re-runs (re-prompts) next time.
   (
     flock -x 200
     if [ "$status" = "completed" ]; then
       echo "COMPLETED: $step_name" >> "$STATE_FILE"
+    elif [ "$status" = "skipped" ]; then
+      echo "SKIPPED: $step_name" >> "$STATE_FILE"
     else
       echo "FAILED: $step_name" >> "$STATE_FILE"
     fi
@@ -558,9 +572,9 @@ save_log_on_exit() {
       echo "Check the log above for details."
     else
       echo "Installation completed successfully!"
-      local elapsed=$(( $(date +%s) - START_TIME ))
+      local elapsed=$(( SECONDS - START_TIME_SEC ))
       (( elapsed < 0 )) && elapsed=0
-      echo "Total installation time: ${elapsed} seconds"
+      echo "Total installation time: $(format_time "$elapsed")"
     fi
   } >> "$INSTALL_LOG"
 }
@@ -637,16 +651,23 @@ else
   fi
 fi
 
-# Step 5: Gaming Mode
+# Step 5: Gaming Mode (exit 2 from the script = user declined -> SKIPPED,
+# which re-prompts on the next run instead of looking "completed")
 dashboard_step "Gaming Mode" 5
 if [[ "$INSTALL_MODE" == "server" ]]; then
+  mark_step_complete_with_progress "gaming_mode" "skipped"
   dashboard_skip "Skipped — server mode"
 elif is_step_complete "gaming_mode"; then
   dashboard_skip
 else
-  if dashboard_run "$SCRIPTS_DIR/gaming_mode.sh"; then
+  dashboard_run "$SCRIPTS_DIR/gaming_mode.sh"
+  gaming_ret=$?
+  if [ "$gaming_ret" -eq 0 ]; then
     mark_step_complete_with_progress "gaming_mode" "completed"
     dashboard_ok
+  elif [ "$gaming_ret" -eq 2 ]; then
+    mark_step_complete_with_progress "gaming_mode" "skipped"
+    dashboard_skip "Skipped by user"
   else
     mark_step_complete_with_progress "gaming_mode" "failed"
     dashboard_fail
@@ -708,17 +729,14 @@ else
   fi
 fi
 
-# Step 9: Wake-on-LAN Configuration
+# Step 9: Wake-on-LAN Configuration (same dashboard_run pattern as every
+# other step: diagnostics hidden in the log, interactive prompts on /dev/tty)
 dashboard_step "Wake-on-LAN Configuration" 9
 if is_step_complete "wakeonlan_config"; then
   dashboard_skip
 else
-  # Source first to define configure_wakeonlan, then call it.
-  # The Wake-on-LAN step is interactive (interface selection), so its output
-  # is shown on the terminal. Diagnostic output is also logged via tee.
-  source "$SCRIPTS_DIR/wakeonlan_config.sh" >> "$INSTALL_LOG"
-  wol_exit=0
-  configure_wakeonlan 2>&1 | tee -a "$INSTALL_LOG" >/dev/tty || wol_exit=${PIPESTATUS[0]}
+  dashboard_run "$SCRIPTS_DIR/wakeonlan_config.sh"
+  wol_exit=$?
   if [ "$wol_exit" -eq 0 ]; then
     mark_step_complete_with_progress "wakeonlan_config" "completed"
     dashboard_ok

@@ -76,6 +76,7 @@ configure_fail2ban() {
   if [ "$firewall" = "firewalld" ]; then
     sudo sed -i '/^\[sshd\]/,/^$/ {
       /^action = /d
+      /^ *blocktype=.*/d
       /^\[sshd\]/a action = firewallcmd-rich-rules[actiontype=<multiport>]
       /^\[sshd\]/a          blocktype=drop
     }' "$jail_local"

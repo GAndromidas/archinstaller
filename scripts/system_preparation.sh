@@ -237,45 +237,23 @@ install_kernel_headers_for_all() {
   echo -e "\\n${THEME_SUCCESS}Kernel headers installation completed${RESET}\\n"
 }
 
+# Fixed locale set: en_US (system default) + el_GR (Greece). No geo-IP
+# detection — external lookups are slow behind captive portals and
+# nondeterministic across runs.
 generate_locales() {
-  step "Configuring system locales"
+  step "Configuring system locales (en_US + el_GR)"
 
-  if grep -q "^#en_US.UTF-8" /etc/locale.gen; then
-    sudo sed -i 's/^#en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
-    log_info "Uncommented en_US.UTF-8 locale (default)"
-  fi
-
-  log_info "Detecting location for local language support..."
-  local country_code=""
-
-  if command -v curl >/dev/null; then
-    country_code=$(curl -s --connect-timeout 5 https://ifconfig.co/country-iso 2>/dev/null)
-    if [[ -z "$country_code" || ${#country_code} -ne 2 ]]; then
-      country_code=$(curl -s --connect-timeout 5 http://ip-api.com/line/?fields=countryCode 2>/dev/null)
-    fi
-  fi
-
-  if [[ -n "$country_code" && ${#country_code} -eq 2 ]]; then
-    log_success "Detected location: $country_code"
-
-    # Find matching UTF-8 locale in /etc/locale.gen
-    local locale_entry=$(grep "^#.*_${country_code}\.UTF-8" /etc/locale.gen | head -n 1)
-
-    if [[ -n "$locale_entry" ]]; then
-      local locale_name=$(echo "$locale_entry" | awk '{print $1}' | sed 's/^#//')
-
-      if [[ -n "$locale_name" ]]; then
-        sudo sed -i "s/^#${locale_name}/${locale_name}/" /etc/locale.gen
-        log_success "Enabled detected locale: $locale_name"
-      else
-        log_warning "Could not parse locale entry for $country_code"
-      fi
+  local locale
+  for locale in "en_US.UTF-8" "el_GR.UTF-8"; do
+    if grep -q "^#${locale} UTF-8" /etc/locale.gen; then
+      sudo sed -i "s/^#${locale} UTF-8/${locale} UTF-8/" /etc/locale.gen
+      log_success "Enabled locale: $locale"
+    elif grep -q "^${locale} UTF-8" /etc/locale.gen; then
+      log_info "Locale already enabled: $locale"
     else
-      log_info "No specific UTF-8 locale found for country code: $country_code"
+      log_warning "Locale not found in /etc/locale.gen: $locale"
     fi
-  else
-    log_warning "Could not detect location. Only en_US.UTF-8 enabled."
-  fi
+  done
 
   run_step "Regenerating locales" sudo locale-gen
 }

@@ -53,6 +53,17 @@ configure_firewalld() {
   else
     log_warning "KDE Connect is not installed. Skipping KDE Connect service configuration."
   fi
+
+  # Portainer ports (8000,9443) - ensure open even if installed before firewall (programs.sh defers)
+  if sudo docker ps -a 2>/dev/null | grep -q portainer || pacman -Q portainer &>/dev/null || [[ -f /var/tmp/archinstaller_portainer_ports_pending ]] || sudo docker images 2>/dev/null | grep -q portainer; then
+    if ! sudo firewall-cmd --list-ports 2>/dev/null | grep -q "8000/tcp"; then
+      sudo firewall-cmd --add-port=8000/tcp --permanent >>"$INSTALL_LOG" 2>&1 || true
+      sudo firewall-cmd --add-port=9443/tcp --permanent >>"$INSTALL_LOG" 2>&1 || true
+      sudo firewall-cmd --reload >>"$INSTALL_LOG" 2>&1 || true
+      log_success "Opened ports 8000,9443/tcp in firewalld for Portainer (deferred)."
+    fi
+    rm -f /var/tmp/archinstaller_portainer_ports_pending 2>/dev/null || true
+  fi
 }
 
 configure_ufw() {
@@ -62,9 +73,9 @@ configure_ufw() {
     log_success "UFW installed successfully."
   fi
 
-  # Enable UFW
-  sudo ufw enable
-  sudo systemctl enable --now ufw
+  # Enable UFW ( --force avoids "Proceed with operation (y|n)?" hang under dashboard_run where stdout is to log)
+  sudo ufw --force enable
+  sudo systemctl enable --now ufw 2>/dev/null || true
 
   # Set default policies
   sudo ufw default deny incoming
@@ -74,8 +85,8 @@ configure_ufw() {
   log_success "Default policy set to allow all outgoing connections."
 
   # Allow SSH
-  if ! sudo ufw status | grep -q "22/tcp"; then
-    sudo ufw allow ssh
+  if ! sudo ufw status 2>/dev/null | grep -q "22/tcp"; then
+    sudo ufw allow ssh >>"$INSTALL_LOG" 2>&1 || true
     log_success "SSH allowed through UFW."
   else
     log_warning "SSH is already allowed. Skipping SSH service configuration."
@@ -84,9 +95,19 @@ configure_ufw() {
   # Check if KDE Connect is installed
   if pacman -Q kdeconnect &>/dev/null; then
     # Allow specific ports for KDE Connect
-    sudo ufw allow 1714:1764/udp
-    sudo ufw allow 1714:1764/tcp
+    sudo ufw allow 1714:1764/udp >>"$INSTALL_LOG" 2>&1 || true
+    sudo ufw allow 1714:1764/tcp >>"$INSTALL_LOG" 2>&1 || true
     log_success "KDE Connect ports opened in firewall"
+  fi
+
+  # Portainer ports (8000,9443) - ensure open even if installed before firewall (programs.sh defers)
+  if sudo docker ps -a 2>/dev/null | grep -q portainer || pacman -Q portainer &>/dev/null || [[ -f /var/tmp/archinstaller_portainer_ports_pending ]] || sudo docker images 2>/dev/null | grep -q portainer; then
+    if ! sudo ufw status 2>/dev/null | grep -q "8000/tcp"; then
+      sudo ufw allow 8000/tcp >>"$INSTALL_LOG" 2>&1 || true
+      sudo ufw allow 9443/tcp >>"$INSTALL_LOG" 2>&1 || true
+      log_success "Opened ports 8000,9443/tcp in UFW for Portainer (deferred)."
+    fi
+    rm -f /var/tmp/archinstaller_portainer_ports_pending 2>/dev/null || true
   fi
 }
 

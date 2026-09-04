@@ -142,14 +142,14 @@ check_system_compatibility() {
         issues+=("Insufficient disk space (need 2GB, have $((available_space / 1024 / 1024))GB)")
     fi
     
-    # Check internet connection
-    if ! ping -c 1 -W 5 archlinux.org &>/dev/null; then
-        issues+=("No internet connection")
+    # Check internet connection (robust: try DNS + IP, hint on failure)
+    if ! ping -c 1 -W 5 archlinux.org &>/dev/null && ! ping -c 1 -W 5 8.8.8.8 &>/dev/null && ! getent hosts archlinux.org &>/dev/null; then
+        issues+=("No internet connection (check cable/Wi-Fi and DNS - try: ping 8.8.8.8)")
     fi
     
-    # Check bootloader compatibility (sudo: archinstall may lock /boot to
-    # root-only, which bare [ -d ] reports as missing)
-    if ! sudo test -d "/boot" 2>/dev/null; then
+    # Check bootloader compatibility - bare [ -d /boot ] succeeds on 700 (exists, just not readable)
+    # Only use sudo as fallback after bare fails, avoids prompting before sudo -v in install.sh
+    if [ ! -d /boot ] && ! sudo test -d "/boot" 2>/dev/null; then
         issues+=("Boot directory not found")
     fi
     
@@ -429,6 +429,10 @@ update_system_mirrors() {
 
 # Function to check if system is running in a VM environment
 is_vm() {
+  # systemd-detect-virt is most reliable (covers QEMU, KVM, VMware, VirtualBox, etc.)
+  if command -v systemd-detect-virt &>/dev/null && systemd-detect-virt --vm &>/dev/null; then
+    return 0
+  fi
   # Check for common VM indicators
   if [ -f /proc/1/cgroup ] && grep -q hypervisor /proc/1/cgroup 2>/dev/null; then
     return 0
@@ -436,7 +440,7 @@ is_vm() {
   if [ -d /sys/hypervisor ] 2>/dev/null; then
     return 0
   fi
-  if grep -qw "virtual" /sys/class/dmi/id/product_name 2>/dev/null; then
+  if grep -iqw "virtual" /sys/class/dmi/id/product_name 2>/dev/null; then
     return 0
   fi
   if [ -f /etc/arch-release ] && grep -q "VMware" /sys/firmware/acpi/tables/DSDT 2>/dev/null; then

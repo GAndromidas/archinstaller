@@ -1060,18 +1060,19 @@ configure_limine_theme() {
     log_warning "Limine theme: no config path, skipping"
     return 0
   fi
-  # Idempotent - if already themed with correct branding, skip (migrates Archinstaller -> Arch Linux)
-  if sudo grep -qE "^\s*term_palette:" "$conf" 2>/dev/null && sudo grep -qE "^\s*interface_branding:\s*Arch Linux" "$conf" 2>/dev/null; then
+  # Idempotent - if already themed with correct 05142a + Arch Linux/linux default, skip
+  if sudo grep -q "term_palette: 05142a;" "$conf" 2>/dev/null && sudo grep -q "default_entry: Arch Linux/linux" "$conf" 2>/dev/null && sudo grep -qE "^\s*interface_branding:\s*Arch Linux" "$conf" 2>/dev/null; then
     log_info "Limine theme already present in $conf"
     return 0
   fi
-  # Theme - colors matched to background.png dominant 05142a + accent 3e93af, visible menu (no quiet/hide)
+  # Theme - colors matched to background.png, Arch Linux/linux default (direct kernel boot, menu visible 3s)
   local theme="# Arch Linux Limine theme - matched to background.png
 timeout: 3
-graphics: yes
+default_entry: Arch Linux/linux
 interface_branding: Arch Linux
 interface_branding_colour: 3e93af
 hash_mismatch_panic: no
+graphics: yes
 wallpaper_style: stretched
 term_palette: 05142a;f38ba8;a6e3a1;f9e2af;3e93af;f5c2e7;94e2d5;cdd6f4
 term_foreground: cdd6f4

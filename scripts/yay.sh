@@ -1,26 +1,22 @@
 #!/bin/bash
 
-# yay.sh - Install yay-bin AUR helper (prebuilt, faster than yay)
-# This script installs yay-bin, which provides yay for AUR package installation
+# yay.sh - Install yay AUR helper
+# This script installs yay, which is required for AUR package installation
 set -uo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 install_yay() {
-  step "Installing yay-bin AUR helper (prebuilt)"
+  step "Installing yay AUR helper"
 
-  # Check if yay is already installed (yay or yay-bin both provide yay)
+  # Check if yay is already installed
   if command -v yay &>/dev/null; then
     log_success "yay is already installed"
     return 0
   fi
-  if pacman -Q yay-bin &>/dev/null 2>&1; then
-    log_success "yay-bin is already installed"
-    return 0
-  fi
 
-  # Ensure base-devel and git are installed (yay-bin is prebuilt, no go needed - faster)
-  log_info "Ensuring base-devel and git are installed (yay-bin, no go)..."
+  # Ensure base-devel, git, and go are installed (required for building yay)
+  log_info "Ensuring base-devel, git, and go are installed..."
   if ! sudo -v; then
     log_error "Failed to refresh sudo credentials. Cannot proceed with yay installation."
     return 1
@@ -28,7 +24,7 @@ install_yay() {
   local pacman_retries=3
   local pacman_ok=0
   for ((attempt = 1; attempt <= pacman_retries; attempt++)); do
-    if sudo pacman -S --noconfirm --needed base-devel git 2>&1 | tee -a "$INSTALL_LOG"; then
+    if sudo pacman -S --noconfirm --needed base-devel git go 2>&1 | tee -a "$INSTALL_LOG"; then
       pacman_ok=1
       break
     fi
@@ -38,7 +34,7 @@ install_yay() {
     fi
   done
   if [[ $pacman_ok -eq 0 ]]; then
-    log_error "Failed to install base-devel or git. Cannot proceed with yay-bin installation."
+    log_error "Failed to install base-devel, git, or go. Cannot proceed with yay installation."
     return 1
   fi
 
@@ -53,30 +49,30 @@ install_yay() {
 
   cd "$temp_dir" || { log_error "Failed to change to temporary directory"; return 1; }
 
-  # Clone yay-bin repository (prebuilt binary, faster than yay source, no go)
-  ui_info "Cloning yay-bin repository..."
-  if git clone https://aur.archlinux.org/yay-bin.git . 2>&1 | tee -a "$INSTALL_LOG"; then
-    log_success "yay-bin repository cloned successfully"
+  # Clone yay repository
+  ui_info "Cloning yay repository..."
+  if git clone https://aur.archlinux.org/yay.git . 2>&1 | tee -a "$INSTALL_LOG"; then
+    log_success "yay repository cloned successfully"
   else
-    log_error "Failed to clone yay-bin repository"
+    log_error "Failed to clone yay repository"
     return 1
   fi
 
-  # Build yay-bin (installs prebuilt binary, no compilation)
-  ui_info "Installing yay-bin (prebuilt)..."
-  echo -e "${THEME_TEXT}Please enter your sudo password to install yay-bin:${RESET}"
+  # Build yay
+  ui_info "Building and installing yay..."
+  echo -e "${THEME_TEXT}Please enter your sudo password to build and install yay:${RESET}"
   sudo -v
   if makepkg -si --noconfirm --needed 2>&1 | tee -a "$INSTALL_LOG"; then
-    log_success "yay-bin installed successfully"
+    log_success "yay built and installed successfully"
   else
-    log_error "Failed to install yay-bin"
+    log_error "Failed to build yay"
     return 1
   fi
 
-  # Verify installation (yay-bin provides yay command)
+  # Verify installation
   ui_info "Verifying yay installation..."
   if command -v yay &>/dev/null; then
-    log_success "yay (yay-bin) installation verified"
+    log_success "yay installation verified"
   else
     log_error "yay installation verification failed"
     return 1

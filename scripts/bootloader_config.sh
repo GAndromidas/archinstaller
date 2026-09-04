@@ -357,6 +357,11 @@ configure_boot() {
   run_step "Updating kernel options with unified parameters" update_systemd_boot_options "$kernel_params"
 
   run_step "Checking kernel options consistency" check_kernel_options_consistency
+
+  # Btrfs-assistant profile for all bootloaders: 1 daily, 1 boot (enabled), others 0, keep 8 (from 50)
+  if is_btrfs_system 2>/dev/null; then
+    run_step "Configuring Btrfs-Assistant snapshot limits" apply_btrfs_assistant_profile
+  fi
 }
 
 # Update kernel options in systemd-boot entries
@@ -770,6 +775,11 @@ configure_grub() {
     else
         log_success "GRUB configured to remember the last chosen boot entry."
     fi
+
+    # Btrfs-assistant profile for all bootloaders: 1 daily, 1 boot (enabled), others 0, keep 8 (from 50)
+    if is_btrfs_system 2>/dev/null; then
+      run_step "Configuring Btrfs-Assistant snapshot limits" apply_btrfs_assistant_profile
+    fi
 }
 
 # ============================================================================
@@ -975,6 +985,40 @@ patch_limine_cmdlines() {
   log_success "Patched $patched base cmdline line(s) ($skipped refused, $snap_skipped snapshot-owned) in $conf"
 }
 
+# Shared Btrfs-Assistant profile for ALL bootloaders (systemd-boot, GRUB, Limine)
+# User-requested: Daily 1, Boot 1 (enabled), Hourly/Weekly/Monthly/Yearly 0, Number 8 (from 50)
+apply_btrfs_assistant_profile() {
+  local conf="/etc/snapper/configs/root"
+  if [[ ! -f "$conf" ]]; then
+    if is_btrfs_system 2>/dev/null; then
+      log_info "No snapper config for / — creating one for btrfs-assistant profile..."
+      if ! sudo snapper -c root create-config / >>"$INSTALL_LOG" 2>&1; then
+        log_warning "Could not create snapper config for / — skipping btrfs-assistant limits."
+        return 0
+      fi
+    else
+      log_info "Not btrfs — skipping btrfs-assistant profile."
+      return 0
+    fi
+  fi
+  if [[ -f "$conf" ]]; then
+    sudo sed -i 's/^TIMELINE_MIN_AGE=.*/TIMELINE_MIN_AGE="1800"/' "$conf"
+    sudo sed -i 's/^TIMELINE_LIMIT_HOURLY=.*/TIMELINE_LIMIT_HOURLY="0"/' "$conf"
+    sudo sed -i 's/^TIMELINE_LIMIT_DAILY=.*/TIMELINE_LIMIT_DAILY="1"/' "$conf"
+    sudo sed -i 's/^TIMELINE_LIMIT_WEEKLY=.*/TIMELINE_LIMIT_WEEKLY="0"/' "$conf"
+    sudo sed -i 's/^TIMELINE_LIMIT_MONTHLY=.*/TIMELINE_LIMIT_MONTHLY="0"/' "$conf"
+    sudo sed -i 's/^TIMELINE_LIMIT_YEARLY=.*/TIMELINE_LIMIT_YEARLY="0"/' "$conf"
+    sudo sed -i 's/^NUMBER_LIMIT=.*/NUMBER_LIMIT="8"/' "$conf"
+    sudo sed -i 's/^NUMBER_LIMIT_IMPORTANT=.*/NUMBER_LIMIT_IMPORTANT="8"/' "$conf"
+    sudo sed -i 's/^NUMBER_MIN_AGE=.*/NUMBER_MIN_AGE="1800"/' "$conf"
+    sudo sed -i 's/^TIMELINE_CREATE=.*/TIMELINE_CREATE="yes"/' "$conf"
+    sudo sed -i 's/^TIMELINE_CLEANUP=.*/TIMELINE_CLEANUP="yes"/' "$conf"
+    sudo sed -i 's/^NUMBER_CLEANUP=.*/NUMBER_CLEANUP="yes"/' "$conf"
+    sudo sed -i 's/^EMPTY_PRE_POST_CLEANUP=.*/EMPTY_PRE_POST_CLEANUP="yes"/' "$conf"
+    log_success "Btrfs-Assistant profile applied: Daily 1, Boot 1, Hourly/Weekly/Monthly/Yearly 0, Number 8 (from 50)"
+  fi
+}
+
 # Wire the overlayfs initramfs hook from limine-mkinitcpio-hook so booting a
 # read-only snapshot actually works (GDM and other writers fail without a
 # writable layer). Upstream rule: btrfs-overlayfs after filesystems for
@@ -1151,39 +1195,17 @@ configure_limine_snapper() {
     configure_limine_overlayfs || true
   fi
 
-  # Configure Snapper (btrfs only)
-  local snapper_conf="/etc/snapper/configs/root"
+  # Configure Snapper (btrfs only) - shared profile for ALL bootloaders (Daily 1, Boot 1, others 0, Number 8)
   if [[ "$want_snapper" == true ]]; then
     step "Configuring Snapper..."
-    if [[ ! -f "$snapper_conf" ]]; then
-      sudo snapper -c root create-config / >>"$INSTALL_LOG" 2>&1 || \
-        log_warning "snapper create-config failed (may already be configured)."
-    fi
-
     if ! mountpoint -q /.snapshots 2>/dev/null; then
       sudo mount -a 2>/dev/null || true
     fi
     mountpoint -q /.snapshots 2>/dev/null || \
       log_warning "/.snapshots not mounted yet; will mount on next boot."
 
-    if [[ -f "$snapper_conf" ]]; then
-      # btrfs-assistant view: Daily 1, Boot 1 (via number), keep 8, others 0
-      sudo sed -i 's/^TIMELINE_MIN_AGE=.*/TIMELINE_MIN_AGE="1800"/' "$snapper_conf"
-      sudo sed -i 's/^TIMELINE_LIMIT_HOURLY=.*/TIMELINE_LIMIT_HOURLY="0"/' "$snapper_conf"
-      sudo sed -i 's/^TIMELINE_LIMIT_DAILY=.*/TIMELINE_LIMIT_DAILY="1"/' "$snapper_conf"
-      sudo sed -i 's/^TIMELINE_LIMIT_WEEKLY=.*/TIMELINE_LIMIT_WEEKLY="0"/' "$snapper_conf"
-      sudo sed -i 's/^TIMELINE_LIMIT_MONTHLY=.*/TIMELINE_LIMIT_MONTHLY="0"/' "$snapper_conf"
-      sudo sed -i 's/^TIMELINE_LIMIT_YEARLY=.*/TIMELINE_LIMIT_YEARLY="0"/' "$snapper_conf"
-      sudo sed -i 's/^NUMBER_LIMIT=.*/NUMBER_LIMIT="8"/' "$snapper_conf"
-      sudo sed -i 's/^NUMBER_LIMIT_IMPORTANT=.*/NUMBER_LIMIT_IMPORTANT="8"/' "$snapper_conf"
-      sudo sed -i 's/^NUMBER_MIN_AGE=.*/NUMBER_MIN_AGE="1800"/' "$snapper_conf"
-      # ensure cleanup/creation flags match the btrfs-assistant profile
-      sudo sed -i 's/^TIMELINE_CREATE=.*/TIMELINE_CREATE="yes"/' "$snapper_conf"
-      sudo sed -i 's/^TIMELINE_CLEANUP=.*/TIMELINE_CLEANUP="yes"/' "$snapper_conf"
-      sudo sed -i 's/^NUMBER_CLEANUP=.*/NUMBER_CLEANUP="yes"/' "$snapper_conf"
-      sudo sed -i 's/^EMPTY_PRE_POST_CLEANUP=.*/EMPTY_PRE_POST_CLEANUP="yes"/' "$snapper_conf"
-      log_success "Snapper timeline limits configured (Daily 1, Boot 1, keep 8, others 0)."
-    fi
+    # Apply unified btrfs-assistant profile (also used for systemd-boot/GRUB via apply_btrfs_assistant_profile)
+    apply_btrfs_assistant_profile
 
     sudo systemctl enable --now snapper-timeline.timer 2>/dev/null || true
     sudo systemctl enable --now snapper-cleanup.timer 2>/dev/null || true

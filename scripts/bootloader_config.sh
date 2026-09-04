@@ -1592,6 +1592,12 @@ configure_limine_snapper() {
     fi
   fi
 
+  # Final theme pass - re-apply after limine-update/snapper-sync regenerated bloat (### comments)
+  # Ensures Arch Linux branding + wallpaper + 700 handling, idempotent
+  if sudo test -f "$limine_conf" 2>/dev/null; then
+    configure_limine_theme "$limine_conf"
+  fi
+
   # Install snap-manager helper (btrfs only; harmless to skip otherwise)
   if [[ "$want_snapper" == true ]]; then
   step "Installing snapshot manager helper..."

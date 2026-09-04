@@ -170,6 +170,7 @@ desktop_environments:
       - plasma-systemmonitor
       - powerdevil
       - print-manager
+      - system-config-printer
       - python-pyqt6
       - qbittorrent
       - spectacle

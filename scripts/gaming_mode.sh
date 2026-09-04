@@ -144,7 +144,7 @@ filter_gpu_specific_packages() {
 	local filtered=()
 	local pkg
 	for pkg in "${pacman_gaming_programs[@]}"; do
-		if [[ "$pkg" == "lact" ]] && ! is_amd_gpu; then
+		if [[ "$pkg" == "lact" ]] && ! is_amd_gpu && ! is_vm; then
 			log_info "No AMD GPU detected — skipping lact (AMDGPU-only)."
 			continue
 		fi

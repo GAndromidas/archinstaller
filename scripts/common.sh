@@ -346,6 +346,24 @@ update_system_mirrors() {
   return 0
 }
 
+# Function to check if system is running in a VM environment
+is_vm() {
+  # Check for common VM indicators
+  if [ -f /proc/1/cgroup ] && grep -q hypervisor /proc/1/cgroup 2>/dev/null; then
+    return 0
+  fi
+  if [ -d /sys/hypervisor ] 2>/dev/null; then
+    return 0
+  fi
+  if grep -qw "virtual" /sys/class/dmi/id/product_name 2>/dev/null; then
+    return 0
+  fi
+  if [ -f /etc/arch-release ] && grep -q "VMware" /sys/firmware/acpi/tables/DSDT 2>/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
 # Function to check if system is headless (no display manager or X server)
 is_headless_system() {
   # Check for display manager

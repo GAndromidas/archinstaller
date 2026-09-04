@@ -597,21 +597,23 @@ gum_confirm() {
     local description="${2:-}" # Default to empty string if not provided
 
     if supports_gum; then
-        # Use subshell to temporarily restore stdout/stderr to terminal for gum display
-        # Cursor should be positioned below dashboard frame by dashboard_run
+        # Use subshell to temporarily restore stdio to terminal for gum display.
+        # Must restore stdin too: dashboard_run redirects stdout/stderr to the
+        # log, and without stdin on /dev/tty gum hangs until an extra Enter.
         (
-            exec >/dev/tty 2>/dev/tty
+            exec </dev/tty >/dev/tty 2>/dev/tty
             echo ""
 
             if [ -n "$description" ]; then
                 gum style --foreground "$GUM_WARN" "$description"
             fi
 
-            if gum confirm --default=true --prompt.foreground "$GUM_PRIMARY" --selected.background "$GUM_PRIMARY" "$question"; then
+            if gum confirm --default=true --prompt.foreground "$GUM_PRIMARY" --selected.background "$GUM_PRIMARY" "$question" </dev/tty; then
                 exit 0
             else
                 exit 1
             fi
+            echo "" >/dev/tty
         )
         local result=$?
 

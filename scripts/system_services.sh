@@ -1033,10 +1033,11 @@ check_battery_status() {
         log_info "Installation may take 20-30 minutes"
 
         if command -v gum >/dev/null 2>&1; then
-          if ! gum confirm --default=false "Continue on battery power?"; then
+          if ! ( exec </dev/tty >/dev/tty 2>/dev/tty; gum confirm --default=false "Continue on battery power?" </dev/tty ); then
             log_error "Installation cancelled - please connect AC adapter"
             exit 1
           fi
+          echo "" >/dev/tty 2>/dev/null || true
         else
           # Prompt is written to /dev/tty because dashboard_run redirects this
           # step's stdout/stderr to the install log.
@@ -1515,10 +1516,11 @@ setup_laptop_optimizations() {
     done
     
     echo ""
-    gum style --foreground "$GUM_WARN" "Tip: Set AUTO_LAPTOP_OPTS=true to skip this prompt in future"
-    if gum confirm --default=true "Enable laptop optimizations?"; then
+    ( exec </dev/tty >/dev/tty 2>/dev/tty; gum style --foreground "$GUM_WARN" "Tip: Set AUTO_LAPTOP_OPTS=true to skip this prompt in future" </dev/tty )
+    if ( exec </dev/tty >/dev/tty 2>/dev/tty; gum confirm --default=true "Enable laptop optimizations?" </dev/tty ); then
       enable_laptop_opts=true
     fi
+    echo "" >/dev/tty 2>/dev/null || true
   else
     # Non-interactive mode
     echo ""

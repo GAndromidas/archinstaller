@@ -455,11 +455,7 @@ check_kernel_options_consistency() {
     done
 
     if command -v gum >/dev/null 2>&1; then
-      echo ""
-      gum style --foreground "$GUM_WARN" "Kernel options are inconsistent across entries"
-      gum style --foreground "$GUM_TEXT" "This may cause boot issues"
-      echo ""
-      if gum confirm "Sync all kernel entries to use the same options?"; then
+      if ui_confirm "Sync all kernel entries to use the same options?" "Kernel options are inconsistent across entries — this may cause boot issues."; then
         sync_all_kernel_options
       else
         log_warning "Kernel options left inconsistent — manual review recommended"

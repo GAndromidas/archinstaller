@@ -136,21 +136,25 @@ ui_confirm() {
     local description="${2:-}"
 
     if supports_gum; then
-        # Use subshell to temporarily restore stdout/stderr to terminal for gum display
-        # Output at current cursor position (should be below dashboard frame)
+        # Use subshell to temporarily restore stdio to terminal for gum display.
+        # Must restore stdin too: dashboard_run redirects stdout/stderr to the
+        # log, and without stdin on /dev/tty gum's key reader hangs until an
+        # extra Enter flushes the buffer.
         (
-            exec >/dev/tty 2>/dev/tty
+            exec </dev/tty >/dev/tty 2>/dev/tty
             echo ""
 
             if [ -n "$description" ]; then
                 gum style --foreground "$GUM_WARN" "$description"
             fi
 
-            if gum confirm --default=true --prompt.foreground "$GUM_PRIMARY" --selected.background "$GUM_PRIMARY" "$question"; then
+            if gum confirm --default=true --prompt.foreground "$GUM_PRIMARY" --selected.background "$GUM_PRIMARY" "$question" </dev/tty; then
                 exit 0
             else
                 exit 1
             fi
+            # ensure the cursor advances after gum's alt-screen leaves a stray newline
+            echo "" >/dev/tty
         )
         local result=$?
 

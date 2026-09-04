@@ -1047,6 +1047,72 @@ configure_limine_overlayfs() {
   fi
 }
 
+# Limine theme - Catppuccin Mocha, better looking, clean dark
+# Handles 700 /boot via privileged atomic write and FAT32 mutex, idempotent
+_limine_write_file() {
+  local src="$1" dst="$2"
+  sudo tee "$dst" >/dev/null < "$src"
+}
+
+configure_limine_theme() {
+  local conf="$1"
+  if [[ -z "$conf" ]]; then
+    log_warning "Limine theme: no config path, skipping"
+    return 0
+  fi
+  # Idempotent - if already themed (term_palette + interface_branding), skip
+  if sudo grep -qE "^\s*term_palette:" "$conf" 2>/dev/null && sudo grep -qE "^\s*interface_branding:" "$conf" 2>/dev/null; then
+    log_info "Limine theme already present in $conf"
+    return 0
+  fi
+  # Theme header - no wallpaper image required (avoids missing boot():/limine-splash.png)
+  local theme="# Archinstaller Limine theme - Catppuccin Mocha
+# Better looking, clean dark, Arch blue accent
+timeout: 3
+graphics: yes
+interface_branding: Archinstaller
+interface_branding_colour: 89b4fa
+interface_help_colour: 6c7086
+wallpaper_style: stretched
+term_palette: 1e1e2e;f38ba8;a6e3a1;f9e2af;89b4fa;f5c2e7;94e2d5;cdd6f4
+term_palette_bright: 585b70;f38ba8;a6e3a1;f9e2af;89b4fa;f5c2e7;94e2d5;cdd6f4
+term_background: 1e1e2e
+term_foreground: cdd6f4
+term_background_bright: 1e1e2e
+term_foreground_bright: cdd6f4
+term_margin: 64
+term_margin_gradient: 4
+"
+  local existing=""
+  if sudo test -f "$conf" 2>/dev/null; then
+    existing=$(sudo cat "$conf" 2>/dev/null || echo "")
+    # Remove existing global theme keys + timeout to avoid duplicates, keep entries
+    existing=$(echo "$existing" | grep -vE "^\s*(timeout:|graphics:|interface_branding|interface_help|wallpaper|term_palette|term_background|term_foreground|term_margin)" || true)
+    # Trim leading blank lines
+    existing=$(echo "$existing" | sed '/./,$!d' || true)
+  fi
+  local tmp
+  tmp=$(mktemp /tmp/limine_theme.XXXXXX 2>/dev/null || echo "/tmp/limine_theme.$$")
+  {
+    printf "%s" "$theme"
+    if [[ -n "$existing" ]]; then
+      printf "\n%s" "$existing"
+    fi
+  } > "$tmp"
+  if [[ ! -s "$tmp" ]]; then
+    log_error "Limine theme temp empty"
+    rm -f "$tmp"
+    return 1
+  fi
+  # FAT32 atomic via mutex, privileged 700
+  if with_limine_lock _limine_write_file "$tmp" "$conf"; then
+    log_success "Applied Limine theme to $conf (Catppuccin Mocha, Arch blue)"
+  else
+    log_warning "Failed to apply Limine theme to $conf"
+  fi
+  rm -f "$tmp"
+}
+
 # Install an AUR package using whatever helper is available.
 # Optional 2nd arg pre-answers one stdin prompt (e.g. an install scriptlet
 # asking Y/n) — without it, the prompt is invisible under dashboard_run
@@ -1314,6 +1380,20 @@ configure_limine_snapper() {
     else
       log_error "ESP ($esp_mount) is separate from /boot and no UKI is configured — Limine cannot read non-FAT /boot. Enable UKI or use a FAT /boot (see ArchWiki Limine)."
     fi
+  fi
+
+  # Apply Limine theme for better looking boot menu (Catppuccin Mocha, Arch blue)
+  # Handles 700 /boot via privileged write + FAT32 mutex, idempotent
+  if [[ -n "${limine_conf:-}" ]] && sudo test -f "$limine_conf" 2>/dev/null; then
+    configure_limine_theme "$limine_conf"
+  elif [[ -n "${limine_dir:-}" ]]; then
+    for _lc in "$limine_dir/limine.conf" "$limine_dir/../limine.conf" "/boot/limine.conf" "/boot/limine/limine.conf"; do
+      if sudo test -f "$_lc" 2>/dev/null; then
+        configure_limine_theme "$_lc"
+        break
+      fi
+    done
+    unset _lc
   fi
 
   # Ensure an NVRAM entry exists pointing at the REAL install dir (firmware

@@ -1065,20 +1065,19 @@ configure_limine_theme() {
     log_info "Limine theme already present in $conf"
     return 0
   fi
-  # Theme header - no wallpaper image required (avoids missing boot():/limine-splash.png)
-  local theme="# Archinstaller Limine theme - Catppuccin Mocha
-# Better looking, clean dark, Arch blue accent
+  # Theme - colors matched to background.png dominant 05142a + accent 3e93af (not Catppuccin)
+  local theme="# Arch Linux Limine theme - matched to background.png
 timeout: 3
 graphics: yes
 interface_branding: Arch Linux
-interface_branding_colour: 89b4fa
+interface_branding_colour: 3e93af
 interface_help_colour: 6c7086
 wallpaper_style: stretched
-term_palette: 1e1e2e;f38ba8;a6e3a1;f9e2af;89b4fa;f5c2e7;94e2d5;cdd6f4
-term_palette_bright: 585b70;f38ba8;a6e3a1;f9e2af;89b4fa;f5c2e7;94e2d5;cdd6f4
-term_background: 1e1e2e
+term_palette: 05142a;f38ba8;a6e3a1;f9e2af;3e93af;f5c2e7;94e2d5;cdd6f4
+term_palette_bright: 45475a;f38ba8;a6e3a1;f9e2af;3e93af;f5c2e7;94e2d5;ffffff
+term_background: 05142a
 term_foreground: cdd6f4
-term_background_bright: 1e1e2e
+term_background_bright: 05142a
 term_foreground_bright: cdd6f4
 term_margin: 64
 term_margin_gradient: 4

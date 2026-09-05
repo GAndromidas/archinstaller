@@ -67,8 +67,6 @@ pacman:
 # Essential packages for different installation modes
 essential:
   default:
-    - name: filezilla
-      description: "FTP client for file transfers"
     - name: gnome-boxes
       description: "Virtualization GUI using QEMU/KVM"
     - name: libreoffice-fresh

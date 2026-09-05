@@ -12,6 +12,111 @@ BOOTLOADER=$(detect_bootloader)
 NEEDS_INITRAMFS_REBUILD=false
 
 # ============================================================================
+# SMART DISPLAY RESOLUTION DETECTION
+# ============================================================================
+# Single source for both `interface_resolution:` (limine.conf) and `video=`
+# (kernel cmdline). Picks the largest mode among connected outputs so a
+# 2K-primary + 1080p-secondary setup yields 2560x1440, while a single-1080p
+# machine yields 1920x1080. No hardcoding, no per-machine config.
+#
+# Priority:
+#   1. $LIMINE_RESOLUTION override (e.g. LIMINE_RESOLUTION=1920x1080 ./install.sh)
+#   2. DRM modes of connected outputs (/sys/class/drm/card*-*/{status,modes})
+#   3. fb modes (/sys/class/graphics/fb0/modes, first U:WxHp entry)
+#   4. xrandr current mode (live X/Wayland session only)
+#   5. Fallback 1920x1080 (safe everywhere, incl. headless/VM)
+# Usage: detect_display_resolution  -> echoes e.g. 2560x1440
+detect_display_resolution() {
+  # 1. Explicit override wins (CI, VMs with weird EDID, user preference)
+  if [[ -n "${LIMINE_RESOLUTION:-}" ]]; then
+    if [[ "$LIMINE_RESOLUTION" =~ ^[0-9]+x[0-9]+$ ]]; then
+      echo "$LIMINE_RESOLUTION"
+      return 0
+    else
+      log_warning "Ignoring malformed LIMINE_RESOLUTION='$LIMINE_RESOLUTION' (want WxH)"
+    fi
+  fi
+
+  local best="" best_pixels=0
+  local d status mode w h pixels
+
+  # 2. DRM: largest preferred mode among connected outputs.
+  #    modes(5) lists preferred first, so head -1 is the native res; we still
+  #    take the max across outputs to cover multi-monitor (2K + 1080p -> 2K).
+  for d in /sys/class/drm/card*-*; do
+    [[ -f "$d/status" && -f "$d/modes" ]] || continue
+    status=$(cat "$d/status" 2>/dev/null || echo "")
+    [[ "$status" == "connected" ]] || continue
+    while IFS= read -r mode; do
+      [[ "$mode" =~ ^([0-9]+)x([0-9]+) ]] || continue
+      w="${BASH_REMATCH[1]}"
+      h="${BASH_REMATCH[2]}"
+      pixels=$((w * h))
+      if ((pixels > best_pixels)); then
+        best_pixels=$pixels
+        best="${w}x${h}"
+      fi
+      break # preferred (first) mode per output is enough
+    done < "$d/modes"
+  done
+  if [[ -n "$best" ]]; then
+    echo "$best"
+    return 0
+  fi
+
+  # 3. Framebuffer (efifb/simplefb/vesafb): U:2560x1440p-0 -> 2560x1440
+  if [[ -r /sys/class/graphics/fb0/modes ]]; then
+    mode=$(grep -oE 'U:[0-9]+x[0-9]+' /sys/class/graphics/fb0/modes 2>/dev/null | head -1 || true)
+    if [[ "$mode" =~ U:([0-9]+x[0-9]+) ]]; then
+      echo "${BASH_REMATCH[1]}"
+      return 0
+    fi
+  fi
+
+  # 4. xrandr (only when a display server runs; installer is usually TTY)
+  if command -v xrandr &>/dev/null && [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
+    local xr_best="" xr_pixels=0
+    while IFS= read -r line; do
+      # current mode line: "   2560x1440    164.99*+"
+      if [[ "$line" =~ ([0-9]+)x([0-9]+).*\* ]]; then
+        w="${BASH_REMATCH[1]}"
+        h="${BASH_REMATCH[2]}"
+        pixels=$((w * h))
+        if ((pixels > xr_pixels)); then
+          xr_pixels=$pixels
+          xr_best="${w}x${h}"
+        fi
+      fi
+    done < <(xrandr 2>/dev/null || true)
+    if [[ -n "$xr_best" ]]; then
+      echo "$xr_best"
+      return 0
+    fi
+    unset xr_best xr_pixels
+  fi
+
+  # 5. Safe fallback (headless, VM with unknown output, no EDID)
+  echo "1920x1080"
+}
+
+# Term font scale follows resolution: HiDPI (>=1440p height or >=2560 width)
+# needs 2x2 for a readable menu, 1080p and below stays sharp at 1x1.
+# Usage: detect_term_font_scale [resolution]  -> echoes e.g. 2x2
+detect_term_font_scale() {
+  local res="${1:-$(detect_display_resolution)}"
+  local w=0 h=0
+  if [[ "$res" =~ ^([0-9]+)x([0-9]+)$ ]]; then
+    w="${BASH_REMATCH[1]}"
+    h="${BASH_REMATCH[2]}"
+  fi
+  if ((w >= 2560 || h >= 1440)); then
+    echo "2x2"
+  else
+    echo "1x1"
+  fi
+}
+
+# ============================================================================
 # UNIFIED KERNEL PARAMETERS
 # ============================================================================
 
@@ -87,6 +192,16 @@ get_kernel_params() {
       ;;
   esac
 
+  # Smart display resolution: same value as limine `interface_resolution:`.
+  # Detects largest connected mode (2K-primary + 1080p-secondary -> 2560x1440,
+  # single-1080p box -> 1920x1080), override via $LIMINE_RESOLUTION. Headless /
+  # VM falls back to 1920x1080 (harmless: KMS ignores unusable video= modes).
+  local disp_res
+  disp_res=$(detect_display_resolution 2>/dev/null || echo "1920x1080")
+  if [[ "$disp_res" =~ ^[0-9]+x[0-9]+$ ]]; then
+    params="$params video=$disp_res"
+  fi
+
   if [[ "$cmdline_only" == true ]]; then
     echo "$params"
     return 0
@@ -112,7 +227,7 @@ get_kernel_params() {
 # those lines wholesale would drop them and render encrypted/hibernating
 # systems unbootable. So this installer OWNS only the keys below and MERGES:
 # existing unmanaged params are preserved verbatim, managed keys are replaced.
-MANAGED_PARAM_KEYS="quiet loglevel nowatchdog splash vt.global_cursor_default nvidia_drm.modeset nvidia_drm.fbdev NVreg_DynamicPowerManagement NVreg_PreserveVideoMemoryAllocations NVreg_TemporaryFilePath radeon.si_support amdgpu.si_support radeon.cik_support amdgpu.cik_support amd_pstate i915.enable_guc rootflags"
+MANAGED_PARAM_KEYS="quiet loglevel nowatchdog splash vt.global_cursor_default nvidia_drm.modeset nvidia_drm.fbdev NVreg_DynamicPowerManagement NVreg_PreserveVideoMemoryAllocations NVreg_TemporaryFilePath radeon.si_support amdgpu.si_support radeon.cik_support amdgpu.cik_support amd_pstate i915.enable_guc rootflags video"
 
 _merge_param_key() {
   local tok="$1"
@@ -1047,8 +1162,11 @@ configure_limine_overlayfs() {
   fi
 }
 
-# Limine theme - Catppuccin Mocha, better looking, clean dark
-# Handles 700 /boot via privileged atomic write and FAT32 mutex, idempotent
+# Limine theme - Catppuccin Mocha, Arch blue (user-spec full header)
+# Handles 700 /boot via privileged atomic write and FAT32 mutex, idempotent.
+# Resolution + font scale are smart: largest connected mode (2K-primary +
+# 1080p-secondary -> 2560x1440, single-1080p box -> 1920x1080); 2x2 on HiDPI,
+# 1x1 otherwise. Override with LIMINE_RESOLUTION=WxH.
 _limine_write_file() {
   local src="$1" dst="$2"
   sudo tee "$dst" >/dev/null < "$src"
@@ -1060,29 +1178,86 @@ configure_limine_theme() {
     log_warning "Limine theme: no config path, skipping"
     return 0
   fi
-  # Idempotent - if already themed with correct 05142a + Arch Linux/linux default, skip
-  if sudo grep -q "term_palette: 05142a;" "$conf" 2>/dev/null && sudo grep -q "default_entry: Arch Linux/linux" "$conf" 2>/dev/null && sudo grep -qE "^\s*interface_branding:\s*Arch Linux" "$conf" 2>/dev/null; then
-    log_info "Limine theme already present in $conf"
+  local resolution font_scale
+  resolution=$(detect_display_resolution 2>/dev/null || echo "1920x1080")
+  [[ "$resolution" =~ ^[0-9]+x[0-9]+$ ]] || resolution="1920x1080"
+  font_scale=$(detect_term_font_scale "$resolution" 2>/dev/null || echo "1x1")
+
+  # Idempotent: all signature keys + detected resolution/scale must match.
+  # Resolution is part of the check so a 1080p box re-themes after a 2K image
+  # (and vice versa) instead of keeping a stale interface_resolution/video=.
+  if sudo grep -q "term_palette: 05142a;" "$conf" 2>/dev/null \
+    && sudo grep -q "default_entry: Arch Linux/linux" "$conf" 2>/dev/null \
+    && sudo grep -qE "^\s*interface_branding:\s*Arch Linux" "$conf" 2>/dev/null \
+    && sudo grep -q "term_palette_bright: 45475a;" "$conf" 2>/dev/null \
+    && sudo grep -q "graphic_palette: 05142a;" "$conf" 2>/dev/null \
+    && sudo grep -q "interface_resolution: $resolution" "$conf" 2>/dev/null \
+    && sudo grep -q "term_font_scale: $font_scale" "$conf" 2>/dev/null \
+    && sudo grep -q "term_background_bright: 181825" "$conf" 2>/dev/null; then
+    log_info "Limine theme already present in $conf ($resolution, $font_scale)"
     return 0
   fi
-  # Theme - colors matched to background.png, Arch Linux/linux default (direct kernel boot, menu visible 3s)
-  local theme="# Arch Linux Limine theme - matched to background.png
+  # Full user-spec header. interface_resolution / term_font_scale / video=
+  # stay in sync via detect_display_resolution (see get_kernel_params).
+  local theme="# ==============================================================================
+# LIMINE BOOTLOADER CONFIGURATION
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# General Boot Settings
+# ------------------------------------------------------------------------------
 timeout: 3
 default_entry: Arch Linux/linux
+hash_mismatch_panic: no
+
+# ------------------------------------------------------------------------------
+# Branding & Display Setup
+# ------------------------------------------------------------------------------
 interface_branding: Arch Linux
 interface_branding_colour: 3e93af
-hash_mismatch_panic: no
+interface_resolution: $resolution
+term_font_scale: $font_scale
+
+# ------------------------------------------------------------------------------
+# Background & Graphics
+# ------------------------------------------------------------------------------
 graphics: yes
-wallpaper_style: stretched
-term_palette: 05142a;f38ba8;a6e3a1;f9e2af;3e93af;f5c2e7;94e2d5;cdd6f4
-term_foreground: cdd6f4
+
+# ------------------------------------------------------------------------------
+# Terminal Theme: Colors & Palettes
+# ------------------------------------------------------------------------------
+# Primary Text & Background (6-digit hex format)
 term_background: 05142a
+term_foreground: cdd6f4
+term_background_bright: 181825
+
+# Color Palettes (Base & Bright)
+term_palette: 05142a;f38ba8;a6e3a1;f9e2af;3e93af;f5c2e7;94e2d5;cdd6f4
+term_palette_bright: 45475a;f38ba8;a6e3a1;f9e2af;89b4fa;f5c2e7;94e2d5;a6adc8
+
+# Selection & Highlight UI
+term_highlight_background: 313244
+term_highlight_foreground: cdd6f4
+
+# Margins & Outer Background (Fills screen outside terminal window)
+term_margin: 0
+term_margin_gradient: 0
+
+# ------------------------------------------------------------------------------
+# Graphical UI Theme
+# ------------------------------------------------------------------------------
+graphic_background: 05142a
+graphic_foreground: cdd6f4
+graphic_margin: 0
+graphic_palette: 05142a;f38ba8;a6e3a1;f9e2af;3e93af;f5c2e7;94e2d5;cdd6f4
+graphic_palette_bright: 45475a;f38ba8;a6e3a1;f9e2af;89b4fa;f5c2e7;94e2d5;a6adc8
 "
   local existing=""
   if sudo test -f "$conf" 2>/dev/null; then
     existing=$(sudo cat "$conf" 2>/dev/null || echo "")
-    # Remove existing global theme keys + timeout + bloat, keep only kernel/snapshots entries
-    existing=$(echo "$existing" | grep -vE "^\s*(timeout:|default_entry|hash_mismatch_panic|quiet|graphics:|interface_branding|interface_help|wallpaper|term_palette|term_background|term_foreground|term_margin|editor_)" || true)
+    # Remove existing global theme keys + timeout + bloat, keep only kernel/snapshots entries.
+    # Covers every key in the header above plus legacy wallpaper/editor keys.
+    existing=$(echo "$existing" | grep -vE "^\s*(timeout:|default_entry|hash_mismatch_panic|quiet|graphics:|graphic_background|graphic_foreground|graphic_margin|graphic_palette|graphic_palette_bright|interface_branding|interface_branding_colour|interface_resolution|interface_help|wallpaper|wallpaper_style|term_palette|term_palette_bright|term_background|term_background_bright|term_foreground|term_highlight_background|term_highlight_foreground|term_font_scale|term_margin|term_margin_gradient|editor_)" || true)
     # Trim leading blank lines
     existing=$(echo "$existing" | sed '/./,$!d' || true)
   fi
@@ -1101,7 +1276,7 @@ term_background: 05142a
   fi
   # FAT32 atomic via mutex, privileged 700
   if with_limine_lock _limine_write_file "$tmp" "$conf"; then
-    log_success "Applied Limine theme to $conf (Catppuccin Mocha, Arch blue)"
+    log_success "Applied Limine theme to $conf ($resolution, $font_scale, Catppuccin Mocha)"
   else
     log_warning "Failed to apply Limine theme to $conf"
   fi

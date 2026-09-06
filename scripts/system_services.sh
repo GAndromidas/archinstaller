@@ -222,6 +222,8 @@ EOF
     sudo systemctl disable --now snapper-daily-snapshot.timer 2>/dev/null || true
     log_info "Migrated from custom snapper-daily-snapshot.timer to snapper-timeline.timer"
   fi
+  # Monthly scrub for bit-rot detection — snapper stack only, never with timeshift
+  enable_btrfs_scrub_timer
 }
 
 enable_services() {
@@ -409,16 +411,31 @@ enable_services() {
 
 detect_and_install_gpu_drivers() {
   step "Detecting and installing graphics drivers"
-  
+
   # Install base Mesa first (needed for all GPU types)
   install_packages_quietly mesa lib32-mesa
 
-  if lspci | grep -Eiq 'vga.*amd|3d.*amd|display.*amd'; then
+  # Capture lspci once and test each vendor independently so:
+  #  - an AMD-only box NEVER installs NVIDIA drivers, and
+  #  - hybrid iGPU+dGPU boxes (e.g. AMD iGPU + NVIDIA dGPU) get BOTH sets.
+  # The old if/elif chain installed exactly one vendor and mis-handled hybrids.
+  local lspci_out
+  lspci_out=$(lspci 2>/dev/null || true)
+
+  local has_amd=false has_nvidia=false has_intel=false has_vm=false
+  echo "$lspci_out" | grep -Eiq 'vga.*amd|3d.*amd|display.*amd|vga.*radeon|3d.*radeon|display.*radeon|vga.*ati|display.*ati' && has_amd=true
+  echo "$lspci_out" | grep -Eiq 'vga.*nvidia|3d.*nvidia|display.*nvidia' && has_nvidia=true
+  echo "$lspci_out" | grep -Eiq 'vga.*intel|3d.*intel|display.*intel' && has_intel=true
+  echo "$lspci_out" | grep -Eiq 'qxl|virtio.*gpu|vmware svga|cirrus|bochs' && has_vm=true
+
+  if [[ "$has_amd" == true ]]; then
     echo -e "${THEME_TEXT}AMD GPU detected. Installing AMD drivers and Vulkan support...${RESET}"
     install_packages_quietly xf86-video-amdgpu vulkan-radeon lib32-vulkan-radeon
     log_success "AMD drivers and Vulkan support installed"
     log_info "AMD GPU will use AMDGPU driver after reboot"
-  elif lspci | grep -Eiq 'vga.*nvidia|3d.*nvidia|display.*nvidia'; then
+  fi
+
+  if [[ "$has_nvidia" == true ]]; then
     echo -e "${THEME_TEXT}NVIDIA GPU detected. Installing NVIDIA drivers and Vulkan support...${RESET}"
     # Determine correct NVIDIA package set based on installed kernels
     local nvidia_packages=(nvidia-dkms nvidia-utils lib32-nvidia-utils vulkan-icd-loader lib32-vulkan-icd-loader)
@@ -428,12 +445,16 @@ detect_and_install_gpu_drivers() {
     log_success "NVIDIA drivers and Vulkan support installed"
     log_info "NVIDIA GPU will use proprietary driver after reboot"
     log_info "Ensure 'nvidia-dkms' is in your mkinitcpio MODULES array if using custom kernel"
-  elif lspci | grep -Eiq 'vga.*intel|3d.*intel|display.*intel'; then
+  fi
+
+  if [[ "$has_intel" == true ]]; then
     echo -e "${THEME_TEXT}Intel GPU detected. Installing Intel drivers and Vulkan support...${RESET}"
     install_packages_quietly vulkan-intel lib32-vulkan-intel
     log_success "Intel drivers and Vulkan support installed"
     log_info "Intel GPU will use i915 or xe driver after reboot"
-  elif lspci | grep -Eiq 'qxl|virtio.*gpu|vmware svga|cirrus|bochs'; then
+  fi
+
+  if [[ "$has_vm" == true ]]; then
     # Virtualized GPU (QXL / virtio-gpu / VMware / Cirrus / Bochs) — no 3D
     # acceleration required. Install the appropriate lightweight driver and
     # the base Vulkan software rasterizer for VM/dev-testing compatibility.
@@ -442,7 +463,9 @@ detect_and_install_gpu_drivers() {
     install_packages_quietly "${vm_packages[@]}"
     log_success "VM graphics drivers installed"
     log_info "Virtualized/VM GPU detected — using guest drivers (QXL/VirtIO/VMware)"
-  else
+  fi
+
+  if [[ "$has_amd" == false && "$has_nvidia" == false && "$has_intel" == false && "$has_vm" == false ]]; then
     echo -e "${THEME_WARN}No recognizable GPU detected. Using basic Mesa drivers already installed.${RESET}"
     # In a VM without the above device IDs, still try the software rasterizer
     install_packages_quietly vulkan-swrast lib32-vulkan-swrast

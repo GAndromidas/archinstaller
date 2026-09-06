@@ -145,6 +145,13 @@ verify_install() {
       systemctl is-active --quiet snapper-timeline.timer 2>/dev/null && check_pass "snapper-timeline.timer active" || check_warn "snapper-timeline.timer not active"
       systemctl is-active --quiet snapper-cleanup.timer 2>/dev/null && check_pass "snapper-cleanup.timer active" || check_warn "snapper-cleanup.timer not active"
       systemctl is-active --quiet snapper-boot.timer 2>/dev/null && check_pass "snapper-boot.timer active" || check_warn "snapper-boot.timer not active (fallback snapper-boot-snapshot.service?)"
+      if pacman -Q timeshift &>/dev/null 2>&1; then
+        check_pass "timeshift present — btrfs-scrub timer correctly skipped (snapper not authoritative)"
+      elif systemctl is-enabled --quiet "btrfs-scrub@-.timer" 2>/dev/null; then
+        check_pass "btrfs-scrub@-.timer enabled (monthly scrub)"
+      else
+        check_warn "btrfs-scrub@-.timer not enabled"
+      fi
       local snap_cnt
       snap_cnt=$(sudo snapper -c root list 2>/dev/null | awk 'NR>2' | wc -l | tr -d ' ')
       echo "  snapshots: $snap_cnt (should be 0 after maintenance clean, or <=8)"

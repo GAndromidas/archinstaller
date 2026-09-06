@@ -374,6 +374,32 @@ snapper_ensure_aux_packages() {
   fi
 }
 
+enable_btrfs_scrub_timer() {
+  # Monthly btrfs scrub (bit-rot detection) for the snapper/btrfs-assistant
+  # stack. Enabled ONLY when snapper is installed AND timeshift is not
+  # (competing snapshot systems — timeshift setups manage their own
+  # maintenance). Btrfs-only; no-op otherwise. Idempotent.
+  if ! pacman -Q snapper &>/dev/null; then
+    return 0
+  fi
+  if pacman -Q timeshift &>/dev/null; then
+    log_info "Timeshift detected — skipping btrfs-scrub timer (snapper stack not authoritative)."
+    return 0
+  fi
+  if ! is_btrfs_system 2>/dev/null; then
+    return 0
+  fi
+  if ! systemctl list-unit-files "btrfs-scrub@-.timer" 2>/dev/null | grep -q "btrfs-scrub@-.timer"; then
+    log_info "btrfs-scrub@-.timer unit not found (btrfs-progs missing?) — skipping."
+    return 0
+  fi
+  if sudo systemctl enable --now "btrfs-scrub@-.timer" >>"$INSTALL_LOG" 2>&1; then
+    log_success "Enabled monthly btrfs scrub (btrfs-scrub@-.timer)"
+  else
+    log_warning "Failed to enable btrfs-scrub@-.timer"
+  fi
+}
+
 # ============================================================================
 # SECTION 4: TERMINAL OUTPUT & UI FUNCTIONS
 # ============================================================================

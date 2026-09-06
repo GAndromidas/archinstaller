@@ -182,16 +182,20 @@ check_system_requirements() {
   fi
 
   if lspci | grep -qi vga; then
-    # Match the GPU vendor by name from the full lspci line (the PCI bus
-    # address in field 1 is not the vendor).
-    local gpu_info
-    gpu_info=$(lspci | grep -iE 'vga|3d controller|display controller' | head -1)
-    case "$gpu_info" in
-      *NVIDIA*)         log_to_file "NVIDIA GPU detected - proprietary drivers will be configured" ;;
-      *"AMD"*|*Radeon*|*ATI*) log_to_file "AMD GPU detected - open-source drivers will be configured" ;;
-      *Intel*)          log_to_file "Intel GPU detected - mesa drivers will be configured" ;;
-      *)                log_to_file "Unknown GPU detected - generic drivers will be used" ;;
-    esac
+    # Report EVERY GPU (not just head -1): hybrids (AMD iGPU + NVIDIA dGPU)
+    # are common and head -1 hid the second vendor.
+    local gpu_lines
+    gpu_lines=$(lspci | grep -iE 'vga|3d controller|display controller' || true)
+    log_to_file "GPU(s) detected:"
+    while IFS= read -r gpu_info; do
+      [[ -z "$gpu_info" ]] && continue
+      case "$gpu_info" in
+        *NVIDIA*)         log_to_file "  NVIDIA GPU: $gpu_info - proprietary drivers will be configured" ;;
+        *"AMD"*|*Radeon*|*ATI*) log_to_file "  AMD GPU: $gpu_info - open-source drivers will be configured" ;;
+        *Intel*)          log_to_file "  Intel GPU: $gpu_info - mesa drivers will be configured" ;;
+        *)                log_to_file "  Unknown GPU: $gpu_info - generic drivers will be used" ;;
+      esac
+    done <<< "$gpu_lines"
   else
     hardware_issues+=("No GPU detected - this may be a headless system")
   fi

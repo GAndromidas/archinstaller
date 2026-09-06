@@ -137,48 +137,45 @@ get_kernel_params() {
   # dedups it on re-runs.
   params="$params splash vt.global_cursor_default=0"
 
-  # GPU-specific parameters
-  local gpu_vendor=""
-  if lspci 2>/dev/null | grep -qiE 'vga.*nvidia|3d.*nvidia|display.*nvidia'; then
-    gpu_vendor="nvidia"
-  elif lspci 2>/dev/null | grep -qiE 'vga.*amd|3d.*amd|display.*amd|vga.*radeon|3d.*radeon'; then
-    gpu_vendor="amd"
-  elif lspci 2>/dev/null | grep -qiE 'vga.*intel|display.*intel'; then
-    gpu_vendor="intel"
-  fi
+  # GPU-specific parameters (multi-GPU aware: a hybrid AMD iGPU + NVIDIA dGPU
+  # needs BOTH sets; an AMD-only box must never get nvidia_drm.*).
+  local lspci_out=""
+  lspci_out=$(lspci 2>/dev/null || true)
+  local has_nvidia=false has_amd=false has_intel=false
+  echo "$lspci_out" | grep -qiE 'vga.*nvidia|3d.*nvidia|display.*nvidia' && has_nvidia=true
+  echo "$lspci_out" | grep -qiE 'vga.*amd|3d.*amd|display.*amd|vga.*radeon|3d.*radeon' && has_amd=true
+  echo "$lspci_out" | grep -qiE 'vga.*intel|display.*intel' && has_intel=true
 
-  case "$gpu_vendor" in
-    nvidia)
-      # NVIDIA: Required for Wayland and modern drivers
-      params="$params nvidia_drm.modeset=1 nvidia_drm.fbdev=1"
-      # Laptop power management for Ampere+ GPUs
-      if is_laptop 2>/dev/null; then
-        params="$params NVreg_DynamicPowerManagement=0x03"
-        params="$params NVreg_PreserveVideoMemoryAllocations=1"
-        params="$params NVreg_TemporaryFilePath=/var/tmp"
-      fi
-      ;;
-    amd)
-      # AMD: amdgpu is the default driver, no extra params needed by default
-      # Only add for older GCN 1-2 GPUs that need force-loading
-      if lspci 2>/dev/null | grep -qiE 'vga.*amd.*oland|vga.*amd.*tonga|vga.*amd.*fiji|vga.*amd.*polaris'; then
-        params="$params radeon.si_support=0 amdgpu.si_support=1"
-        params="$params radeon.cik_support=0 amdgpu.cik_support=1"
-      fi
-      # AMD P-State for CPUs with CPPC support (Ryzen 5000+ / Zen 3+)
-      if grep -qi "amd_pstate" /proc/cpuinfo 2>/dev/null || [ -d /sys/devices/system/cpu/amd_pstate ]; then
-        params="$params amd_pstate=active"
-      fi
-      ;;
-    intel)
-      # Intel: Enable GuC/HuC firmware only when GuC firmware actually ships
-      # for this machine (Gen 9.5+). Unconditional enable_guc on old iGPUs can
-      # stall firmware loading, so gate on /lib/firmware/i915/*guc*.
-      if compgen -G "/lib/firmware/i915/*guc*" >/dev/null 2>&1; then
-        params="$params i915.enable_guc=3"
-      fi
-      ;;
-  esac
+  if [[ "$has_nvidia" == true ]]; then
+    # NVIDIA: Required for Wayland and modern drivers
+    params="$params nvidia_drm.modeset=1 nvidia_drm.fbdev=1"
+    # Laptop power management for Ampere+ GPUs
+    if is_laptop 2>/dev/null; then
+      params="$params NVreg_DynamicPowerManagement=0x03"
+      params="$params NVreg_PreserveVideoMemoryAllocations=1"
+      params="$params NVreg_TemporaryFilePath=/var/tmp"
+    fi
+  fi
+  if [[ "$has_amd" == true ]]; then
+    # AMD: amdgpu is the default driver, no extra params needed by default
+    # Only add for older GCN 1-2 GPUs that need force-loading
+    if echo "$lspci_out" | grep -qiE 'vga.*amd.*oland|vga.*amd.*tonga|vga.*amd.*fiji|vga.*amd.*polaris'; then
+      params="$params radeon.si_support=0 amdgpu.si_support=1"
+      params="$params radeon.cik_support=0 amdgpu.cik_support=1"
+    fi
+    # AMD P-State for CPUs with CPPC support (Ryzen 5000+ / Zen 3+)
+    if grep -qi "amd_pstate" /proc/cpuinfo 2>/dev/null || [ -d /sys/devices/system/cpu/amd_pstate ]; then
+      params="$params amd_pstate=active"
+    fi
+  fi
+  if [[ "$has_intel" == true ]]; then
+    # Intel: Enable GuC/HuC firmware only when GuC firmware actually ships
+    # for this machine (Gen 9.5+). Unconditional enable_guc on old iGPUs can
+    # stall firmware loading, so gate on /lib/firmware/i915/*guc*.
+    if compgen -G "/lib/firmware/i915/*guc*" >/dev/null 2>&1; then
+      params="$params i915.enable_guc=3"
+    fi
+  fi
 
   # Filesystem-specific root flags
   local root_fstype=$(findmnt -n -o FSTYPE / 2>/dev/null || echo "")
@@ -192,15 +189,9 @@ get_kernel_params() {
       ;;
   esac
 
-  # Smart display resolution: same value as limine `interface_resolution:`.
-  # Detects largest connected mode (2K-primary + 1080p-secondary -> 2560x1440,
-  # single-1080p box -> 1920x1080), override via $LIMINE_RESOLUTION. Headless /
-  # VM falls back to 1920x1080 (harmless: KMS ignores unusable video= modes).
-  local disp_res
-  disp_res=$(detect_display_resolution 2>/dev/null || echo "1920x1080")
-  if [[ "$disp_res" =~ ^[0-9]+x[0-9]+$ ]]; then
-    params="$params video=$disp_res"
-  fi
+  # No forced display resolution: KMS picks the native mode automatically.
+  # (Older versions wrote video=WxH here, which is why 2560x1440/1920x1080
+  # showed up in /proc/cmdline. Removed — see MANAGED_PARAM_KEYS cleanup.)
 
   if [[ "$cmdline_only" == true ]]; then
     echo "$params"
@@ -227,6 +218,9 @@ get_kernel_params() {
 # those lines wholesale would drop them and render encrypted/hibernating
 # systems unbootable. So this installer OWNS only the keys below and MERGES:
 # existing unmanaged params are preserved verbatim, managed keys are replaced.
+# NOTE: `video` stays in this list as cleanup-only: get_kernel_params() no
+# longer generates video=WxH, so keeping the key here strips stale video=
+# tokens from existing entries on the next run instead of preserving them.
 MANAGED_PARAM_KEYS="quiet loglevel nowatchdog splash vt.global_cursor_default nvidia_drm.modeset nvidia_drm.fbdev NVreg_DynamicPowerManagement NVreg_PreserveVideoMemoryAllocations NVreg_TemporaryFilePath radeon.si_support amdgpu.si_support radeon.cik_support amdgpu.cik_support amd_pstate i915.enable_guc rootflags video"
 
 _merge_param_key() {
@@ -1434,6 +1428,8 @@ configure_limine_snapper() {
     sudo systemctl enable --now snapper-timeline.timer 2>/dev/null || true
     sudo systemctl enable --now snapper-cleanup.timer 2>/dev/null || true
     log_success "Snapper timers enabled."
+    # Monthly scrub for bit-rot detection — snapper stack only, never with timeshift
+    enable_btrfs_scrub_timer || true
   fi
 
   # Locate an existing Limine install or deploy fresh.

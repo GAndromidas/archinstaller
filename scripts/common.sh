@@ -548,7 +548,9 @@ is_vm() {
   if [ -f /proc/1/cgroup ] && grep -q hypervisor /proc/1/cgroup 2>/dev/null; then
     return 0
   fi
-  if [ -d /sys/hypervisor ] 2>/dev/null; then
+  # NOTE: a bare (empty) /sys/hypervisor dir exists on bare metal too —
+  # only trust it when it actually contains hypervisor entries (Xen type/uuid).
+  if [ -d /sys/hypervisor/type ] 2>/dev/null || [ -n "$(ls -A /sys/hypervisor 2>/dev/null)" ]; then
     return 0
   fi
   if grep -iqw "virtual" /sys/class/dmi/id/product_name 2>/dev/null; then

@@ -75,7 +75,8 @@ dashboard_init() {
 
     # Info line
     local log_info="Log: $INSTALL_LOG"
-    local cancel_info="${UNATTENDED:+Unattended · }Ctrl+C to cancel"
+    local cancel_info="Ctrl+C to cancel"
+    [[ "${UNATTENDED:-false}" == true ]] && cancel_info="Unattended · Ctrl+C to cancel"
     local info_pad=$((w - ${#log_info} - ${#cancel_info} - 3))
     (( info_pad < 1 )) && info_pad=1
     printf "${THEME_BORDER}  │${RESET} ${THEME_MUTED}%s${RESET}%*s ${THEME_MUTED}%s${RESET} ${THEME_BORDER}│${RESET}\n" \

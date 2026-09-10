@@ -397,8 +397,12 @@ enable_btrfs_scrub_timer() {
   if ! is_btrfs_system 2>/dev/null; then
     return 0
   fi
-  if ! systemctl list-unit-files "btrfs-scrub@-.timer" 2>/dev/null | grep -q "btrfs-scrub@-.timer"; then
-    log_info "btrfs-scrub@-.timer unit not found (btrfs-progs missing?) — skipping."
+  # btrfs-progs ships the template btrfs-scrub@.timer; the "-" instance below
+  # means "/". Grep for the template: list-unit-files shows unit files, so
+  # the instantiated name never appears there and the old check always
+  # skipped even with btrfs-progs installed.
+  if ! systemctl list-unit-files "btrfs-scrub@.timer" 2>/dev/null | grep -q "btrfs-scrub@.timer"; then
+    log_info "btrfs-scrub@.timer template not found (btrfs-progs missing?) — skipping scrub timer."
     return 0
   fi
   if sudo systemctl enable --now "btrfs-scrub@-.timer" >>"$INSTALL_LOG" 2>&1; then

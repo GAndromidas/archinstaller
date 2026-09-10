@@ -84,10 +84,14 @@ configure_ufw() {
   sudo ufw default allow outgoing
   log_success "Default policy set to allow all outgoing connections."
 
-  # Allow SSH - robust for 22/tcp, 22, OpenSSH (UFW shows different forms)
-  # Always ensure (idempotent) - don't rely on grep form, just allow
+  # Allow SSH - port rule is authoritative on Arch. The OpenSSH app profile
+  # only exists where the distro ships it (e.g. Ubuntu) — Arch's ufw has no
+  # /etc/ufw/applications.d entry for it, so probe first to avoid
+  # "Could not find a profile matching 'OpenSSH'" noise in the log/summary.
   sudo ufw allow 22/tcp >>"$INSTALL_LOG" 2>&1 || true
-  sudo ufw allow OpenSSH >>"$INSTALL_LOG" 2>&1 || true
+  if sudo ufw app list 2>/dev/null | grep -qi openssh; then
+    sudo ufw allow OpenSSH >>"$INSTALL_LOG" 2>&1 || true
+  fi
   # Verify and log
   if sudo ufw status 2>/dev/null | grep -qE "22/tcp|22\s|OpenSSH"; then
     log_success "SSH allowed through UFW."

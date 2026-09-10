@@ -1,9 +1,7 @@
 #!/bin/bash
 set -uo pipefail
 
-# ============================================================================
-# Core Library - Logging, Error Handling, and Core Utilities
-# ============================================================================
+# Logging, error handling, and core utilities
 
 # Color definitions (kept for backward compatibility — use THEME_* for new code)
 if [ -z "${RED:-}" ]; then
@@ -55,7 +53,7 @@ ERRORS=()
 INSTALLED_PACKAGES=()
 FAILED_PACKAGES=()
 
-# Rotate old log files (keep last 3 backups)
+# Keep last 3 log backups
 if ! declare -f rotate_logs >/dev/null 2>&1; then
 rotate_logs() {
     local log="$INSTALL_LOG"
@@ -66,7 +64,6 @@ rotate_logs() {
 }
 fi
 
-# Initialize logging
 if ! declare -f init_logging >/dev/null 2>&1; then
 init_logging() {
     mkdir -p "$(dirname "$INSTALL_LOG")" 2>/dev/null || true
@@ -76,7 +73,6 @@ init_logging() {
 }
 fi
 
-# Log to file
 if ! declare -f log_to_file >/dev/null 2>&1; then
 log_to_file() {
     local message="$1"
@@ -85,7 +81,6 @@ log_to_file() {
 }
 fi
 
-# Log info message (console + file)
 if ! declare -f log_info >/dev/null 2>&1; then
 log_info() {
     local message="$1"
@@ -98,7 +93,6 @@ log_info() {
 }
 fi
 
-# Log success message (console + file)
 if ! declare -f log_success >/dev/null 2>&1; then
 log_success() {
     local message="$1"
@@ -112,7 +106,6 @@ log_success() {
 }
 fi
 
-# Log warning message (console + file)
 if ! declare -f log_warning >/dev/null 2>&1; then
 log_warning() {
     local message="$1"
@@ -126,7 +119,6 @@ log_warning() {
 }
 fi
 
-# Log error message (console + file)
 if ! declare -f log_error >/dev/null 2>&1; then
 log_error() {
     local message="$1"
@@ -140,7 +132,6 @@ log_error() {
 }
 fi
 
-# Log debug message
 if ! declare -f log_debug >/dev/null 2>&1; then
 log_debug() {
     local message="$1"
@@ -175,14 +166,12 @@ run_step() {
 }
 fi
 
-# Check if command exists
 if ! declare -f command_exists >/dev/null 2>&1; then
 command_exists() {
     command -v "$1" &>/dev/null
 }
 fi
 
-# Check if running as root
 if ! declare -f check_root >/dev/null 2>&1; then
 check_root() {
     if [ "$EUID" -ne 0 ]; then
@@ -193,7 +182,6 @@ check_root() {
 }
 fi
 
-# Initialize the core library
 if ! declare -f init_core >/dev/null 2>&1; then
 init_core() {
     init_logging

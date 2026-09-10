@@ -1,9 +1,25 @@
 #!/bin/bash
 set -uo pipefail
 
-# ============================================================================
 # SECTION 1: COLOR VARIABLES & BASIC FUNCTIONS
-# ============================================================================
+
+# Enable the [multilib] repository (needed for 32-bit/Steam/Wine/gaming
+# packages). Idempotent and safe to call from multiple modules — single
+# source of truth so system_preparation.sh and gaming_mode.sh don't each
+# carry their own copy of this logic.
+if ! declare -f enable_multilib_repo >/dev/null 2>&1; then
+enable_multilib_repo() {
+    local pacman_conf="${1:-/etc/pacman.conf}"
+
+    if grep -q "^\[multilib\]" "$pacman_conf" 2>/dev/null; then
+        log_success "Multilib repository already enabled"
+        return 0
+    fi
+
+    echo -e "\n[multilib]\nInclude = /etc/pacman.d/mirrorlist" | sudo tee -a "$pacman_conf" >/dev/null
+    log_success "Enabled multilib repository"
+}
+fi
 
 # Color variables for output formatting (only define if not already set by core.sh)
 if [ -z "${RED:-}" ]; then
@@ -86,14 +102,10 @@ done
 unset __lib_module
 
 # Improved terminal output functions
-# ============================================================================
 # SECTION 2: LOGGING FUNCTIONS
-# ============================================================================
 
 
-# ============================================================================
 # SECTION 3: CONFIGURATION VALIDATION FUNCTIONS
-# ============================================================================
 
 # Validate configuration file before modification
 validate_config_file() {
@@ -235,9 +247,7 @@ atomic_write() {
     return 0
 }
 
-# ============================================================================
 # SECTION 3b: PRIVILEGED /BOOT HANDLING (archinstall 700)
-# ============================================================================
 # archinstall sets /boot to 700 (root-only) for UKI protection. Bare
 # [ -f /boot/... ] and > /boot/... fail for the user, but sudo succeeds.
 # This helper provides a delicate, robust way: never chmod 755, just use
@@ -289,9 +299,7 @@ with_privileged_boot() {
     "$@"
 }
 
-# ============================================================================
 # SECTION 3c: SHARED SNAPPER / BTRFS-ASSISTANT (single source, all bootloaders)
-# ============================================================================
 # ArchWiki snapper-configs(5): Daily 1, Boot 1 (snapper-boot.timer single),
 # Hourly/Weekly/Monthly/Quarterly/Yearly 0, Number 8 (from 50)
 # Single source for bootloader_config + system_services - no duplication, fast (guard)
@@ -400,9 +408,7 @@ enable_btrfs_scrub_timer() {
   fi
 }
 
-# ============================================================================
 # SECTION 4: TERMINAL OUTPUT & UI FUNCTIONS
-# ============================================================================
 
 
 # Format time display helper function (durations are second-resolution, so a
@@ -448,9 +454,7 @@ print_unified_step_header() {
   fi
 }
 
-# ============================================================================
 # SECTION 5: UI STYLING FUNCTIONS (gum-based)
-# ============================================================================
 print_header() {
   local title="$1"; shift
   if supports_gum; then
@@ -485,9 +489,7 @@ EOF
 # Enhanced resume functionality
 # Function to check if running in VM environment
 
-# ============================================================================
 # SECTION 7: MENU & INSTALLATION MODE SELECTION
-# ============================================================================
 
 
 # Function to ensure a default mirrorlist exists before any pacman operation
@@ -592,9 +594,7 @@ is_headless_system() {
 }
 
 
-# ============================================================================
 # SECTION 6: DISPLAY & BANNER FUNCTIONS
-# ============================================================================
 show_menu() {
   # Display detected OS information - use /etc/os-release for EndeavourOS
   local detected_os=""
@@ -774,7 +774,9 @@ get_installed_kernel_types() {
   pacman -Q linux-lts &>/dev/null && kernel_types+=("linux-lts")
   pacman -Q linux-zen &>/dev/null && kernel_types+=("linux-zen")
   pacman -Q linux-hardened &>/dev/null && kernel_types+=("linux-hardened")
-  echo "${kernel_types[@]}"
+  # One per line (not space-joined) so callers can safely `mapfile -t` this
+  # without word-splitting assumptions.
+  printf '%s\n' "${kernel_types[@]}"
 }
 
 # Function: install_packages_quietly
@@ -784,95 +786,102 @@ install_packages_quietly() {
   install_package_generic "pacman" "$@"
 }
 
-# ============================================================================
 # SECTION 11: PACKAGE INSTALLATION FUNCTIONS
-# ============================================================================
 
-# Function for user confirmation with gum (or fallback)
-# Usage: gum_confirm "Your question?" "Optional description."
-gum_confirm() {
-    local question="$1"
-    local description="${2:-}" # Default to empty string if not provided
+_summary_step_name() {
+  case "$1" in
+    system_preparation) echo "System Preparation" ;;
+    shell_setup) echo "Shell Setup" ;;
+    yay_installation) echo "Yay Installation" ;;
+    programs_installation) echo "Programs Installation" ;;
+    gaming_mode) echo "Gaming Mode" ;;
+    bootloader_config) echo "Bootloader Configuration" ;;
+    system_services) echo "System Services" ;;
+    fail2ban_setup) echo "Fail2ban Setup" ;;
+    wakeonlan_config) echo "Wake-on-LAN Configuration" ;;
+    maintenance) echo "Maintenance" ;;
+    *) echo "$1" ;;
+  esac
+}
 
-    if supports_gum; then
-        # Use subshell to temporarily restore stdio to terminal for gum display.
-        # Must restore stdin too: dashboard_run redirects stdout/stderr to the
-        # log, and without stdin on /dev/tty gum hangs until an extra Enter.
-        (
-            exec </dev/tty >/dev/tty 2>/dev/tty
-            echo ""
-
-            if [ -n "$description" ]; then
-                gum style --foreground "$GUM_WARN" "$description"
-            fi
-
-            if gum confirm --default=true --prompt.foreground "$GUM_PRIMARY" --selected.background "$GUM_PRIMARY" "$question" </dev/tty; then
-                exit 0
-            else
-                exit 1
-            fi
-            echo "" >/dev/tty
-        )
-        local result=$?
-
-        return $result
-    else
-        # Fallback when gum is unavailable. Interactive prompts are written to
-        # /dev/tty so they remain visible even when called from a step subshell
-        # whose stdout/stderr are redirected to the install log.
-        local tty="/dev/tty"
-        echo "" > "$tty"
-        if [ -n "$description" ]; then
-            echo -e "${THEME_WARN}${description}${RESET}" > "$tty"
-        fi
-
-        local response
-        while true; do
-            printf '%b' "${THEME_SECONDARY}${question} [Y/n]: ${RESET}" > "$tty"
-            read -r response < "$tty" || response=""
-            response=${response,,}
-            case "$response" in
-                ""|y|yes)
-                    return 0 # Yes
-                    ;;
-                n|no)
-                    return 1 # No
-                    ;;
-                *)
-                    printf '\n%b\n' "${THEME_ERROR}Please answer Y (yes) or N (no).${RESET}" > "$tty"
-                    ;;
-            esac
-        done
-    fi
+# A short, de-duplicated list of anything from this run worth a second
+# look — surfaced here so it isn't buried in a multi-thousand-line log.
+# Best-effort only: a missing/unreadable log just means an empty section.
+_summary_warnings() {
+  [[ -r "${INSTALL_LOG:-}" ]] || return 0
+  grep -E '(WARNING|ERROR):' "$INSTALL_LOG" 2>/dev/null \
+    | sed -E 's/^\[[0-9: -]+\] //' \
+    | sort -u \
+    | head -8
 }
 
 prompt_reboot() {
+  # Belt-and-suspenders: install.sh already exits before calling this in
+  # dry-run mode, but prompt_reboot must never be able to trigger a real
+  # reboot on a preview run even if called from somewhere else later.
+  if [[ "${DRY_RUN:-false}" == true ]]; then
+    log_debug "Dry-run: skipping reboot prompt"
+    return 0
+  fi
+
   simple_banner "Installation Complete"
 
   echo -e "${THEME_SUCCESS}Congratulations! Your Arch Linux system is now fully configured!${RESET}"
   echo ""
-  echo -e "${THEME_HEADER}── Post-Install Summary ──${RESET}"
+  echo -e "${THEME_HEADER}── System ──${RESET}"
   echo ""
 
-  # Installation mode
   local mode="Standard"
   [ "$INSTALL_MODE" = "minimal" ] && mode="Minimal"
   [ "$INSTALL_MODE" = "server" ] && mode="Server"
   echo -e "  ${THEME_TEXT}Mode:${RESET}            ${THEME_SUCCESS}${mode}${RESET}"
 
-  # Package count
+  local de="${XDG_CURRENT_DESKTOP:-}"
+  if [[ -n "$de" ]]; then
+    echo -e "  ${THEME_TEXT}Desktop:${RESET}         ${THEME_SUCCESS}${de}${RESET}"
+  fi
+
+  local cpu_vendor="unknown"
+  if declare -f detect_cpu_vendor &>/dev/null; then
+    cpu_vendor=$(detect_cpu_vendor 2>/dev/null || echo "unknown")
+  fi
+  local cpu_display="Unknown"
+  [[ "$cpu_vendor" == "amd" ]] && cpu_display="AMD"
+  [[ "$cpu_vendor" == "intel" ]] && cpu_display="Intel"
+  echo -e "  ${THEME_TEXT}CPU:${RESET}             ${THEME_SUCCESS}${cpu_display}${RESET}"
+
+  # Lightweight, display-only GPU read — the real install-time driver
+  # selection already ran in System Services; this just reports what was
+  # found, reusing the same signals without re-running that whole block.
+  local gpu_line="Not detected"
+  local lspci_out
+  lspci_out=$(command -v lspci &>/dev/null && lspci 2>/dev/null || true)
+  if [[ -n "$lspci_out" ]]; then
+    local gpus=()
+    echo "$lspci_out" | grep -Eiq 'vga.*amd|3d.*amd|display.*amd|vga.*radeon|3d.*radeon|display.*radeon' && gpus+=("AMD")
+    echo "$lspci_out" | grep -Eiq 'vga.*nvidia|3d.*nvidia|display.*nvidia' && gpus+=("NVIDIA")
+    echo "$lspci_out" | grep -Eiq 'vga.*intel|3d.*intel|display.*intel' && gpus+=("Intel")
+    echo "$lspci_out" | grep -Eiq 'qxl|virtio.*gpu|vmware svga|cirrus|bochs' && gpus+=("Virtual/VM")
+    [[ ${#gpus[@]} -gt 0 ]] && gpu_line=$(IFS=" + "; echo "${gpus[*]}")
+  fi
+  echo -e "  ${THEME_TEXT}GPU:${RESET}             ${THEME_SUCCESS}${gpu_line}${RESET}"
+
+  local system_type="Desktop"
+  if declare -f is_laptop &>/dev/null && is_laptop 2>/dev/null; then
+    system_type="Laptop"
+  fi
+  echo -e "  ${THEME_TEXT}Chassis:${RESET}         ${THEME_SUCCESS}${system_type}${RESET}"
+
   if command -v pacman &>/dev/null; then
     local pkg_count
     pkg_count=$(pacman -Q 2>/dev/null | wc -l)
     echo -e "  ${THEME_TEXT}Packages:${RESET}        ${THEME_SUCCESS}${pkg_count} installed${RESET}"
   fi
 
-  # Services enabled
-  local svc_count
-  svc_count=$(systemctl list-unit-files --state=enabled --type=service --no-pager 2>/dev/null | grep -c "\.service" || echo 0)
-  echo -e "  ${THEME_TEXT}Services:${RESET}        ${THEME_SUCCESS}${svc_count} enabled${RESET}"
+  echo ""
+  echo -e "${THEME_HEADER}── Security ──${RESET}"
+  echo ""
 
-  # Firewall
   if command -v ufw &>/dev/null && sudo ufw status 2>/dev/null | grep -q "active"; then
     echo -e "  ${THEME_TEXT}Firewall:${RESET}        ${THEME_SUCCESS}UFW (active)${RESET}"
   elif command -v firewall-cmd &>/dev/null && sudo firewall-cmd --state 2>/dev/null | grep -q "running"; then
@@ -881,28 +890,73 @@ prompt_reboot() {
     echo -e "  ${THEME_TEXT}Firewall:${RESET}        ${THEME_MUTED}not configured${RESET}"
   fi
 
-  # Fail2ban
   if systemctl is-active --quiet fail2ban 2>/dev/null; then
-    echo -e "  ${THEME_TEXT}Fail2ban:${RESET}        ${THEME_SUCCESS}active${RESET}"
+    local jail_list
+    jail_list=$(sudo fail2ban-client status 2>/dev/null | grep "Jail list" | sed 's/.*://;s/,/ /g; s/^[[:space:]]*//')
+    if [[ -n "$jail_list" ]]; then
+      echo -e "  ${THEME_TEXT}Fail2ban:${RESET}        ${THEME_SUCCESS}active (jails: ${jail_list})${RESET}"
+    else
+      echo -e "  ${THEME_TEXT}Fail2ban:${RESET}        ${THEME_WARN}running, but no active jails — see warnings below${RESET}"
+    fi
   fi
 
-  # Shell
   echo -e "  ${THEME_TEXT}Shell:${RESET}           ${THEME_SUCCESS}Zsh + Starship${RESET}"
 
-  # Completed steps
-  local completed_steps=0
-  local failed_steps=0
+  echo ""
+  echo -e "${THEME_HEADER}── Steps ──${RESET}"
+  echo ""
+
+  local completed_steps=0 failed_steps=0
+  local failed_names=()
   if [ -f "$STATE_FILE" ] && [ -s "$STATE_FILE" ]; then
     completed_steps=$(grep -c "^COMPLETED:" "$STATE_FILE" 2>/dev/null) || completed_steps=0
     failed_steps=$(grep -c "^FAILED:" "$STATE_FILE" 2>/dev/null) || failed_steps=0
+    if [[ "$failed_steps" -gt 0 ]]; then
+      while IFS= read -r line; do
+        failed_names+=("$(_summary_step_name "${line#FAILED: }")")
+      done < <(grep "^FAILED:" "$STATE_FILE" 2>/dev/null)
+    fi
   fi
-  echo -e "  ${THEME_TEXT}Steps:${RESET}           ${THEME_SUCCESS}${completed_steps} completed${RESET}${THEME_MUTED}, ${failed_steps} failed${RESET}"
+  if [[ "$failed_steps" -eq 0 ]]; then
+    echo -e "  ${THEME_SUCCESS}✓ All ${completed_steps} steps completed successfully${RESET}"
+  else
+    echo -e "  ${THEME_SUCCESS}${completed_steps} completed${RESET}${THEME_WARN}, ${failed_steps} failed${RESET}"
+    local fn
+    for fn in "${failed_names[@]}"; do
+      echo -e "    ${THEME_ERROR}✗ ${fn}${RESET}"
+    done
+    echo -e "  ${THEME_MUTED}Re-run ./install.sh — completed steps are skipped automatically.${RESET}"
+  fi
 
-  # Log file
-  echo ""
-  echo -e "  ${THEME_TEXT}Log file:${RESET}        ${THEME_MUTED}${INSTALL_LOG:-/var/tmp/archinstaller.log}${RESET}"
-  echo ""
+  local warnings
+  warnings=$(_summary_warnings)
+  if [[ -n "$warnings" ]]; then
+    echo ""
+    echo -e "${THEME_HEADER}── Worth a look ──${RESET}"
+    echo ""
+    echo "$warnings" | while IFS= read -r w; do
+      echo -e "  ${THEME_WARN}⚠${RESET} ${THEME_TEXT}${w}${RESET}"
+    done
+    echo -e "  ${THEME_MUTED}None of these stopped the install — full detail in the log below.${RESET}"
+  fi
 
+  echo ""
+  echo -e "${THEME_HEADER}── What's next ──${RESET}"
+  echo ""
+  echo -e "  ${THEME_TEXT}•${RESET} Reboot to apply kernel, bootloader, and driver changes."
+  echo -e "  ${THEME_TEXT}•${RESET} Log out/in (or open a new terminal) to start using Zsh + Starship."
+  if is_step_complete gaming_mode 2>/dev/null; then
+    echo -e "  ${THEME_TEXT}•${RESET} Gaming Mode is set up — Steam, Wine, and GameMode are in your app menu."
+  fi
+  if [[ "$INSTALL_MODE" == "server" ]]; then
+    echo -e "  ${THEME_TEXT}•${RESET} SSH is protected by fail2ban; connect as usual with your existing key/password."
+  fi
+  if is_step_complete wakeonlan_config 2>/dev/null; then
+    echo -e "  ${THEME_TEXT}•${RESET} Wake-on-LAN is enabled — this machine can now be woken remotely once shut down."
+  fi
+  echo -e "  ${THEME_TEXT}•${RESET} Full details of everything this run did: ${THEME_MUTED}${INSTALL_LOG:-/var/tmp/archinstaller.log}${RESET}"
+
+  echo ""
   echo -e "${THEME_WARN}It is strongly recommended to reboot now to apply all changes.${RESET}"
   echo ""
 
@@ -932,9 +986,7 @@ prompt_reboot() {
 
 # Pre-download package lists for faster installation
 
-# ============================================================================
 # SECTION 12: CONFIRMATION & USER INTERACTION
-# ============================================================================
 
 # Function: install_aur_quietly
 # Description: Install packages via AUR helper (wrapper for generic installer)

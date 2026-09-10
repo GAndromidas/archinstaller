@@ -1,10 +1,7 @@
 #!/bin/bash
 set -uo pipefail
 
-# ============================================================================
-# System Detection Library - Hardware and System Information
-# Uses caching to avoid redundant checks
-# ============================================================================
+# Hardware/system detection, cached to avoid redundant checks
 
 # Cache for detection results
 declare -gA SYSTEM_CACHE=()
@@ -22,7 +19,6 @@ find_systemd_boot_entries_dir() {
 }
 fi
 
-# Detect CPU vendor
 detect_cpu_vendor() {
     local cache_key="cpu_vendor"
     
@@ -42,7 +38,6 @@ detect_cpu_vendor() {
     echo "$vendor"
 }
 
-# Detect if system is a laptop
 is_laptop() {
     local cache_key="is_laptop"
     
@@ -76,7 +71,6 @@ is_laptop() {
     [[ "$is_laptop" == "true" ]]
 }
 
-# Detect if system uses Btrfs filesystem
 if ! declare -f is_btrfs_system >/dev/null 2>&1; then
 is_btrfs_system() {
     local cache_key="is_btrfs"
@@ -93,7 +87,6 @@ is_btrfs_system() {
 }
 fi
 
-# Detect bootloader type
 if ! declare -f detect_bootloader >/dev/null 2>&1; then
 detect_bootloader() {
     local cache_key="bootloader"

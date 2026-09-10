@@ -1,11 +1,8 @@
 #!/bin/bash
 set -uo pipefail
 
-# ============================================================================
-# Dashboard Module — Professional wizard-style installation display
-# Uses pure bash + tput for a persistent full-screen frame with in-place
-# step updates. No external dependencies (gum optional elsewhere).
-# ============================================================================
+# Dashboard: full-screen wizard frame via pure bash + tput, in-place step
+# updates, no external deps.
 
 DASHBOARD_START_SEC=-1
 DASHBOARD_STEP_TIMES=()
@@ -19,7 +16,7 @@ DASHBOARD_FRAME_END=0
 DASHBOARD_ROW_OFFSET=0
 
 dashboard_init() {
-    clear
+    if [[ -t 1 ]] && [[ "${TERM:-dumb}" != dumb ]]; then clear; fi
     DASHBOARD_STEP_SEC=-1
     DASHBOARD_STEP_TIMES=()
     DASHBOARD_STEP_NAMES=()
@@ -42,7 +39,9 @@ dashboard_init() {
     row=1
 
     # Title line
-    local title="● Arch Installer"
+    local mode_label="${INSTALL_MODE:-auto}"
+    case "$mode_label" in default) mode_label="Standard" ;; minimal) mode_label="Minimal" ;; server) mode_label="Server" ;; esac
+    local title="● Arch Installer · $mode_label"
     local step_info="Step 1/${total}"
     local title_pad=$((w - ${#title} - ${#step_info} - 3))
     (( title_pad < 1 )) && title_pad=1
@@ -76,7 +75,7 @@ dashboard_init() {
 
     # Info line
     local log_info="Log: $INSTALL_LOG"
-    local cancel_info="Ctrl+C to cancel"
+    local cancel_info="${UNATTENDED:+Unattended · }Ctrl+C to cancel"
     local info_pad=$((w - ${#log_info} - ${#cancel_info} - 3))
     (( info_pad < 1 )) && info_pad=1
     printf "${THEME_BORDER}  │${RESET} ${THEME_MUTED}%s${RESET}%*s ${THEME_MUTED}%s${RESET} ${THEME_BORDER}│${RESET}\n" \
@@ -254,7 +253,7 @@ dashboard_warn() {
 }
 
 dashboard_finish() {
-    clear
+    if [[ -t 1 ]] && [[ "${TERM:-dumb}" != dumb ]]; then clear; fi
 
     local total=${TOTAL_STEPS:-10}
     local success=0 fail=0 skip=0 warn=0

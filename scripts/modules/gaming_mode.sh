@@ -5,11 +5,11 @@ set -uo pipefail
 # Get the directory where this script is located, resolving symlinks
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
-ARCHINSTALLER_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ARCHINSTALLER_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 CONFIGS_DIR="$ARCHINSTALLER_ROOT/configs"
 GAMING_YAML="$CONFIGS_DIR/gaming_mode.yaml"
 
-source "$SCRIPT_DIR/common.sh"
+source "$SCRIPT_DIR/../common.sh"
 
 # ===== Globals =====
 GAMING_ERRORS=()
@@ -19,18 +19,19 @@ flatpak_gaming_programs=()
 
 # ===== Local Helper Functions =====
 
-# Enable multilib repository for gaming packages
+# Enable multilib repository for gaming packages (shared implementation in
+# common.sh — see enable_multilib_repo)
 check_and_enable_multilib() {
-	# Enable multilib if not already enabled
-	if ! grep -q "^\[multilib\]" /etc/pacman.conf; then
-		echo -e "\n[multilib]\nInclude = /etc/pacman.d/mirrorlist" | sudo tee -a /etc/pacman.conf >/dev/null
-		log_success "Enabled multilib repository for gaming mode"
+	local was_enabled=false
+	grep -q "^\[multilib\]" /etc/pacman.conf 2>/dev/null && was_enabled=true
+
+	enable_multilib_repo
+
+	if [[ "$was_enabled" == false ]]; then
 		# Sync-only (no -u): the repo is brand-new so databases must refresh
 		# before installs, but a second full system upgrade mid-run is waste.
 		# This is the one legitimate bare -Sy — do not "fix" into -Syu.
 		sudo pacman -Sy --noconfirm >>"$INSTALL_LOG" 2>&1
-	else
-		log_success "Multilib repository already enabled"
 	fi
 }
 
@@ -176,7 +177,8 @@ main() {
 
 	local description="This includes popular tools like Discord, Steam, Wine, GameMode, MangoHud, Goverlay, LACT (AMD GPU control), Heroic Games Launcher, and more."
 	
-	# Use the same robust gum_confirm pattern as other scripts.
+	# Uses ui_confirm (lib/ui.sh), which handles both the gum and
+	# plain-text-fallback confirmation paths.
 	# Exit 2 = declined: the installer records SKIPPED (not COMPLETED) so a
 	# later re-run offers Gaming Mode again.
 	if ! ui_confirm "Enable Gaming Mode?" "$description"; then
@@ -216,4 +218,8 @@ main() {
 	fi
 }
 
+if [[ "${DRY_RUN:-false}" == true ]]; then
+  ui_info "Dry-run: this installation module would run here."
+  exit 0
+fi
 main

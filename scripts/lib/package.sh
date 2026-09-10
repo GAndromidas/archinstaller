@@ -1,11 +1,51 @@
 #!/bin/bash
 set -uo pipefail
 
-# ============================================================================
-# Package Management Library - Pacman, AUR, Flatpak operations
-# ============================================================================
+# Pacman, AUR, and Flatpak install/remove helpers
 
-# Check if package is installed
+# Run a package-manager command with a couple of retries for transient
+# failures — a locked pacman db (another process/timer still holding it) or
+# a flaky mirror/network blip are common on real hardware right after boot,
+# and are not worth failing the whole install over. Anything else (missing
+# package, signature failure, etc.) is returned as-is on first attempt.
+if ! declare -f run_with_retry >/dev/null 2>&1; then
+run_with_retry() {
+    local max_attempts=3
+    local delay=3
+    local attempt=1
+    local output rc
+
+    while :; do
+        output=$("$@" 2>&1)
+        rc=$?
+        if [ "$rc" -eq 0 ]; then
+            printf '%s' "$output"
+            return 0
+        fi
+
+        # Only retry errors that are actually transient.
+        if [[ "$output" != *"could not lock database"* ]] && \
+           [[ "$output" != *"failed to synchronize"* ]] && \
+           [[ "$output" != *"failed retrieving file"* ]] && \
+           [[ "$output" != *"Could not resolve host"* ]] && \
+           [[ "$output" != *"Connection timed out"* ]]; then
+            printf '%s' "$output"
+            return "$rc"
+        fi
+
+        if [ "$attempt" -ge "$max_attempts" ]; then
+            printf '%s' "$output"
+            return "$rc"
+        fi
+
+        log_debug "Transient package-manager error (attempt $attempt/$max_attempts) — retrying in ${delay}s" "$output"
+        sleep "$delay"
+        attempt=$((attempt + 1))
+        delay=$((delay * 2))
+    done
+}
+fi
+
 if ! declare -f is_package_installed >/dev/null 2>&1; then
 is_package_installed() {
     local manager="$1"
@@ -16,13 +56,12 @@ is_package_installed() {
             pacman -Q "$pkg" &>/dev/null
             ;;
         flatpak)
-            flatpak list | grep -q "^$pkg" &>/dev/null
+            flatpak list --app --columns=application 2>/dev/null | grep -qxF "$pkg"
             ;;
     esac
 }
 fi
 
-# Install single package via pacman
 if ! declare -f pacman_install_single >/dev/null 2>&1; then
 pacman_install_single() {
     local pkg="$1"
@@ -33,7 +72,7 @@ pacman_install_single() {
     fi
 
     local output
-    if output=$(sudo pacman -S --noconfirm --needed "$pkg" 2>&1); then
+    if output=$(run_with_retry sudo pacman -S --noconfirm --needed "$pkg"); then
         [ "$verbose" = true ] && printf '%b' "${THEME_SUCCESS} ✓ Success${RESET}\n"
         INSTALLED_PACKAGES+=("$pkg")
         return 0
@@ -48,7 +87,6 @@ pacman_install_single() {
 }
 fi
 
-# Install single package via AUR (yay)
 if ! declare -f yay_install_single >/dev/null 2>&1; then
 yay_install_single() {
     local pkg="$1"
@@ -64,7 +102,7 @@ yay_install_single() {
     fi
 
     local output
-    if output=$(yay -S --noconfirm --needed "$pkg" 2>&1); then
+    if output=$(run_with_retry yay -S --noconfirm --needed "$pkg"); then
         [ "$verbose" = true ] && printf '%b' "${THEME_SUCCESS} ✓ Success${RESET}\n"
         INSTALLED_PACKAGES+=("$pkg")
         return 0
@@ -79,7 +117,6 @@ yay_install_single() {
 }
 fi
 
-# Install single package via Flatpak
 if ! declare -f flatpak_install_single >/dev/null 2>&1; then
 flatpak_install_single() {
     local pkg="$1"
@@ -110,7 +147,7 @@ flatpak_install_single() {
 }
 fi
 
-# Batch install Flatpak packages (much faster than one-by-one)
+# Faster than installing one-by-one
 if ! declare -f flatpak_install_batch >/dev/null 2>&1; then
 flatpak_install_batch() {
     local packages=("$@")
@@ -147,7 +184,7 @@ flatpak_install_batch() {
     local failed=0
     for pkg in "${packages[@]}"; do
         if flatpak_install_single "$pkg" true; then
-            INSTALLED_PACKAGES+=("$pkg")
+            : # flatpak_install_single already records successful packages.
         else
             ((failed++))
         fi
@@ -161,7 +198,6 @@ flatpak_install_batch() {
 }
 fi
 
-# Generic package installer with error handling
 if ! declare -f install_package_generic >/dev/null 2>&1; then
 install_package_generic() {
     local manager="$1"
@@ -191,10 +227,10 @@ install_package_generic() {
             local error_output install_result=1
             case "$manager" in
                 pacman)
-                    error_output=$(sudo pacman -S --noconfirm --needed "$pkg" 2>&1) && install_result=0
+                    error_output=$(run_with_retry sudo pacman -S --noconfirm --needed "$pkg") && install_result=0
                     ;;
                 aur)
-                    error_output=$(yay -S --noconfirm --needed "$pkg" 2>&1) && install_result=0
+                    error_output=$(run_with_retry yay -S --noconfirm --needed "$pkg") && install_result=0
                     ;;
                 flatpak)
                     error_output=$(sudo flatpak install -y --noninteractive flathub "$pkg" 2>&1) && install_result=0
@@ -223,7 +259,6 @@ install_package_generic() {
 }
 fi
 
-# Batch package installation with filtering
 if ! declare -f install_packages_batch >/dev/null 2>&1; then
 install_packages_batch() {
     local manager="$1"
@@ -256,7 +291,6 @@ install_packages_batch() {
 }
 fi
 
-# Remove package
 if ! declare -f remove_package >/dev/null 2>&1; then
 remove_package() {
     local pkg="$1"
@@ -273,7 +307,6 @@ remove_package() {
 }
 fi
 
-# Update system
 if ! declare -f update_system >/dev/null 2>&1; then
 update_system() {
     ui_info "Updating system packages..."

@@ -3,34 +3,49 @@ set -uo pipefail
 
 # Get directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/common.sh"
+source "$SCRIPT_DIR/../common.sh"
+
+if [[ "${DRY_RUN:-false}" == true ]]; then
+  ui_info "Dry-run: Maintenance and cleanup would run here."
+  exit 0
+fi
 
 cleanup_and_optimize() {
   step "Performing final cleanup and optimizations"
-  # Run fstrim in background (does not block other cleanup)
-  if command_exists lsblk; then
-    if lsblk -d -o rota | grep -q '^0$'; then
-      sudo fstrim -v / >>"$INSTALL_LOG" 2>&1 &
-      log_info "TRIM started in background"
-    fi
-  else
-    log_warning "lsblk not available. Skipping SSD optimization."
+  enable_trim_timer || true
+  # Do not recursively purge /tmp — other running processes (X11 sockets,
+  # PulseAudio, systemd) keep live state there and a broad purge risks
+  # stepping on them. Only remove this installer's own legacy files.
+  rm -f /tmp/archinstaller.log /tmp/archinstaller.state 2>/dev/null || true
+}
+
+# Periodic TRIM via the native systemd timer (weekly, standard practice)
+# instead of a single one-shot fstrim right after install — but also runs
+# one immediate trim so the benefit isn't delayed a full week on first boot.
+enable_trim_timer() {
+  if ! command_exists systemctl; then
+    log_warning "systemctl unavailable; cannot enable fstrim.timer"
+    return 1
   fi
-  run_step "Cleaning /tmp directory" sudo find /tmp -mindepth 1 -maxdepth 1 \
-    ! -path '/tmp/systemd-*' ! -path '/tmp/.X*' ! -path '/tmp/pulse-*' \
-    ! -path '/tmp/archinstaller.log' ! -path '/tmp/archinstaller.state' \
-    -exec rm -rf {} + 2>/dev/null || true
-  # State/log live in /var/tmp (reboot-safe); clean stale legacy copies in /tmp
-  # only when the live files exist, never the live files themselves.
-  if [ -s /var/tmp/archinstaller.state ] || [ -s /var/tmp/archinstaller.log ]; then
-    rm -f /tmp/archinstaller.log /tmp/archinstaller.state 2>/dev/null || true
+  if sudo systemctl enable --now fstrim.timer >>"$INSTALL_LOG" 2>&1; then
+    log_success "Enabled systemd fstrim.timer for periodic TRIM"
+    sudo systemctl start fstrim.service >>"$INSTALL_LOG" 2>&1 || true
+    return 0
   fi
+  log_warning "Could not enable fstrim.timer; leaving existing TRIM configuration unchanged"
+  return 1
 }
 
 setup_maintenance() {
   step "Performing comprehensive system cleanup"
   # Use paccache instead of pacman -Sc (keeps last 3 versions, safer for resume)
   run_step "Cleaning old pacman packages (keeping 3 versions)" sudo paccache -r
+  # Leftover partial-download temp files (pacman's in-progress download
+  # names before a package is fully verified/renamed) can accumulate from
+  # transient network blips during a long install and confuse later cache
+  # cleaning ("could not open file ... Error reading fd 8"). Harmless to
+  # remove — these are never valid packages.
+  sudo find /var/cache/pacman/pkg -maxdepth 1 -name 'download-*' -delete 2>/dev/null || true
   run_step "Cleaning yay cache" yay -Sc --noconfirm 2>/dev/null || true
 
   # Flatpak cleanup - single call removes both unused packages and runtimes
@@ -41,71 +56,49 @@ setup_maintenance() {
     log_info "Flatpak not installed, skipping flatpak cleanup"
   fi
 
-  # Remove orphaned packages if any exist
-  if pacman -Qtdq &>/dev/null; then
-    run_step "Removing orphaned packages" sudo pacman -Rns $(pacman -Qtdq) --noconfirm
+  # Remove orphaned packages if any exist. Capture once so an empty list can
+  # never turn into a bare `pacman -Rns` invocation.
+  local orphans
+  orphans=$(pacman -Qtdq 2>/dev/null || true)
+  if [[ -n "$orphans" ]]; then
+    read -r -a orphan_packages <<< "$orphans"
+    run_step "Removing orphaned packages" sudo pacman -Rns --noconfirm "${orphan_packages[@]}"
   else
     log_info "No orphaned packages found"
   fi
 
-  # Only attempt to remove yay-debug if it's actually installed
+  # Safety net: yay.sh (as of this version) never installs yay-debug in the
+  # first place — it builds with `makepkg -s` and installs only the real
+  # package tarball. This check only matters for a system that had
+  # yay-debug installed by an older version of the script.
   if pacman -Q yay-debug &>/dev/null; then
     run_step "Removing yay-debug package" sudo pacman -Rns --noconfirm yay-debug
   fi
 }
 
 cleanup_helpers() {
-  run_step "Cleaning yay build dir" sudo rm -rf /tmp/yay
+  # yay.sh builds in /tmp/archinstaller-yay-build.* and cleans up after
+  # itself on success. This is a safety net for the one case it can't
+  # handle itself: the build process being killed (crash, power loss)
+  # before its own cleanup trap runs. Glob-scoped to our distinctive
+  # prefix, never a bare /tmp/yay (that path is never actually created —
+  # matching it against reality, not a guess) and never a bare /tmp/tmp.*
+  # (would risk deleting unrelated processes' temp dirs).
+  run_step "Cleaning leftover yay build directories" bash -c \
+    'shopt -s nullglob; dirs=(/tmp/archinstaller-yay-build.*); [ ${#dirs[@]} -eq 0 ] || sudo rm -rf "${dirs[@]}"'
 }
 
 cleanup_snapper_snapshots() {
-  # Clean snapper snapshots to leave system without snapshots after archinstaller (as requested)
-  # Robust for 700 /boot, btrfs only, snapper present
-  if ! is_btrfs_system 2>/dev/null; then
-    return 0
-  fi
-  if ! pacman -Q snapper &>/dev/null 2>&1 && ! command -v snapper &>/dev/null; then
+  # Never delete snapshots automatically — they may predate archinstaller
+  # and be the user's only recovery path if something goes wrong. This
+  # just reports the current count.
+  if ! command -v snapper &>/dev/null || ! is_btrfs_system 2>/dev/null; then
     return 0
   fi
   local snap_count
-  snap_count=$(sudo snapper -c root list 2>/dev/null | awk 'NR>2 && $1 ~ /^[0-9]+$/ {print $1}' | wc -l)
-  snap_count=$(echo "$snap_count" | tr -d ' ')
-  if [[ -z "$snap_count" || "$snap_count" -eq 0 ]]; then
-    log_info "No snapper snapshots to clean"
-    return 0
-  fi
-  log_info "Cleaning $snap_count snapper snapshot(s) for clean post-install (no snapshots)"
-  # Delete via snapper (updates DB) - batch delete if possible
-  local ids
-  ids=$(sudo snapper -c root list 2>/dev/null | awk 'NR>2 && $1 ~ /^[0-9]+$/ {print $1}' | tr '\n' ' ')
-  if [[ -n "$ids" ]]; then
-    # Try batch delete first (faster)
-    if ! sudo snapper -c root delete $ids >>"$INSTALL_LOG" 2>&1; then
-      # Fallback: delete one by one (handles busy snapshots)
-      for id in $ids; do
-        sudo snapper -c root delete "$id" >>"$INSTALL_LOG" 2>&1 || sudo btrfs subvolume delete "/.snapshots/$id/snapshot" 2>/dev/null || true
-      done
-    fi
-    log_success "Cleaned snapper snapshots - system now without snapshots"
-  fi
-  # Cleanup any orphaned btrfs subvolumes under /.snapshots not tracked by snapper
-  local orphans
-  orphans=$(sudo btrfs subvolume list -o /.snapshots 2>/dev/null | awk '{print $NF}' || true)
-  if [[ -n "$orphans" ]]; then
-    echo "$orphans" | while read -r sv; do
-      [[ -n "$sv" ]] || continue
-      # Only delete if not tracked (snapper list doesn't contain the ID)
-      local sid=$(basename "$(dirname "$sv")" 2>/dev/null || echo "")
-      if ! echo "$ids" | grep -qw "$sid" 2>/dev/null; then
-        sudo btrfs subvolume delete "/$sv" 2>/dev/null || true
-      fi
-    done
-  fi
-  # Also clean limine-snapper-sync history if present (bloated limine.conf //Snapshots already kept, but history subvols)
-  if sudo test -d "/.snapshots" 2>/dev/null; then
-    # Ensure /.snapshots is still a valid btrfs subvolume mount
-    mountpoint -q /.snapshots 2>/dev/null || sudo mount -a 2>/dev/null || true
-  fi
+  snap_count=$(sudo snapper -c root list 2>/dev/null | awk 'NR>2 && $1 ~ /^[0-9]+$/ {count++} END {print count+0}')
+  log_info "Existing Snapper snapshots: $snap_count (preserved)"
+  return 0
 }
 
 cleanup_script_backups() {
@@ -186,7 +179,7 @@ cleanup_script_backups() {
 cleanup_and_optimize
 setup_maintenance
 cleanup_helpers
-run_step "Cleaning snapper snapshots (clean post-install without snapshots)" cleanup_snapper_snapshots
+run_step "Checking snapper snapshots" cleanup_snapper_snapshots
 run_step "Cleaning script-created .backup files" cleanup_script_backups
 
 # Final message

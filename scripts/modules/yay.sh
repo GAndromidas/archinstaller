@@ -4,7 +4,7 @@
 # This script installs yay, which is required for AUR package installation
 set -uo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/../common.sh"
 
 install_yay() {
   step "Installing yay AUR helper"
@@ -38,9 +38,13 @@ install_yay() {
     return 1
   fi
 
-  # Create temporary directory for building
+  # Create temporary directory for building. Distinctive prefix (not a bare
+  # mktemp default) so maintenance.sh can safely glob-match and clean up any
+  # leftovers if the build is ever interrupted before the trap below runs
+  # (e.g. killed process, power loss) — without risking touching unrelated
+  # /tmp/tmp.* directories from other processes.
   local temp_dir
-  temp_dir=$(mktemp -d) || { log_error "Failed to create temporary directory for yay build"; return 1; }
+  temp_dir=$(mktemp -d /tmp/archinstaller-yay-build.XXXXXXXX) || { log_error "Failed to create temporary directory for yay build"; return 1; }
 
   local orig_dir; orig_dir=$(pwd)
   local cleanup_tempdir
@@ -58,14 +62,38 @@ install_yay() {
     return 1
   fi
 
-  # Build yay
-  ui_info "Building and installing yay..."
+  # Build yay. Deliberately build-only (-s, not -si): Arch's default
+  # makepkg.conf has `debug` in OPTIONS, so a plain `-si` here would also
+  # build AND auto-install a yay-debug package nobody asked for (extra
+  # download size, no use for it without gdb work on yay itself). Building
+  # separately lets us install only the real package below.
+  ui_info "Building yay..."
   echo -e "${THEME_TEXT}Please enter your sudo password to build and install yay:${RESET}"
   sudo -v
-  if makepkg -si --noconfirm --needed 2>&1 | tee -a "$INSTALL_LOG"; then
-    log_success "yay built and installed successfully"
+  if makepkg -s --noconfirm --needed 2>&1 | tee -a "$INSTALL_LOG"; then
+    log_success "yay built successfully"
   else
     log_error "Failed to build yay"
+    return 1
+  fi
+
+  # Install only the real yay package — explicitly exclude any -debug
+  # package tarball that makepkg produced alongside it.
+  ui_info "Installing yay..."
+  local pkg_files=()
+  while IFS= read -r -d '' f; do
+    pkg_files+=("$f")
+  done < <(find . -maxdepth 1 -name 'yay-[0-9]*.pkg.tar.*' ! -name '*-debug-*' -print0)
+
+  if [[ ${#pkg_files[@]} -eq 0 ]]; then
+    log_error "yay build succeeded but no installable package file was found"
+    return 1
+  fi
+
+  if sudo pacman -U --noconfirm --needed "${pkg_files[@]}" 2>&1 | tee -a "$INSTALL_LOG"; then
+    log_success "yay installed successfully"
+  else
+    log_error "Failed to install yay package"
     return 1
   fi
 
@@ -103,4 +131,8 @@ YAYEOF
 }
 
 # Execute yay installation
+if [[ "${DRY_RUN:-false}" == true ]]; then
+  ui_info "Dry-run: this installation module would run here."
+  exit 0
+fi
 install_yay

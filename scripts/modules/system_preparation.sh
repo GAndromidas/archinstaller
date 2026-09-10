@@ -3,7 +3,12 @@ set -uo pipefail
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/common.sh"
+source "$SCRIPT_DIR/../common.sh"
+
+if [[ "${DRY_RUN:-false}" == true ]]; then
+  ui_info "Dry-run: System preparation would run here."
+  exit 0
+fi
 
 # NOTE: Network-speed testing was removed. A single-stream curl test is a poor
 # proxy for pacman throughput (it often times out on slow links and adds
@@ -67,12 +72,7 @@ configure_pacman() {
     log_success "Added ILoveCandy setting"
   fi
 
-  if ! grep -q "^\[multilib\]" /etc/pacman.conf; then
-    echo -e "\n[multilib]\nInclude = /etc/pacman.d/mirrorlist" | sudo tee -a /etc/pacman.conf >/dev/null
-    log_success "Enabled multilib repository"
-  else
-    log_success "Multilib repository already enabled"
-  fi
+  enable_multilib_repo
 
   echo ""
 }
@@ -191,8 +191,8 @@ install_cpu_microcode() {
 
 install_kernel_headers_for_all() {
   step "Installing kernel headers for all installed kernels"
-  local kernel_types
-  kernel_types=($(get_installed_kernel_types))
+  local kernel_types=()
+  mapfile -t kernel_types < <(get_installed_kernel_types)
 
   if [ "${#kernel_types[@]}" -eq 0 ]; then
     log_warning "No supported kernel types detected. Please check your system configuration."

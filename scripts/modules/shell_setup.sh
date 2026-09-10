@@ -2,8 +2,8 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIGS_DIR="$SCRIPT_DIR/../configs"
-source "$SCRIPT_DIR/common.sh"
+CONFIGS_DIR="$SCRIPT_DIR/../../configs"
+source "$SCRIPT_DIR/../common.sh"
 
 setup_shell() {
   step "Setting up ZSH shell environment"
@@ -81,4 +81,8 @@ setup_shell() {
 }
 
 # Main execution
+if [[ "${DRY_RUN:-false}" == true ]]; then
+  ui_info "Dry-run: this installation module would run here."
+  exit 0
+fi
 setup_shell

@@ -2,7 +2,10 @@
 set -uo pipefail
 
 # Installation log file (/var/tmp persists across reboots so resume works)
-INSTALL_LOG="/var/tmp/archinstaller.log"
+INSTALL_LOG="${INSTALL_LOG:-/var/tmp/archinstaller.log}"
+AUTO_MODE=false
+UNATTENDED=false
+AUTO_CONFIRM=false
 
 # Function to show help
 show_help() {
@@ -17,6 +20,8 @@ OPTIONS:
     -v, --verbose   Enable verbose output (show all package installation details)
     -q, --quiet     Quiet mode (minimal output)
     -d, --dry-run   Preview what will be installed without making changes
+    -a, --auto      Automatically select the recommended installation mode
+    -y, --yes       Non-interactive mode: accept safe/default prompts automatically
 
 DESCRIPTION:
     ArchInstaller transforms a fresh Arch Linux installation into a fully
@@ -67,6 +72,8 @@ EXAMPLES:
     ./install.sh                Run installer with interactive prompts
     ./install.sh --verbose      Run with detailed package installation output
     ./install.sh --dry-run      Preview changes without making them
+    ./install.sh --auto          Automatically choose the recommended mode
+    ./install.sh --yes           Run unattended with safe/default choices
     ./install.sh --help         Show this help message
 
 LOG FILES:
@@ -81,10 +88,7 @@ EOF
 }
 
 
-# Clear terminal for clean interface
-clear
-
-# Gets the directory where this script is located (archinstaller root)
+# Get the directory where this script is located (archinstaller root)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$SCRIPT_DIR/scripts"
 CONFIGS_DIR="$SCRIPT_DIR/configs"
@@ -98,66 +102,51 @@ if [[ ! -s "$INSTALL_LOG" && -s /tmp/archinstaller.log ]]; then
   cp -a /tmp/archinstaller.log "$INSTALL_LOG" 2>/dev/null || true
 fi
 
-# Source new modular libraries
+# Parse flags before any package installation or other system side effects.
+VERBOSE=false
+DRY_RUN=false
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help) show_help ;;
+    --verbose|-v) VERBOSE=true ;;
+    --quiet|-q) VERBOSE=false ;;
+    --dry-run|-d) DRY_RUN=true; VERBOSE=true ;;
+    --auto|-a) AUTO_MODE=true ;;
+    --yes|-y) AUTO_MODE=true; UNATTENDED=true; AUTO_CONFIRM=true ;;
+    *) echo "Unknown option: $arg"; echo "Use --help for usage information"; exit 1 ;;
+  esac
+done
+
+# Source modular libraries once. common.sh remains a compatibility facade for
+# older modules and third-party callers.
 source "$SCRIPTS_DIR/lib/core.sh"
 source "$SCRIPTS_DIR/lib/ui.sh"
 source "$SCRIPTS_DIR/lib/system.sh"
 source "$SCRIPTS_DIR/lib/package.sh"
 source "$SCRIPTS_DIR/lib/config.sh"
-
-# Source common.sh for backward compatibility with existing scripts
+source "$SCRIPTS_DIR/lib/state.sh"
 source "$SCRIPTS_DIR/common.sh"
-
-# Source dashboard module for professional wizard-style display
 source "$SCRIPTS_DIR/lib/dashboard.sh"
 
-# Install gum silently for enhanced UI experience
-if ! command -v gum >/dev/null 2>&1; then
+export VERBOSE DRY_RUN INSTALL_LOG AUTO_MODE UNATTENDED AUTO_CONFIRM
+
+# Install gum only when we are actually going to modify the system. Dry-run is
+# guaranteed not to install helpers or alter the target machine.
+if [[ "$DRY_RUN" != true ]] && ! command -v gum >/dev/null 2>&1; then
   log_to_file "Installing gum for enhanced UI experience..."
-  if sudo pacman -S --noconfirm --needed gum 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
+  if sudo pacman -S --noconfirm --needed gum >>"$INSTALL_LOG" 2>&1; then
     log_to_file "Gum installed successfully"
   else
     log_to_file "Failed to install gum, falling back to basic UI"
   fi
 fi
 
-# Initialize core library
 init_core
-
-# Monotonic install timer (bash SECONDS: immune to NTP/VM wall-clock jumps,
-# which previously produced a "0 seconds" total when the clock moved back)
 START_TIME_SEC=$SECONDS
-
-# Parse flags
-VERBOSE=false
-DRY_RUN=false
-for arg in "$@"; do
-  case "$arg" in
-    -h|--help)
-      show_help
-      ;;
-    --verbose|-v)
-      VERBOSE=true
-      ;;
-    --quiet|-q)
-      VERBOSE=false
-      ;;
-    --dry-run|-d)
-      DRY_RUN=true
-      VERBOSE=true
-      ;;
-    *)
-      echo "Unknown option: $arg"
-      echo "Use --help for usage information"
-      exit 1
-      ;;
-  esac
-done
-export VERBOSE
-export DRY_RUN
-export INSTALL_LOG
 export START_TIME_SEC
 
+# Clear the terminal only after options are parsed.
+if [[ -t 1 ]] && [[ "${TERM:-dumb}" != dumb ]]; then clear; fi
 arch_ascii
 
 # System checking function (defined before use)
@@ -239,7 +228,17 @@ check_system_requirements() {
 # Run system checks — stdout goes to log, interactive prompts use /dev/tty
 check_system_requirements >> "$INSTALL_LOG" 2>&1
 
-show_menu
+if [[ "$AUTO_MODE" == true ]]; then
+  if is_headless_system; then
+    INSTALL_MODE="server"
+  else
+    INSTALL_MODE="default"
+  fi
+  ui_info "Automatic mode: selected $( [[ "$INSTALL_MODE" == server ]] && echo "Server" || echo "Standard" ) installation."
+  [[ "$UNATTENDED" == true ]] && export AUTO_LAPTOP_OPTS=true
+else
+  show_menu
+fi
 
 # Check if INSTALL_MODE was set (user might have exited menu)
 if [ -z "${INSTALL_MODE:-}" ]; then
@@ -255,262 +254,7 @@ fi
 
 export INSTALL_MODE
 
-# Function to validate state file integrity
-validate_state_file() {
-  if [ ! -f "$STATE_FILE" ]; then
-    return 0  # No file is valid
-  fi
-  
-  # Check if file is readable and not empty
-  if [ ! -r "$STATE_FILE" ] || [ ! -s "$STATE_FILE" ]; then
-    log_warning "State file is corrupted or empty. Starting fresh installation."
-    rm -f "$STATE_FILE" 2>/dev/null || true
-    return 1
-  fi
-  
-  return 0
-}
-
-# Enhanced resume functionality with partial failure handling and error recovery
-show_resume_menu() {
-  # Validate state file first
-  if ! validate_state_file; then
-    return 0
-  fi
-  
-  if [ -f "$STATE_FILE" ] && [ -s "$STATE_FILE" ]; then
-    echo ""
-    ui_info "Previous installation detected. Checking installation status..."
-
-    local completed_steps=()
-    local step_status=()
-    local has_failures=false
-
-    # Read and parse state file
-    while IFS= read -r step; do
-      completed_steps+=("$step")
-      # Check if step was marked as completed
-      if [[ "$step" =~ ^COMPLETED: ]]; then
-        step_status+=("completed")
-      elif [[ "$step" =~ ^FAILED: ]]; then
-        step_status+=("failed")
-        has_failures=true
-      elif [[ "$step" =~ ^SKIPPED: ]]; then
-        step_status+=("skipped")
-      else
-        # Legacy format - assume completed
-        step_status+=("completed")
-      fi
-    done < "$STATE_FILE"
-
-    if [ ${#completed_steps[@]} -eq 0 ]; then
-      ui_info "No completed steps found in state file"
-      return 0
-    fi
-
-    echo ""
-    if supports_gum; then
-      gum style --foreground "$GUM_HEADER" "Installation Progress Summary"
-      echo ""
-      for i in "${!completed_steps[@]}"; do
-        local step="${completed_steps[$i]}"
-        local status="${step_status[$i]}"
-        local display_step="${step#*: }"
-        
-        case "$status" in
-          "completed")
-            gum style --foreground "$GUM_SUCCESS" "  [COMPLETED] $display_step" >/dev/null
-            ;;
-          "failed")
-            gum style --foreground "$GUM_ERROR" "  [FAILED] $display_step" >/dev/null
-            ;;
-          "skipped")
-            gum style --foreground "$GUM_MUTED" "  [SKIPPED] $display_step" >/dev/null
-            ;;
-        esac
-      done
-      echo ""
-      
-      if [ "$has_failures" = true ]; then
-        if gum confirm --default=true "Found failed steps. Retry failed steps first?"; then
-          ui_info "Will retry failed steps during installation"
-          return 0
-        elif gum confirm --default=false "Resume from last completed step?"; then
-          ui_success "Resuming installation from last completed step..."
-          return 0
-        else
-          if gum confirm --default=false "Start fresh installation (this will clear previous progress)?"; then
-            rm -f "$STATE_FILE" 2>/dev/null || true
-            ui_info "Starting fresh installation..."
-            return 0
-          else
-            ui_info "Installation cancelled by user"
-            exit 0
-          fi
-        fi
-      else
-        if gum confirm --default=true "Resume installation from where you left off?"; then
-          ui_success "Resuming installation..."
-          return 0
-        else
-          if gum confirm --default=false "Start fresh installation (this will clear previous progress)?"; then
-            rm -f "$STATE_FILE" 2>/dev/null || true
-            ui_info "Starting fresh installation..."
-            return 0
-          else
-            ui_info "Installation cancelled by user"
-            exit 0
-          fi
-        fi
-      fi
-    else
-      # Fallback for systems without gum
-      echo ""
-      for i in "${!completed_steps[@]}"; do
-        local step="${completed_steps[$i]}"
-        local status="${step_status[$i]}"
-        local display_step="${step#*: }"
-        
-        case "$status" in
-          "completed")
-            echo -e "${THEME_SUCCESS}[COMPLETED]${RESET} $display_step"
-            ;;
-          "failed")
-            echo -e "${THEME_ERROR}[FAILED]${RESET} $display_step"
-            ;;
-          "skipped")
-            echo -e "${THEME_MUTED}[SKIPPED]${RESET} $display_step"
-            ;;
-        esac
-      done
-      echo ""
-      
-      if [ "$has_failures" = true ]; then
-        echo "Found failed steps. Options:"
-        echo "1. Retry failed steps first"
-        echo "2. Resume from last completed step"
-        echo "3. Start fresh installation"
-        echo "4. Cancel"
-        echo ""
-        read -p "Choose an option (1-4): " choice
-        
-        case "$choice" in
-          1)
-            ui_info "Will retry failed steps during installation"
-            return 0
-            ;;
-          2)
-            ui_success "Resuming installation from last completed step..."
-            return 0
-            ;;
-          3)
-            rm -f "$STATE_FILE" 2>/dev/null || true
-            ui_info "Starting fresh installation..."
-            return 0
-            ;;
-          4)
-            ui_info "Installation cancelled by user"
-            exit 0
-            ;;
-          *)
-            ui_warn "Invalid option. Resuming installation..."
-            return 0
-            ;;
-        esac
-      else
-        echo "Resume installation from where you left off? (y/n)"
-        read -r response
-        if [[ "$response" =~ ^[Yy]$ ]]; then
-          ui_success "Resuming installation..."
-          return 0
-        else
-          echo "Start fresh installation? (y/n)"
-          read -r fresh_response
-          if [[ "$fresh_response" =~ ^[Yy]$ ]]; then
-            rm -f "$STATE_FILE" 2>/dev/null || true
-            ui_info "Starting fresh installation..."
-            return 0
-          else
-            ui_info "Installation cancelled by user"
-            exit 0
-          fi
-        fi
-      fi
-    fi
-  fi
-}
-
-# Show resume menu if previous installation detected
-if [ -f "$STATE_FILE" ] && [ -s "$STATE_FILE" ]; then
-  show_resume_menu
-fi
-
-# Dry-run mode banner
-if [ "$DRY_RUN" = true ]; then
-  ui_header "DRY-RUN MODE ENABLED"
-  ui_info "Preview mode: No changes will be made"
-  ui_info "Package installations will be simulated"
-  ui_info "System configurations will be previewed"
-  echo ""
-fi
-
-# Prompt for sudo using UI helpers
-if [ "$DRY_RUN" = false ]; then
-  ui_info "Please enter your sudo password to begin the installation:"
-  sudo -v || { ui_error "Sudo required. Exiting."; exit 1; }
-else
-  ui_info "Dry-run mode: Skipping sudo authentication"
-fi
-
-# Keep sudo alive (skip in dry-run mode)
-if [ "$DRY_RUN" = false ]; then
-  while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
-  SUDO_KEEPALIVE_PID=$!
-fi
-# Exit/int traps: capture the real exit code first ($? is valid inside an EXIT
-# trap). $LINENO at trap time is NOT the failing line, so don't report it as
-# one — per-step FAILED markers in the state file are the source of truth.
-# (ERR trap intentionally omitted: without `errexit` it never fires.)
-trap 'rc=$?; cleanup_on_error "$rc"; save_log_on_exit' EXIT
-trap 'cleanup_on_error 130 "interrupted (SIGINT)"; save_log_on_exit; exit 130' INT
-trap 'cleanup_on_error 143 "terminated (SIGTERM)"; save_log_on_exit; exit 143' TERM
-
-# Function to mark step as completed with atomic append and status tracking
-# Tracks both completed and failed steps with detailed progress reporting.
-# Uses file locking to prevent state-file corruption on concurrent access.
-mark_step_complete_with_progress() {
-  local step_name="$1"
-  local status="${2:-completed}"
-
-  # Validate step name
-  if [ -z "$step_name" ]; then
-    log_error "mark_step_complete_with_progress: step_name cannot be empty"
-    return 1
-  fi
-
-  # Write status to state file with consistent format (atomic, flock-guarded).
-  # "skipped" is informational only: is_step_complete() ignores it, so a
-  # skipped optional step re-runs (re-prompts) next time.
-  (
-    flock -x 200
-    if [ "$status" = "completed" ]; then
-      echo "COMPLETED: $step_name" >> "$STATE_FILE"
-    elif [ "$status" = "skipped" ]; then
-      echo "SKIPPED: $step_name" >> "$STATE_FILE"
-    else
-      echo "FAILED: $step_name" >> "$STATE_FILE"
-    fi
-  ) 200>>"$STATE_FILE" 2>/dev/null || {
-    log_error "Failed to update state file for step: $step_name"
-    return 1
-  }
-}
-
-# Function to check if step was completed (fixed-string match — step names are
-# literal, never regex)
-is_step_complete() {
-  [ -f "$STATE_FILE" ] && grep -qFx -e "COMPLETED: $1" -e "$1" "$STATE_FILE"
-}
+# State-file validation and step bookkeeping live in lib/state.sh.
 
 # Enhanced error handling and rollback functions
 cleanup_on_error() {
@@ -555,22 +299,22 @@ cleanup_on_error() {
 
 # Global installation success tracking
 INSTALLATION_SUCCESS=true
+INSTALLER_EXITING=false
 
-# Function to save log on exit
 save_log_on_exit() {
-  # Kill sudo keep-alive if running
   if [ -n "${SUDO_KEEPALIVE_PID:-}" ]; then
     kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
   fi
-  
+
   {
     echo ""
     echo "=========================================="
     echo "Installation ended: $(date)"
     echo "=========================================="
-    
-    # Determine actual installation status from state file (more reliable than INSTALLATION_SUCCESS
-    # which can be false due to external signals like SIGTERM after all steps completed)
+
+    # Determine actual installation status from state file (more reliable than
+    # INSTALLATION_SUCCESS, which can be false due to external signals like
+    # SIGTERM after all steps completed)
     if [ -f "$STATE_FILE" ] && grep -q "^FAILED:" "$STATE_FILE" 2>/dev/null; then
       echo "Installation completed with errors!"
       echo "Check the log above for details."
@@ -583,193 +327,118 @@ save_log_on_exit() {
   } >> "$INSTALL_LOG"
 }
 
+# cleanup_on_error() and save_log_on_exit() above were fully written but
+# never actually wired to anything — no trap in the whole codebase called
+# them, so neither ran on error, Ctrl+C, or normal exit. This wires them up.
+handle_signal() {
+  local sig="$1"
+  log_warning "Received $sig; stopping ArchInstaller safely."
+  INSTALLATION_SUCCESS=false
+  exit 130
+}
+trap 'handle_signal INT' INT
+trap 'handle_signal TERM' TERM
+
+on_exit() {
+  local rc=$?
+  if [[ "$INSTALLER_EXITING" == true ]]; then return; fi
+  INSTALLER_EXITING=true
+  if (( rc != 0 )); then cleanup_on_error "$rc" || true; fi
+  save_log_on_exit || true
+}
+trap on_exit EXIT
+
 # Installation start — enter dashboard wizard mode
+# Keep the order and failure policy of the original installer while using one
+# runner for every normal step. This is intentionally data-driven so adding a
+# future module does not require another large copy/paste block.
+run_install_step() {
+  local number="$1" id="$2" name="$3" script="$4" policy="${5:-continue}"
+  dashboard_step "$name" "$number"
+
+  if is_step_complete "$id"; then
+    dashboard_skip
+    return 0
+  fi
+
+  if dashboard_run "$script"; then
+    mark_step_complete_with_progress "$id" completed
+    dashboard_ok
+    return 0
+  fi
+
+  mark_step_complete_with_progress "$id" failed
+  dashboard_fail
+  log_error "$name failed"
+
+  case "$policy" in
+    continue)
+      ui_warn "$name failed but continuing installation"
+      return 0
+      ;;
+    ask)
+      if [[ "$AUTO_CONFIRM" == true ]] || ui_confirm "$name failed. Continue with installation?" "The installer will continue, but dependent features may not work correctly."; then
+        ui_warn "Continuing despite $name failure"
+        return 0
+      fi
+      ui_error "Installation stopped due to $name failure"
+      return 1
+      ;;
+    stop)
+      ui_error "Installation stopped due to $name failure"
+      return 1
+      ;;
+  esac
+}
+
+# Draw the wizard frame once before the first step. Every dashboard_step/
+# dashboard_ok/dashboard_fail call below assumes the frame (and the
+# per-step row lookup table) already exists — without this call the very
+# first dashboard_step invocation crashes under `set -u` (DASHBOARD_STEP_ROWS
+# is never populated) and the dashboard box is never drawn at all.
 dashboard_init
 
-# Step 1: System Preparation
-dashboard_step "System Preparation" 1
-if is_step_complete "system_preparation"; then
-  dashboard_skip
-else
-  if dashboard_run "$SCRIPTS_DIR/system_preparation.sh"; then
-    mark_step_complete_with_progress "system_preparation" "completed"
-    dashboard_ok
-  else
-    mark_step_complete_with_progress "system_preparation" "failed"
-    dashboard_fail
-    log_error "System preparation failed"
-    if gum_confirm "System preparation failed. Continue with installation?" "This may cause issues with subsequent steps."; then
-      ui_warn "Continuing installation despite system preparation failure"
-    else
-      ui_error "Installation stopped due to system preparation failure"
-      exit 1
-    fi
-  fi
-fi
+run_install_step 1 system_preparation "System Preparation" "$SCRIPTS_DIR/modules/system_preparation.sh" ask || exit 1
+run_install_step 2 shell_setup "Shell Setup" "$SCRIPTS_DIR/modules/shell_setup.sh"
+run_install_step 3 yay_installation "Yay Installation" "$SCRIPTS_DIR/modules/yay.sh"
+run_install_step 4 programs_installation "Programs Installation" "$SCRIPTS_DIR/modules/programs.sh"
 
-# Step 2: Shell Setup
-dashboard_step "Shell Setup" 2
-if is_step_complete "shell_setup"; then
-  dashboard_skip
-else
-  if dashboard_run "$SCRIPTS_DIR/shell_setup.sh"; then
-    mark_step_complete_with_progress "shell_setup" "completed"
-    dashboard_ok
-  else
-    mark_step_complete_with_progress "shell_setup" "failed"
-    dashboard_fail
-    log_error "Shell setup failed"
-    ui_warn "Shell setup failed but continuing installation"
-  fi
-fi
-
-# Step 3: Yay Installation
-dashboard_step "Yay Installation" 3
-if is_step_complete "yay_installation"; then
-  dashboard_skip
-else
-  if dashboard_run "$SCRIPTS_DIR/yay.sh"; then
-    mark_step_complete_with_progress "yay_installation" "completed"
-    dashboard_ok
-  else
-    mark_step_complete_with_progress "yay_installation" "failed"
-    dashboard_fail
-    log_error "Yay installation failed"
-    ui_warn "Yay installation failed but continuing installation (AUR packages will not be available)"
-  fi
-fi
-
-# Step 4: Programs Installation
-dashboard_step "Programs Installation" 4
-if is_step_complete "programs_installation"; then
-  dashboard_skip
-else
-  if dashboard_run "$SCRIPTS_DIR/programs.sh"; then
-    mark_step_complete_with_progress "programs_installation" "completed"
-    dashboard_ok
-  else
-    mark_step_complete_with_progress "programs_installation" "failed"
-    dashboard_fail
-    log_error "Programs installation failed"
-    ui_warn "Programs installation failed but continuing installation"
-  fi
-fi
-
-# Step 5: Gaming Mode (exit 2 from the script = user declined -> SKIPPED,
-# which re-prompts on the next run instead of looking "completed")
+# Gaming mode has a meaningful exit code 2: user declined it. Preserve that
+# behavior rather than treating a decline as a failure.
 dashboard_step "Gaming Mode" 5
 if [[ "$INSTALL_MODE" == "server" ]]; then
-  mark_step_complete_with_progress "gaming_mode" "skipped"
+  mark_step_complete_with_progress gaming_mode skipped
   dashboard_skip "Skipped — server mode"
-elif is_step_complete "gaming_mode"; then
+elif is_step_complete gaming_mode; then
   dashboard_skip
 else
-  dashboard_run "$SCRIPTS_DIR/gaming_mode.sh"
+  dashboard_run "$SCRIPTS_DIR/modules/gaming_mode.sh"
   gaming_ret=$?
-  if [ "$gaming_ret" -eq 0 ]; then
-    mark_step_complete_with_progress "gaming_mode" "completed"
-    dashboard_ok
-  elif [ "$gaming_ret" -eq 2 ]; then
-    mark_step_complete_with_progress "gaming_mode" "skipped"
-    dashboard_skip "Skipped by user"
-  else
-    mark_step_complete_with_progress "gaming_mode" "failed"
-    dashboard_fail
-    log_error "Gaming Mode failed"
-    ui_warn "Gaming Mode failed but continuing installation (gaming optimizations not applied)"
-  fi
+  case "$gaming_ret" in
+    0) mark_step_complete_with_progress gaming_mode completed; dashboard_ok ;;
+    2) mark_step_complete_with_progress gaming_mode skipped; dashboard_skip "Skipped by user" ;;
+    *) mark_step_complete_with_progress gaming_mode failed; dashboard_fail; log_error "Gaming Mode failed"; ui_warn "Gaming Mode failed but continuing installation (gaming optimizations not applied)" ;;
+  esac
 fi
 
-# Step 6: Bootloader and Kernel Configuration
-dashboard_step "Bootloader and Kernel Configuration" 6
-if is_step_complete "bootloader_config"; then
-  dashboard_skip
-else
-  if dashboard_run "$SCRIPTS_DIR/bootloader_config.sh"; then
-    mark_step_complete_with_progress "bootloader_config" "completed"
-    dashboard_ok
-  else
-    mark_step_complete_with_progress "bootloader_config" "failed"
-    dashboard_fail
-    log_error "Bootloader and kernel configuration failed"
-    if gum_confirm "Bootloader configuration failed. Continue with installation?" "This may prevent your system from booting properly."; then
-      ui_warn "Continuing installation despite bootloader configuration failure"
-    else
-      ui_error "Installation stopped due to bootloader configuration failure"
-      exit 1
-    fi
-  fi
-fi
+run_install_step 6 bootloader_config "Bootloader and Kernel Configuration" "$SCRIPTS_DIR/modules/bootloader_config.sh" ask || exit 1
+run_install_step 7 system_services "System Services" "$SCRIPTS_DIR/modules/system_services.sh"
+run_install_step 8 fail2ban_setup "Fail2ban Setup" "$SCRIPTS_DIR/modules/fail2ban.sh"
 
-# Step 7: System Services (firewall FIRST, then services)
-dashboard_step "System Services" 7
-if is_step_complete "system_services"; then
-  dashboard_skip
-else
-  if dashboard_run "$SCRIPTS_DIR/system_services.sh"; then
-    mark_step_complete_with_progress "system_services" "completed"
-    dashboard_ok
-  else
-    mark_step_complete_with_progress "system_services" "failed"
-    dashboard_fail
-    log_error "System services failed"
-    ui_warn "System services failed but continuing installation"
-  fi
-fi
-
-# Step 8: Fail2ban Setup (after firewall is configured)
-dashboard_step "Fail2ban Setup" 8
-if is_step_complete "fail2ban_setup"; then
-  dashboard_skip
-else
-  if dashboard_run "$SCRIPTS_DIR/fail2ban.sh"; then
-    mark_step_complete_with_progress "fail2ban_setup" "completed"
-    dashboard_ok
-  else
-    mark_step_complete_with_progress "fail2ban_setup" "failed"
-    dashboard_fail
-    log_error "Fail2ban setup failed"
-    ui_warn "Fail2ban setup failed but continuing installation (SSH security protection not applied)"
-  fi
-fi
-
-# Step 9: Wake-on-LAN Configuration (same dashboard_run pattern as every
-# other step: diagnostics hidden in the log, interactive prompts on /dev/tty)
 dashboard_step "Wake-on-LAN Configuration" 9
-if is_step_complete "wakeonlan_config"; then
+if is_step_complete wakeonlan_config; then
   dashboard_skip
 else
-  dashboard_run "$SCRIPTS_DIR/wakeonlan_config.sh"
+  dashboard_run "$SCRIPTS_DIR/modules/wakeonlan_config.sh"
   wol_exit=$?
-  if [ "$wol_exit" -eq 0 ]; then
-    mark_step_complete_with_progress "wakeonlan_config" "completed"
-    dashboard_ok
-  elif [ "$wol_exit" -eq 2 ]; then
-    mark_step_complete_with_progress "wakeonlan_config" "completed"
-    dashboard_warn
-  else
-    mark_step_complete_with_progress "wakeonlan_config" "failed"
-    dashboard_fail
-    log_error "Wake-on-LAN configuration failed"
-    ui_warn "Wake-on-LAN configuration failed but continuing installation"
-  fi
+  case "$wol_exit" in
+    0) mark_step_complete_with_progress wakeonlan_config completed; dashboard_ok ;;
+    2) mark_step_complete_with_progress wakeonlan_config completed; dashboard_warn ;;
+    *) mark_step_complete_with_progress wakeonlan_config failed; dashboard_fail; log_error "Wake-on-LAN configuration failed"; ui_warn "Wake-on-LAN configuration failed but continuing installation" ;;
+  esac
 fi
 
-# Step 10: Maintenance
-dashboard_step "Maintenance" 10
-if is_step_complete "maintenance"; then
-  dashboard_skip
-else
-  if dashboard_run "$SCRIPTS_DIR/maintenance.sh"; then
-    mark_step_complete_with_progress "maintenance" "completed"
-    dashboard_ok
-  else
-    mark_step_complete_with_progress "maintenance" "failed"
-    dashboard_fail
-    log_error "Maintenance failed"
-    ui_warn "Maintenance failed but installation completed"
-  fi
-fi
+run_install_step 10 maintenance "Maintenance" "$SCRIPTS_DIR/modules/maintenance.sh"
 
 dashboard_finish
 
@@ -778,6 +447,9 @@ if [ "$DRY_RUN" = true ]; then
   ui_info "This was a preview run. No changes were made to your system."
   ui_info "To perform the actual installation, run: ./install.sh"
   echo ""
+  exit 0
 fi
+
+state_clear_failures || log_warning "Could not clear stale failure markers from state file"
 
 prompt_reboot

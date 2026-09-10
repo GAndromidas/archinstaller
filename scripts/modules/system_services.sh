@@ -3,7 +3,7 @@ set -uo pipefail
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/common.sh"
+source "$SCRIPT_DIR/../common.sh"
 
 setup_firewall_and_services() {
   step "Setting up firewall and services"
@@ -103,10 +103,24 @@ configure_ufw() {
 
   # Check if KDE Connect is installed
   if pacman -Q kdeconnect &>/dev/null; then
-    # Allow specific ports for KDE Connect
-    sudo ufw allow 1714:1764/udp >>"$INSTALL_LOG" 2>&1 || true
-    sudo ufw allow 1714:1764/tcp >>"$INSTALL_LOG" 2>&1 || true
-    log_success "KDE Connect ports opened in firewall"
+    # Allow specific ports for KDE Connect. `ufw allow` exits 0 even when
+    # the underlying iptables multiport extension warns/fails (confirmed
+    # via two real install logs on a VM kernel missing that module) — ufw
+    # still records the rule to /etc/ufw/user.rules regardless, it just
+    # may not apply live immediately. So the exit code alone isn't a
+    # reliable success signal here; check the actual output text too.
+    local kdeconnect_ok=true kdeconnect_out
+    kdeconnect_out=$(sudo ufw allow 1714:1764/udp 2>&1)
+    echo "$kdeconnect_out" >>"$INSTALL_LOG"
+    echo "$kdeconnect_out" | grep -qiE 'invalid port|not supported' && kdeconnect_ok=false
+    kdeconnect_out=$(sudo ufw allow 1714:1764/tcp 2>&1)
+    echo "$kdeconnect_out" >>"$INSTALL_LOG"
+    echo "$kdeconnect_out" | grep -qiE 'invalid port|not supported' && kdeconnect_ok=false
+    if [[ "$kdeconnect_ok" == true ]]; then
+      log_success "KDE Connect ports opened in firewall"
+    else
+      log_warning "KDE Connect firewall rule recorded but the live kernel firewall rejected it (missing multiport module) — it will apply automatically once that module is available (e.g. after a reboot). Check $INSTALL_LOG for details."
+    fi
   fi
 
   # Portainer ports (8000,9443) - ensure open even if installed before firewall (programs.sh defers)
@@ -423,7 +437,14 @@ detect_and_install_gpu_drivers() {
   lspci_out=$(lspci 2>/dev/null || true)
 
   local has_amd=false has_nvidia=false has_intel=false has_vm=false
-  echo "$lspci_out" | grep -Eiq 'vga.*amd|3d.*amd|display.*amd|vga.*radeon|3d.*radeon|display.*radeon|vga.*ati|display.*ati' && has_amd=true
+  # "ati" was previously matched bare (vga.*ati) to catch old ATI-branded
+  # cards — but "VGA compatible controller" is the standard lspci preamble
+  # for nearly every GPU line on any system, and "compatible" contains
+  # "ati" as a substring. That false-matched every vendor, including VMs
+  # with no AMD hardware at all. AMD/Radeon already cover current and
+  # recent hardware; ATI-branded cards are all a decade-plus old at this
+  # point, so dropping the bare pattern loses effectively no real coverage.
+  echo "$lspci_out" | grep -Eiq 'vga.*amd|3d.*amd|display.*amd|vga.*radeon|3d.*radeon|display.*radeon' && has_amd=true
   echo "$lspci_out" | grep -Eiq 'vga.*nvidia|3d.*nvidia|display.*nvidia' && has_nvidia=true
   echo "$lspci_out" | grep -Eiq 'vga.*intel|3d.*intel|display.*intel' && has_intel=true
   echo "$lspci_out" | grep -Eiq 'qxl|virtio.*gpu|vmware svga|cirrus|bochs' && has_vm=true
@@ -456,13 +477,19 @@ detect_and_install_gpu_drivers() {
 
   if [[ "$has_vm" == true ]]; then
     # Virtualized GPU (QXL / virtio-gpu / VMware / Cirrus / Bochs) — no 3D
-    # acceleration required. Install the appropriate lightweight driver and
-    # the base Vulkan software rasterizer for VM/dev-testing compatibility.
+    # acceleration required. xf86-video-vmware was removed from Arch's
+    # official repos (broken against current mesa/llvm, upstream-unfixed —
+    # confirmed via a real install log: "target not found:
+    # xf86-video-vmware", and this is a widely-reported issue affecting
+    # even the official archinstall tool, not specific to this project).
+    # The generic `modesetting` driver, built into xorg-server itself,
+    # already handles VMware SVGA and everything else here — no package
+    # needed for it.
     echo -e "${THEME_TEXT}Virtualized GPU detected. Installing lightweight VM graphics drivers...${RESET}"
-    local vm_packages=(xf86-video-qxl xf86-video-vmware xf86-video-fbdev vulkan-swrast lib32-vulkan-swrast)
+    local vm_packages=(xf86-video-qxl xf86-video-fbdev vulkan-swrast lib32-vulkan-swrast)
     install_packages_quietly "${vm_packages[@]}"
     log_success "VM graphics drivers installed"
-    log_info "Virtualized/VM GPU detected — using guest drivers (QXL/VirtIO/VMware)"
+    log_info "Virtualized/VM GPU detected — using guest drivers (QXL/VirtIO) plus the built-in modesetting driver for VMware/other virtual adapters"
   fi
 
   if [[ "$has_amd" == false && "$has_nvidia" == false && "$has_intel" == false && "$has_vm" == false ]]; then
@@ -608,12 +635,12 @@ detect_laptop_manufacturer() {
       *asus*|*rog*|*zenbook*|*vivobook*|*tuf*|*proart*|*expertbook*) manufacturer="asus" ;;
       *msi*|*micro-star*|*ge*|*gt*|*gl*|*gf*|*creator*) manufacturer="msi" ;;
       *surface*|*microsoft*) manufacturer="microsoft" ;;
-      *razer*|*blade*|*razer*) manufacturer="razer" ;;
-      *lg*|*gram*) manufacturer="lg" ;;
-      *samsung*|*galaxy*|*book*) manufacturer="samsung" ;;
+      *razer*|*blade*) manufacturer="razer" ;;
       *huawei*|*matebook*) manufacturer="huawei" ;;
-      *xiaomi*|*mi*|*redmibook*) manufacturer="xiaomi" ;;
-      *framework*|*framework*) manufacturer="framework" ;;
+      *xiaomi*|*redmibook*) manufacturer="xiaomi" ;;
+      *lg*|*gram*) manufacturer="lg" ;;
+      *samsung*|*galaxy*) manufacturer="samsung" ;;
+      *framework*) manufacturer="framework" ;;
       *system76*|*oryp*|*galago*|*lemur*) manufacturer="system76" ;;
     esac
   fi
@@ -627,7 +654,7 @@ detect_laptop_manufacturer() {
       *hp*|*hewlett*) manufacturer="hp" ;;
       *dell*) manufacturer="dell" ;;
       *acer*) manufacturer="acer" ;;
-      *asus*|*asustek*) manufacturer="asus" ;;
+      *asus*) manufacturer="asus" ;;
       *msi*|*micro-star*) manufacturer="msi" ;;
       *microsoft*) manufacturer="microsoft" ;;
       *razer*) manufacturer="razer" ;;
@@ -688,7 +715,7 @@ should_auto_optimize() {
     # In non-interactive mode, ask once and remember the choice
     local config_file="$HOME/.config/archinstaller-laptop-opts"
     if [ -f "$config_file" ]; then
-      echo "$(cat "$config_file" 2>/dev/null)"
+      cat "$config_file" 2>/dev/null
     else
       echo "false"  # Default to false in pure non-interactive mode
     fi
@@ -942,7 +969,8 @@ detect_storage_type() {
   done < <(lsblk -d -n -o NAME,TYPE | grep disk | awk '{print $1}')
 
   for device in "${devices[@]}"; do
-    local rota=$(cat /sys/block/$device/queue/rotational 2>/dev/null || echo "1")
+    local rota
+    rota=$(cat "/sys/block/$device/queue/rotational" 2>/dev/null || echo "1")
     local device_type=""
     local scheduler=""
 
@@ -961,10 +989,10 @@ detect_storage_type() {
     log_info "Device /dev/$device: $device_type"
 
     # Set I/O scheduler
-    if [ -f /sys/block/$device/queue/scheduler ]; then
+    if [ -f "/sys/block/$device/queue/scheduler" ]; then
       # Check if scheduler is available
-      if grep -q "$scheduler" /sys/block/$device/queue/scheduler 2>/dev/null; then
-        echo "$scheduler" | sudo tee /sys/block/$device/queue/scheduler >/dev/null
+      if grep -q "$scheduler" "/sys/block/$device/queue/scheduler" 2>/dev/null; then
+        echo "$scheduler" | sudo tee "/sys/block/$device/queue/scheduler" >/dev/null
         log_success "Set I/O scheduler to '$scheduler' for /dev/$device"
       else
         log_warning "Scheduler '$scheduler' not available for /dev/$device"
@@ -1071,22 +1099,9 @@ check_battery_status() {
         log_warning "Consider plugging in AC adapter for installation"
         log_info "Installation may take 20-30 minutes"
 
-        if command -v gum >/dev/null 2>&1; then
-          if ! ( exec </dev/tty >/dev/tty 2>/dev/tty; gum confirm --default=false "Continue on battery power?" </dev/tty ); then
-            log_error "Installation cancelled - please connect AC adapter"
-            exit 1
-          fi
-          echo "" >/dev/tty 2>/dev/null || true
-        else
-          # Prompt is written to /dev/tty because dashboard_run redirects this
-          # step's stdout/stderr to the install log.
-          printf 'Continue on battery power? [y/N]: ' > /dev/tty
-          read -r response < /dev/tty || response=""
-          response=${response,,}
-          if [[ "$response" != "y" && "$response" != "yes" ]]; then
-            log_error "Installation cancelled - please connect AC adapter"
-            exit 1
-          fi
+        if ! ui_confirm "Continue on battery power?" "The battery is low. Connecting AC power is recommended." false; then
+          log_error "Installation cancelled - please connect AC adapter"
+          exit 1
         fi
       elif [ "$status" = "Charging" ] || [ "$status" = "Full" ]; then
         log_success "Battery is charging or full - safe to proceed"
@@ -1525,16 +1540,20 @@ setup_laptop_optimizations() {
   local is_gaming=$(detect_gaming_laptop "$manufacturer")
   local should_auto=$(should_auto_optimize)
   
-  log_info "CPU Vendor: $(echo $cpu_vendor | tr '[:lower:]' '[:upper:]')"
-  log_info "Laptop Manufacturer: $(echo $manufacturer | tr '[:lower:]' '[:upper:]')"
+  log_info "CPU Vendor: ${cpu_vendor^^}"
+  log_info "Laptop Manufacturer: ${manufacturer^^}"
   log_info "Laptop Model: $laptop_model"
   
   if [ "$is_gaming" = "true" ]; then
     log_info "Gaming laptop detected - will apply gaming-specific optimizations"
   fi
 
-  # Get manufacturer-specific optimizations
-  local manufacturer_opts=($(get_manufacturer_optimizations "$manufacturer"))
+  # Get manufacturer-specific optimizations. mapfile (not unquoted `$(...)`
+  # inside an array literal) preserves each line as one element — the
+  # optimization strings are multi-word ("ThinkPad function keys support"),
+  # and plain word-splitting would break each one into several bullets.
+  local manufacturer_opts=()
+  mapfile -t manufacturer_opts < <(get_manufacturer_optimizations "$manufacturer")
 
   # Determine if we should enable optimizations
   local enable_laptop_opts=false
@@ -1546,8 +1565,8 @@ setup_laptop_optimizations() {
   elif command -v gum >/dev/null 2>&1; then
     # Interactive mode with gum
     echo ""
-    gum style --foreground "$GUM_WARN" "Laptop-specific optimizations available for $(echo $manufacturer | tr '[:lower:]' '[:upper]') $laptop_model:"
-    gum style --margin "0 2" --foreground "$GUM_TEXT" "CPU-specific optimizations ($(echo $cpu_vendor | tr '[:lower:]' '[:upper]'))"
+    gum style --foreground "$GUM_WARN" "Laptop-specific optimizations available for ${manufacturer^^} $laptop_model:"
+    gum style --margin "0 2" --foreground "$GUM_TEXT" "CPU-specific optimizations (${cpu_vendor^^})"
     
     # Show manufacturer-specific optimizations
     for opt in "${manufacturer_opts[@]}"; do
@@ -1556,15 +1575,14 @@ setup_laptop_optimizations() {
     
     echo ""
     ( exec </dev/tty >/dev/tty 2>/dev/tty; gum style --foreground "$GUM_WARN" "Tip: Set AUTO_LAPTOP_OPTS=true to skip this prompt in future" </dev/tty )
-    if ( exec </dev/tty >/dev/tty 2>/dev/tty; gum confirm --default=true "Enable laptop optimizations?" </dev/tty ); then
+    if ui_confirm "Enable laptop optimizations?" "These settings are tailored to the detected laptop hardware."; then
       enable_laptop_opts=true
     fi
-    echo "" >/dev/tty 2>/dev/null || true
   else
     # Non-interactive mode
     echo ""
-    echo -e "${THEME_WARN}Laptop-specific optimizations available for $(echo $manufacturer | tr '[:lower:]' '[:upper]') $laptop_model:${RESET}"
-    echo -e "  \u2022 CPU-specific optimizations ($(echo $cpu_vendor | tr '[:lower:]' '[:upper]'))"
+    echo -e "${THEME_WARN}Laptop-specific optimizations available for ${manufacturer^^} $laptop_model:${RESET}"
+    echo -e "  \u2022 CPU-specific optimizations (${cpu_vendor^^})"
     
     # Show manufacturer-specific optimizations
     for opt in "${manufacturer_opts[@]}"; do
@@ -1700,6 +1718,10 @@ show_laptop_summary() {
 }
 
 # Execute all service and maintenance steps
+if [[ "${DRY_RUN:-false}" == true ]]; then
+  ui_info "Dry-run: this installation module would run here."
+  exit 0
+fi
 setup_firewall_and_services
 detect_and_install_gpu_drivers
 check_battery_status

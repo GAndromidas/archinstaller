@@ -1,10 +1,8 @@
 #!/bin/bash
 set -uo pipefail
 
-# ============================================================================
-# UI Library - Unified Terminal Interface with Blue/White Theme
-# Provides unified UI functions using gum with fallback to traditional prompts
-# ============================================================================
+# Unified terminal UI: gum-based, falls back to plain prompts when gum
+# is unavailable.
 
 # Terminal helpers
 __term_width() {
@@ -129,11 +127,34 @@ ui_multiselect() {
     fi
 }
 
-# Confirmation dialog
+# Same as ui_confirm, but always asks for real, even under --yes/--auto —
+# for the handful of prompts (e.g. bootloader kernel-entry sync) where
+# silently accepting the default in unattended mode is the wrong call.
+ui_confirm_destructive() {
+    local question="$1"
+    local description="${2:-}"
+    local default_yes="${3:-false}"
+
+    local old_auto="${AUTO_CONFIRM:-false}"
+    AUTO_CONFIRM=false
+    ui_confirm "$question" "$description" "$default_yes"
+    local result=$?
+    AUTO_CONFIRM="$old_auto"
+    return "$result"
+}
+
 # Usage: ui_confirm "Question?" "Optional description"
 ui_confirm() {
     local question="$1"
     local description="${2:-}"
+    local default_yes="${3:-true}"
+
+    # --yes / unattended mode accepts the existing dialog default. Callers can
+    # pass false when the original prompt intentionally defaulted to No.
+    if [[ "${AUTO_CONFIRM:-false}" == true ]]; then
+        log_info "Auto-confirmed default ($default_yes): $question"
+        [[ "$default_yes" == true ]] && return 0 || return 1
+    fi
 
     if supports_gum; then
         # Use subshell to temporarily restore stdio to terminal for gum display.
@@ -148,13 +169,16 @@ ui_confirm() {
                 gum style --foreground "$GUM_WARN" "$description"
             fi
 
-            if gum confirm --default=true --prompt.foreground "$GUM_PRIMARY" --selected.background "$GUM_PRIMARY" "$question" </dev/tty; then
-                exit 0
-            else
-                exit 1
-            fi
-            # ensure the cursor advances after gum's alt-screen leaves a stray newline
+            local confirm_result=0
+            gum confirm --default="$default_yes" --prompt.foreground "$GUM_PRIMARY" --selected.background "$GUM_PRIMARY" "$question" </dev/tty || confirm_result=1
+
+            # Ensure the cursor advances after gum's alt-screen leaves a stray
+            # newline. This must run unconditionally before exit — it used to
+            # sit after an if/exit/else/exit block, which made it dead code
+            # that never actually ran on either answer.
             echo "" >/dev/tty
+
+            exit "$confirm_result"
         )
         local result=$?
 

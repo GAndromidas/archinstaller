@@ -22,7 +22,7 @@ set -uo pipefail
 # Get scripts directory (handles both direct execution and sourcing)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
-source "$SCRIPT_DIR/common.sh"
+source "$SCRIPT_DIR/../common.sh"
 
 # Color binding for prompt
 BOLD="${THEME_TEXT_BOLD}"
@@ -474,6 +474,16 @@ prompt_interface_selection() {
     wol_say ""
 
     local choice selected_iface
+
+    # In unattended mode, choose the interface that the normal interactive
+    # flow marks as primary. This avoids an arbitrary NIC while removing the
+    # need for a hidden prompt.
+    if [[ "${AUTO_CONFIRM:-false}" == true && -n "$best_iface" ]]; then
+        wol_say "Automatic mode: selecting primary interface $best_iface"
+        echo "$best_iface"
+        return 0
+    fi
+
     while true; do
         if _wol_has_tty; then
             printf '%b' "${BOLD}Select option [1-${#interfaces[@]}, a, s]:${RESET} " >/dev/tty 2>/dev/null || true
@@ -514,11 +524,16 @@ prompt_interface_selection() {
     done
 }
 
-# Confirm on /dev/tty (gum_confirm writes to captured stdout, so it cannot
-# be used for prompts whose caller captures stdout — use this instead).
+# Confirm on /dev/tty explicitly (this module's callers may capture stdout,
+# so a plain `read` without redirecting to /dev/tty wouldn't be visible to
+# the user) and gracefully decline instead of erroring when no TTY exists.
 wol_confirm_tty() {
     local question="${1:-Continue?}"
     local answer=""
+    if [[ "${AUTO_CONFIRM:-false}" == true ]]; then
+        log_info "Auto-confirmed: $question"
+        return 0
+    fi
     local prompt_text="Y/n"
     if _wol_has_tty; then
         while true; do
@@ -771,4 +786,8 @@ export -f show_wol_status
 # log, interactive prompts on /dev/tty). Exit codes: 0 ok, 2 graceful
 # skip/warning (VM, container, laptop declined, no ethernet, no WoL-capable
 # NIC), anything else = failure.
+if [[ "${DRY_RUN:-false}" == true ]]; then
+    ui_info "Dry-run: Wake-on-LAN configuration would be evaluated here."
+    exit 0
+fi
 configure_wakeonlan

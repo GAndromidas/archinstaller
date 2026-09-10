@@ -4,10 +4,10 @@ set -uo pipefail
 # Get the directory where this script is located, resolving symlinks
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
-ARCHINSTALLER_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ARCHINSTALLER_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 CONFIGS_DIR="$ARCHINSTALLER_ROOT/configs"
 
-source "$SCRIPT_DIR/common.sh"
+source "$SCRIPT_DIR/../common.sh"
 
 # ===== Globals =====
 PROGRAMS_ERRORS=()
@@ -88,6 +88,22 @@ determine_package_lists() {
 	esac
 }
 
+# Normalize XDG_CURRENT_DESKTOP into one of: kde, gnome, cosmic, "" (unknown).
+# Substring match (not exact) because real-world values vary — e.g. some
+# session managers report compound values. Shared by handle_de_packages and
+# handle_flatpak_packages so the detection rule lives in exactly one place.
+detect_normalized_de() {
+	local raw="${XDG_CURRENT_DESKTOP:-}"
+	local lower
+	lower=$(echo "$raw" | tr '[:upper:]' '[:lower:]')
+	case "$lower" in
+	*kde*|*plasma*) echo "kde" ;;
+	*gnome*) echo "gnome" ;;
+	*cosmic*) echo "cosmic" ;;
+	*) echo "" ;;
+	esac
+}
+
 handle_de_packages() {
 	if [[ "$INSTALL_MODE" == "server" ]]; then
 		ui_info "Server mode selected, skipping desktop environment packages."
@@ -95,7 +111,7 @@ handle_de_packages() {
 	fi
 
 	local de
-	de=$(echo "$XDG_CURRENT_DESKTOP" | tr '[:upper:]' '[:lower:]')
+	de=$(detect_normalized_de)
 
 	case "$de" in
 	kde)
@@ -111,7 +127,11 @@ handle_de_packages() {
 		specific_remove_programs=("${cosmic_remove_programs[@]}")
 		;;
 	*)
-		ui_warn "No specific package list for Desktop Environment: $XDG_CURRENT_DESKTOP"
+		if [[ -z "${XDG_CURRENT_DESKTOP:-}" ]]; then
+			ui_info "No desktop session detected (running from a TTY?) — skipping desktop-environment-specific packages. Run this from within your DE session to pick those up."
+		else
+			ui_warn "No specific package list for Desktop Environment: $XDG_CURRENT_DESKTOP"
+		fi
 		return
 		;;
 	esac
@@ -128,7 +148,7 @@ handle_flatpak_packages() {
 	fi
 
 	local de
-	de=$(echo "$XDG_CURRENT_DESKTOP" | tr '[:upper:]' '[:lower:]')
+	de=$(detect_normalized_de)
 	[[ -z "$de" ]] && de="generic"
 
 	local de_flatpaks=()
@@ -353,6 +373,22 @@ main() {
 	if [[ "$INSTALL_MODE" == "server" ]]; then
 		configure_server_applications
 	fi
+
+	# Final summary — individual pacman_install_single/yay_install_single
+	# failures already print a "✗ Failed" line as they happen, but that's
+	# easy to miss scrolling back through a long install. Surface a clear
+	# roll-up here so a partial failure is never silently invisible.
+	echo ""
+	if [[ ${#PROGRAMS_ERRORS[@]} -gt 0 ]]; then
+		ui_warn "Programs Installation completed with ${#PROGRAMS_ERRORS[@]} failure(s): ${PROGRAMS_ERRORS[*]}"
+		ui_info "Everything else installed successfully (${#PROGRAMS_INSTALLED[@]} package(s)). Check $INSTALL_LOG for details on the failure(s) above, or install them manually afterward."
+	else
+		ui_success "Programs Installation complete — ${#PROGRAMS_INSTALLED[@]} package(s) installed, ${#PROGRAMS_REMOVED[@]} removed, 0 failures."
+	fi
 }
 
+if [[ "${DRY_RUN:-false}" == true ]]; then
+  ui_info "Dry-run: this installation module would run here."
+  exit 0
+fi
 main

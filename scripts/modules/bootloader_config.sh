@@ -2,7 +2,14 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/common.sh"
+source "$SCRIPT_DIR/../common.sh"
+
+# DRY-RUN safety boundary: bootloader configuration contains many direct
+# privileged writes and is intentionally not executed in preview mode.
+if [[ "${DRY_RUN:-false}" == true ]]; then
+  ui_info "Dry-run: Bootloader and kernel configuration would run here."
+  exit 0
+fi
 
 # --- Bootloader detection ---
 BOOTLOADER=$(detect_bootloader)
@@ -11,9 +18,7 @@ BOOTLOADER=$(detect_bootloader)
 # end of this step (UKI cmdline changes, overlayfs hook wiring, ...).
 NEEDS_INITRAMFS_REBUILD=false
 
-# ============================================================================
 # SMART DISPLAY RESOLUTION DETECTION
-# ============================================================================
 # Single source for both `interface_resolution:` (limine.conf) and `video=`
 # (kernel cmdline). Picks the largest mode among connected outputs so a
 # 2K-primary + 1080p-secondary setup yields 2560x1440, while a single-1080p
@@ -116,9 +121,7 @@ detect_term_font_scale() {
   fi
 }
 
-# ============================================================================
 # UNIFIED KERNEL PARAMETERS
-# ============================================================================
 
 # Build consistent kernel parameters across all bootloaders
 # Usage: get_kernel_params [--cmdline-only]
@@ -210,9 +213,7 @@ get_kernel_params() {
   fi
 }
 
-# ============================================================================
 # KERNEL CMDLINE MERGE
-# ============================================================================
 # Official archinstall writes installer-chosen params (root=, cryptdevice=,
 # rd.luks.uuid=, resume=, zswap.*, ...) into bootloader configs. Replacing
 # those lines wholesale would drop them and render encrypted/hibernating
@@ -413,9 +414,7 @@ configure_uki_cmdline_note_only() {
   fi
 }
 
-# ============================================================================
 # BOOTLOADER-SPECIFIC KERNEL PARAMETERS
-# ============================================================================
 
 # --- systemd-boot ---
 configure_boot() {
@@ -600,15 +599,10 @@ check_kernel_options_consistency() {
       log_info "${entry_names[$i]}: ${options_list[$i]}"
     done
 
-    if command -v gum >/dev/null 2>&1; then
-      if ui_confirm "Sync all kernel entries to use the same options?" "Kernel options are inconsistent across entries — this may cause boot issues."; then
-        sync_all_kernel_options
-      else
-        log_warning "Kernel options left inconsistent — manual review recommended"
-      fi
-    else
-      log_warning "Inconsistent kernel options detected — auto-syncing for system stability"
+    if ui_confirm_destructive "Sync all kernel entries to use the same options?" "Kernel options are inconsistent across entries — this may cause boot issues." false; then
       sync_all_kernel_options
+    else
+      log_warning "Kernel options left inconsistent — manual review recommended"
     fi
   fi
 }
@@ -919,9 +913,7 @@ configure_grub() {
     fi
 }
 
-# ============================================================================
 # PART 3: HELPER FUNCTIONS
-# ============================================================================
 
 set_grub_config() {
     local key="$1"
@@ -1021,9 +1013,7 @@ ${key} ${value}"
     return 0
 }
 
-# ============================================================================
 # LIMINE HELPERS (must be defined before MAIN EXECUTION dispatch below)
-# ============================================================================
 
 # Detect ESP mountpoint (vfat partition). Echoes path, returns 1 if not found.
 detect_esp_mount() {
@@ -1048,12 +1038,23 @@ detect_esp_mount() {
 # installed yet. Usage: with_limine_lock func arg1...
 with_limine_lock() {
   if [[ -r /usr/lib/limine/limine-mutex ]]; then
-    # shellcheck disable=SC1091
-    source /usr/lib/limine/limine-mutex
-    mutex_lock "archinstaller"
+    # Acquire/release as root, matching `sudo limine-update` and `sudo
+    # limine-snapper-sync`, which use this same mutex internally. Doing
+    # this as the invoking user instead (as before) meant a lock file
+    # created by root earlier in the run (/run/lock/boot-partition.lock)
+    # became unwritable/unremovable from here — every subsequent call hit
+    # "Permission denied" and "Mutex lock timeout", silently skipping the
+    # protection this mutex exists for (a torn write on FAT32, which has
+    # no journaling, if limine-snapper-sync's watcher fires mid-edit).
+    # Harmless on a fresh install with nothing else racing it, but not
+    # actually providing the protection it's there for. Confirmed via a
+    # real install log, not something the mocked test environment could
+    # have caught (no real /run/lock permission semantics there).
+    sudo -v 2>/dev/null || true
+    sudo bash -c 'source /usr/lib/limine/limine-mutex && mutex_lock "archinstaller"' 2>/dev/null || true
     "$@"
     local rc=$?
-    mutex_unlock || true
+    sudo bash -c 'source /usr/lib/limine/limine-mutex && mutex_unlock' 2>/dev/null || true
     return $rc
   else
     "$@"
@@ -1193,9 +1194,7 @@ configure_limine_theme() {
   fi
   # Full user-spec header. interface_resolution / term_font_scale / video=
   # stay in sync via detect_display_resolution (see get_kernel_params).
-  local theme="# ==============================================================================
-# LIMINE BOOTLOADER CONFIGURATION
-# ==============================================================================
+  local theme="# LIMINE BOOTLOADER CONFIGURATION
 
 # ------------------------------------------------------------------------------
 # General Boot Settings
@@ -1416,14 +1415,51 @@ configure_limine_snapper() {
   # Limine-specific AUR sync (limine-snapper-sync) stays limine-only, but btrfs-assistant profile is shared
   if [[ "$want_snapper" == true ]]; then
     step "Configuring Snapper..."
-    if ! mountpoint -q /.snapshots 2>/dev/null; then
-      sudo mount -a 2>/dev/null || true
-    fi
-    mountpoint -q /.snapshots 2>/dev/null || \
-      log_warning "/.snapshots not mounted yet; will mount on next boot."
 
-    # Universal snapper aux (btrfs-assistant/snap-pac) + ArchWiki profile - not limine-only
+    # Universal snapper aux (btrfs-assistant/snap-pac) + ArchWiki profile - not limine-only.
+    # Must run BEFORE the mount check below: this is what actually creates
+    # the /.snapshots subvolume (via `snapper -c root create-config /`) in
+    # the first place. Checking mount status before this ran was checking
+    # something that didn't exist to be mounted yet — confirmed via a real
+    # install+reboot: the warning below fired every time, and "will mount
+    # on next boot" turned out to be false (verify.sh confirmed still
+    # unmounted after a real reboot), because nothing had created the
+    # subvolume/fstab entry yet at the point the old check ran.
     ensure_snapper_aux_universal
+
+    # archinstall's own default btrfs layout commonly creates a top-level
+    # @snapshots subvolume with its own fstab entry (distinct from the
+    # simpler case where .snapshots is just a plain nested subvolume that
+    # needs no separate mount). If create-config above didn't need the
+    # ArchWiki workaround path, this explicit mount never ran — do it
+    # unconditionally here so both layouts end up actually mounted, not
+    # just the one that happened to hit the workaround branch.
+    if ! mountpoint -q /.snapshots 2>/dev/null; then
+      local root_dev
+      root_dev=$(findmnt -n -o SOURCE / 2>/dev/null | cut -d'[' -f1)
+      if [[ -n "$root_dev" ]] && sudo btrfs subvolume list / 2>/dev/null | grep -q "path @snapshots"; then
+        sudo mount -o subvol=@snapshots "$root_dev" /.snapshots 2>/dev/null || true
+      fi
+      mountpoint -q /.snapshots 2>/dev/null || sudo mount -a 2>/dev/null || true
+    fi
+
+    if mountpoint -q /.snapshots 2>/dev/null; then
+      log_success "/.snapshots is mounted"
+    elif sudo snapper -c root list &>/dev/null; then
+      # Not a separate mountpoint, but that's not actually a problem: for
+      # the common single-subvolume layout, .snapshots is just a nested
+      # subvolume inside the already-mounted root filesystem, with no
+      # separate fstab entry at all — `mountpoint -q` correctly reports
+      # false here even when everything works perfectly. Confirmed via a
+      # real install log where `mountpoint -q` failed this exact check yet
+      # snapper successfully created and listed 19 snapshots in the same
+      # run — the mountpoint test was checking a condition that doesn't
+      # apply to this (very common) layout. Test what actually matters —
+      # whether `snapper list` actually works — instead.
+      log_success "Snapper is working (nested subvolume, no separate mount needed)"
+    else
+      log_warning "/.snapshots could not be mounted and 'snapper -c root list' failed. Check 'sudo btrfs subvolume list /' and /etc/fstab after reboot — snapshots won't work until this is resolved."
+    fi
 
     sudo systemctl enable --now snapper-timeline.timer 2>/dev/null || true
     sudo systemctl enable --now snapper-cleanup.timer 2>/dev/null || true
@@ -1594,7 +1630,7 @@ configure_limine_snapper() {
       # ESP-relative loader path, e.g. /boot/EFI/arch-limine -> \EFI\arch-limine\BOOTX64.EFI
       local efi_bin="BOOTX64.EFI"
       sudo test -f "$limine_dir/$efi_bin" 2>/dev/null || efi_bin=$(sudo ls "$limine_dir" 2>/dev/null | grep -im1 '\.efi$' || echo "BOOTX64.EFI")
-      local loader_path="${limine_dir#$esp_mount}/$efi_bin"
+      local loader_path="${limine_dir#"$esp_mount"}/$efi_bin"
       loader_path=${loader_path//\//\\}
       log_info "Creating EFI NVRAM entry ($loader_path)..."
       if sudo efibootmgr --create \
@@ -1854,9 +1890,7 @@ HELPER_EOF
   fi
 }
 
-# ============================================================================
 # MAIN EXECUTION (dispatch AFTER all function definitions)
-# ============================================================================
 
 # Report ESP/boot readability up front: on archinstall systems /boot is often
 # root-only, and every silent "not found, skipping" below traces back to this.
@@ -1895,8 +1929,16 @@ elif [ "$BOOTLOADER" = "refind" ] || [ "$BOOTLOADER" = "efistub" ]; then
     log_info "To change kernel params for $BOOTLOADER, update your NVRAM boot entries (efibootmgr) manually."
     configure_uki_cmdline_note_only
 else
-    log_warning "No bootloader detected or bootloader is unsupported. Defaulting to systemd-boot configuration."
-    configure_boot
+    # Refuse to guess. Silently defaulting to systemd-boot config on a
+    # system whose real bootloader wasn't correctly identified could write
+    # loader entries nothing ever reads while leaving the actual bootloader
+    # unconfigured — on the single riskiest step in the whole installer,
+    # "leave it alone and tell the user" is safer than "guess and modify
+    # boot config." This step already runs under the "ask" policy, so
+    # exiting here surfaces cleanly through install.sh's existing handling.
+    log_error "No supported bootloader could be identified safely. Refusing to modify boot configuration."
+    log_info "Detected: '${BOOTLOADER:-none}'. Supported: grub, systemd-boot, limine, refind, efistub."
+    exit 1
 fi
 
 # Single collected initramfs rebuild for the whole step (was up to 3× -P).

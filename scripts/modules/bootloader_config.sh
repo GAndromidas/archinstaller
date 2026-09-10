@@ -1325,10 +1325,12 @@ limine_install_aur_pkg() {
 }
 
 # Install limine-mkinitcpio-hook. Its install scriptlet asks
-# "Would you like to run 'limine-mkinitcpio' now? [Y/n]" on stdin — ask up
-# front with gum (Gaming Mode style) and pre-answer, or it hangs silently
-# under the dashboard. Yes builds now (slow); No defers to our end-of-step
-# rebuild, which covers it.
+# "Would you like to run 'limine-mkinitcpio' now? [Y/n]" on stdin — always
+# pre-answer "n" (no prompt): the single collected mkinitcpio -P rebuild at
+# the end of this step covers it, so building now would just do the slow
+# rebuild twice. Piping the answer also keeps it non-interactive under the
+# dashboard, where stdin would otherwise hang silently.
+# Override: LIMINE_MKINITCPIO_RUN_NOW=true answers "y".
 install_limine_mkinitcpio_hook() {
   if pacman -Qi limine-mkinitcpio-hook &>/dev/null 2>&1; then
     log_info "limine-mkinitcpio-hook already installed"
@@ -1338,12 +1340,11 @@ install_limine_mkinitcpio_hook() {
     log_warning "No AUR helper — skipping limine-mkinitcpio-hook (kernel entries won't auto-update; install it later)."
     return 1
   fi
-  local answer="y"
-  if ui_confirm "Run limine-mkinitcpio now during install?" "The hook package asks this on stdin, hidden under the dashboard. Yes builds initramfs now (slow); No defers to the rebuild at the end of this step."; then
+  local answer="n"
+  if [[ "${LIMINE_MKINITCPIO_RUN_NOW:-false}" == true ]]; then
     answer="y"
-    log_info "Will run limine-mkinitcpio during hook install."
+    log_info "Will run limine-mkinitcpio during hook install (LIMINE_MKINITCPIO_RUN_NOW=true)."
   else
-    answer="n"
     log_info "Skipping limine-mkinitcpio run during hook install (covered by step-end rebuild)."
   fi
   limine_install_aur_pkg "limine-mkinitcpio-hook" "$answer"

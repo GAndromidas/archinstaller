@@ -1157,7 +1157,7 @@ configure_limine_overlayfs() {
   fi
 }
 
-# Limine theme - Catppuccin Mocha, Arch blue (user-spec full header)
+# Limine theme - custom theme (user-spec full header)
 # Handles 700 /boot via privileged atomic write and FAT32 mutex, idempotent.
 # Resolution + font scale are smart: largest connected mode (2K-primary +
 # 1080p-secondary -> 2560x1440, single-1080p box -> 1920x1080); 2x2 on HiDPI,
@@ -1269,7 +1269,7 @@ graphic_palette_bright: 45475a;f38ba8;a6e3a1;f9e2af;89b4fa;f5c2e7;94e2d5;a6adc8
   fi
   # FAT32 atomic via mutex, privileged 700
   if with_limine_lock _limine_write_file "$tmp" "$conf"; then
-    log_success "Applied Limine theme to $conf ($resolution, $font_scale, Catppuccin Mocha)"
+    log_success "Applied Limine theme to $conf ($resolution, $font_scale, custom theme)"
   else
     log_warning "Failed to apply Limine theme to $conf"
   fi

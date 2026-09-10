@@ -20,7 +20,7 @@ VERBOSE=false
 
 if [ -t 1 ]; then
   RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-  BLUE='\033[0;34m'; MUTED='\033[0;2m'; BOLD='\033[1m'; RESET='\033[0m'
+  BLUE='\033[38;2;62;147;175m'; MUTED='\033[38;2;108;112;134m'; BOLD='\033[1m'; RESET='\033[0m'
 else
   RED=''; GREEN=''; YELLOW=''; BLUE=''; MUTED=''; BOLD=''; RESET=''
 fi

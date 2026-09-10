@@ -8,40 +8,42 @@ if [ -z "${RED:-}" ]; then
   readonly RED='\033[0;31m'
   readonly GREEN='\033[0;32m'
   readonly YELLOW='\033[0;33m'
-  readonly BLUE='\033[0;34m'
+  readonly BLUE='\033[38;2;62;147;175m'
   readonly PURPLE='\033[0;35m'
-  readonly CYAN='\033[0;36m'
-  readonly WHITE='\033[0;37m'
-  readonly DIM='\033[0;2m'
+  readonly CYAN='\033[38;2;62;147;175m'
+  readonly WHITE='\033[38;2;205;214;244m'
+  readonly DIM='\033[38;2;108;112;134m'
   readonly RESET='\033[0m'
 fi
 
 # Theme colors — single source of truth for all UI output
+# Palette: accent #3E93AF, highlight #89B4FA,
+# text #CDD6F4, muted #6C7086. Semantic red/yellow/green stay standard.
 if [ -z "${THEME_PRIMARY:-}" ]; then
-  readonly THEME_PRIMARY='\033[0;34m'
-  readonly THEME_SECONDARY='\033[1;34m'
-  readonly THEME_TEXT='\033[0;37m'
-  readonly THEME_TEXT_BOLD='\033[1;37m'
+  readonly THEME_PRIMARY='\033[38;2;62;147;175m'
+  readonly THEME_SECONDARY='\033[38;2;137;180;250m'
+  readonly THEME_TEXT='\033[38;2;205;214;244m'
+  readonly THEME_TEXT_BOLD='\033[1;38;2;205;214;244m'
   readonly THEME_SUCCESS='\033[0;32m'
   readonly THEME_WARN='\033[0;33m'
   readonly THEME_ERROR='\033[0;31m'
-  readonly THEME_MUTED='\033[0;2m'
-  readonly THEME_HIGHLIGHT='\033[0;33m'
-  readonly THEME_BORDER='\033[1;34m'
-  readonly THEME_HEADER='\033[1;37m'
+  readonly THEME_MUTED='\033[38;2;108;112;134m'
+  readonly THEME_HIGHLIGHT='\033[38;2;137;180;250m'
+  readonly THEME_BORDER='\033[38;2;62;147;175m'
+  readonly THEME_HEADER='\033[38;2;137;180;250m'
 fi
 
-# Gum color mappings for blue/white theme
+# Gum color mappings (hex supported by gum)
 if [ -z "${GUM_PRIMARY:-}" ]; then
-  readonly GUM_PRIMARY="26"
-  readonly GUM_SECONDARY="39"
-  readonly GUM_TEXT="15"
+  readonly GUM_PRIMARY="#3E93AF"
+  readonly GUM_SECONDARY="#89B4FA"
+  readonly GUM_TEXT="#CDD6F4"
   readonly GUM_SUCCESS="46"
   readonly GUM_WARN="226"
   readonly GUM_ERROR="196"
-  readonly GUM_MUTED="8"
-  readonly GUM_HEADER="26"
-  readonly GUM_BORDER="26"
+  readonly GUM_MUTED="#6C7086"
+  readonly GUM_HEADER="#89B4FA"
+  readonly GUM_BORDER="#3E93AF"
 fi
 
 # Global variables (/var/tmp survives reboots so resume works; /tmp does not)

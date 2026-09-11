@@ -28,9 +28,11 @@ check_prerequisites() {
     return 1
   fi
 
-  # Check internet connection
-  if ! ping -c 1 -W 5 archlinux.org &>/dev/null; then
-    log_error "No internet connection detected. Please check your network."
+  # Check internet connection (robust: DNS + IP + getent, same as
+  # check_system_compatibility — single-ping checks fail behind captive
+  # portals / IPv6-only / flaky DNS and are not worth failing the run over)
+  if ! ping -c 1 -W 5 archlinux.org &>/dev/null && ! ping -c 1 -W 5 8.8.8.8 &>/dev/null && ! getent hosts archlinux.org &>/dev/null; then
+    log_error "No internet connection detected. Please check your network (cable/Wi-Fi and DNS - try: ping 8.8.8.8)."
     return 1
   fi
 
@@ -275,6 +277,15 @@ if [ "${DRY_RUN:-false}" != true ]; then
   run_step "Installing mirror ranking tool" sudo pacman -S --noconfirm --needed rate-mirrors
 fi
 update_system_mirrors
+# Pre-upgrade snapshot: on btrfs+snapper, checkpoint before the full -Syu
+# so a bad upgrade is one rollback away. Best-effort, never fatal.
+if command -v snapper &>/dev/null && findmnt -n -o FSTYPE / 2>/dev/null | grep -q btrfs; then
+  if sudo snapper -c root create --description "pre-archinstaller-system-update" >>"$INSTALL_LOG" 2>&1; then
+    log_success "Pre-update snapper snapshot created"
+  else
+    log_debug "Pre-update snapper snapshot skipped (no config or btrfs layout)"
+  fi
+fi
 # update_system_mirrors already ran `pacman -Syy` after ranking, and
 # update_system runs `pacman -Syu` (which syncs again) — no extra -Syy needed.
 update_system

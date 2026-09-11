@@ -54,6 +54,48 @@ else
   bad "Could not read /proc/cmdline"
 fi
 
+# Two-binary trap: limine-mkinitcpio-hook registers ${ESP}/EFI/limine/
+# limine_x64.efi in NVRAM, but that directory ships no limine.conf — booting
+# it shows "[config file not found]" with an empty menu. Every NVRAM Limine
+# entry must resolve to a config (same-dir, or the /boot/limine.conf
+# fallback) or the next reboot can land on a dead menu.
+if command -v efibootmgr &>/dev/null; then
+  while IFS= read -r line; do
+    [[ "$line" =~ ^Boot([0-9A-Fa-f]{4}) ]] || continue
+    num="${BASH_REMATCH[1]}"
+    echo "$line" | grep -qi limine || continue
+    loader=$(echo "$line" | grep -oiE '\\[^ ]*\.efi' | head -1 || true)
+    [[ -n "$loader" ]] || continue
+    found=false
+    resolved=""
+    for esp in /boot /efi /boot/efi; do
+      [[ -d "$esp" ]] || continue
+      loader_unix=$(echo "$loader" | tr '\\' '/')
+      dir=$(dirname "$loader_unix")
+      if sudo test -f "$esp$dir/limine.conf" 2>/dev/null || [[ -f "$esp$dir/limine.conf" ]]; then
+        found=true; resolved="$esp$dir/limine.conf"; break
+      fi
+    done
+    if [[ "$found" == false ]]; then
+      if sudo test -f /boot/limine.conf 2>/dev/null || [[ -f /boot/limine.conf ]]; then
+        found=true; resolved="/boot/limine.conf"
+      fi
+    fi
+    if [[ "$found" == true ]]; then
+      ok "Boot$num ($loader) resolves to a limine.conf"
+      if sudo grep -qE '^[[:space:]]*protocol:' "$resolved" 2>/dev/null || grep -qE '^[[:space:]]*protocol:' "$resolved" 2>/dev/null; then
+        ok "Boot$num menu ($resolved) has bootable entries"
+      else
+        bad "Boot$num menu ($resolved) has no protocol: entries — activating anything in it panics"
+      fi
+    else
+      bad "Boot$num ($loader) has no limine.conf (same-dir or /boot/limine.conf) — booting it shows '[config file not found]'"
+    fi
+  done < <(sudo efibootmgr -v 2>/dev/null || efibootmgr -v 2>/dev/null || true)
+else
+  info "efibootmgr not available, skipping NVRAM entry check"
+fi
+
 section "CPU & GPU drivers"
 
 cpu_vendor="unknown"
@@ -65,6 +107,19 @@ if [[ "$cpu_vendor" == "amd" ]] && [ -d /sys/devices/system/cpu/amd_pstate ]; th
   ok "amd_pstate driver active"
   scaling_driver=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_driver 2>/dev/null || echo "unknown")
   info "scaling_driver: $scaling_driver"
+fi
+
+# amd_pstate=active is a kernel cmdline param (step 6). If the driver is
+# active in sysfs but the cmdline lacks it, a future bootloader rewrite
+# could silently drop it — flag the mismatch now.
+if [[ "$cpu_vendor" == "amd" ]]; then
+  if [[ "$cmdline" == *"amd_pstate=active"* ]]; then
+    ok "amd_pstate=active present on kernel cmdline"
+  elif [ -d /sys/devices/system/cpu/amd_pstate ]; then
+    warn "amd_pstate driver active but amd_pstate=active missing from /proc/cmdline — check bootloader merge"
+  else
+    info "amd_pstate not active (older Ryzen or ACPI CPUfreq in use — expected pre-Zen 3)"
+  fi
 fi
 
 if command -v lspci &>/dev/null; then
@@ -105,9 +160,25 @@ if grep -qE '^\S+\s+/\s+btrfs' /proc/mounts 2>/dev/null; then
       # this check yet snapper had successfully created 19 snapshots in
       # the same run. What actually matters is whether snapper works.
       ok "Snapper is working (${snap_count:-0} existing snapshots)"
+      if pacman -Q snap-pac &>/dev/null; then
+        ok "snap-pac hook present (pacman snapshots)"
+      else
+        warn "snap-pac not installed — no auto-snapshot on pacman transactions"
+      fi
     else
       bad "'sudo snapper -c root list' failed — snapshots are not working. Check 'sudo btrfs subvolume list /' and /etc/fstab."
     fi
+  fi
+  if pacman -Q timeshift &>/dev/null; then
+    ok "Timeshift installed"
+    if pacman -Q timeshift-autosnap &>/dev/null; then
+      ok "timeshift-autosnap hook present"
+    else
+      warn "timeshift-autosnap not installed — no auto-snapshot on pacman transactions"
+    fi
+  fi
+  if ! command -v snapper &>/dev/null && ! pacman -Q timeshift &>/dev/null; then
+    info "Neither snapper nor timeshift installed — snapshot checks skipped (expected)"
   fi
 elif grep -qE '^\S+\s+/\s+ext4' /proc/mounts 2>/dev/null; then
   ok "Root filesystem: ext4"
@@ -175,6 +246,19 @@ if command -v ethtool &>/dev/null; then
   [[ "$wol_checked" == false ]] && info "No Wake-on-LAN-capable wired interface found — expected on laptops/Wi-Fi-only systems"
 else
   info "ethtool not available, skipping Wake-on-LAN check"
+fi
+
+section "Maintenance timers"
+
+if systemctl is-enabled --quiet paccache.timer 2>/dev/null; then
+  ok "paccache.timer enabled (pacman cache pruning)"
+else
+  warn "paccache.timer not enabled — pacman cache will grow unbounded"
+fi
+if systemctl is-enabled --quiet fstrim.timer 2>/dev/null; then
+  ok "fstrim.timer enabled (periodic SSD TRIM)"
+else
+  info "fstrim.timer not enabled (expected on HDD-only systems)"
 fi
 
 section "Shell & tools"

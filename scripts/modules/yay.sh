@@ -120,9 +120,11 @@ install_yay() {
 YAYEOF
   log_success "yay configured with BatchInstall=true for faster AUR builds"
 
-  # Import GPG keys for makepkg (reduces AUR build key errors; failures are non-fatal)
+  # Import GPG keys for makepkg (reduces AUR build key errors; failures are non-fatal).
+  # Key 0xEA33F3A8DE0F8D6E is the `yay` upstream release signing key
+  # (Jguer) used to verify yay source tarballs built via makepkg.
   ui_info "Importing GPG keys..."
-  gpg --keyserver keyserver.ubuntu.com --recv-keys 0xEA33F3A8DE0F8D6E 2>/dev/null || true
+  gpg --keyserver keyserver.ubuntu.com --recv-keys 0xEA33F3A8DE0F8D6E 2>/dev/null || log_debug "GPG key import skipped/failed (non-fatal)"
 
   # Clean up
   ui_info "Cleaning up temporary files..."

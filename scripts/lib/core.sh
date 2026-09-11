@@ -164,7 +164,7 @@ run_step() {
     else
         log_error "$description failed (exit code: $ret)"
     fi
-    return $ret
+    return "$ret"
 }
 fi
 

@@ -220,6 +220,7 @@ status_fail2ban() {
   for attempt in 1 2 3 4 5; do
     jails=$(sudo fail2ban-client status 2>/dev/null | grep "Jail list" | sed 's/.*://;s/,/ /g; s/^[[:space:]]*//')
     echo "$jails" | grep -q "sshd" && break
+    log_debug "fail2ban jail check attempt $attempt/5"
     sleep 1
   done
 

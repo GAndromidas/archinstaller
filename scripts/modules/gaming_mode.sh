@@ -69,13 +69,14 @@ install_pacman_packages() {
 
 	# Try batch install first
 	printf '%b' "${THEME_TEXT}Attempting batch installation...${RESET}\n"
-	# We capture stderr to a variable to print if it fails
-	local batch_output
+	# Capture output so batch failures are logged with context on fallback.
+	local batch_output=""
 	if batch_output=$(sudo pacman -S --noconfirm --needed "${pacman_gaming_programs[@]}" 2>&1); then
 		printf '%b' "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
 		GAMING_INSTALLED+=("${pacman_gaming_programs[@]}")
 		return
 	fi
+	log_debug "Gaming batch install failed, falling back to per-package" "$batch_output"
 
 	printf '%b' "${THEME_WARN} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
 

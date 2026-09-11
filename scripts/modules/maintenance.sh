@@ -56,13 +56,18 @@ setup_maintenance() {
     log_info "Flatpak not installed, skipping flatpak cleanup"
   fi
 
-  # Remove orphaned packages if any exist. Capture once so an empty list can
-  # never turn into a bare `pacman -Rns` invocation.
+  # Remove orphaned packages if any exist. mapfile preserves all lines —
+  # a plain `read` would only take the first line and silently drop the rest.
   local orphans
   orphans=$(pacman -Qtdq 2>/dev/null || true)
   if [[ -n "$orphans" ]]; then
-    read -r -a orphan_packages <<< "$orphans"
-    run_step "Removing orphaned packages" sudo pacman -Rns --noconfirm "${orphan_packages[@]}"
+    local orphan_packages=()
+    mapfile -t orphan_packages <<< "$orphans"
+    if [[ ${#orphan_packages[@]} -gt 0 ]]; then
+      run_step "Removing orphaned packages" sudo pacman -Rns --noconfirm "${orphan_packages[@]}"
+    else
+      log_info "No orphaned packages found"
+    fi
   else
     log_info "No orphaned packages found"
   fi
@@ -84,8 +89,11 @@ cleanup_helpers() {
   # prefix, never a bare /tmp/yay (that path is never actually created —
   # matching it against reality, not a guess) and never a bare /tmp/tmp.*
   # (would risk deleting unrelated processes' temp dirs).
+  # shellcheck disable=SC2016
+  # single quotes intentional: expression runs in inner bash -c, not here
   run_step "Cleaning leftover yay build directories" bash -c \
     'shopt -s nullglob; dirs=(/tmp/archinstaller-yay-build.*); [ ${#dirs[@]} -eq 0 ] || sudo rm -rf "${dirs[@]}"'
+
 }
 
 cleanup_snapper_snapshots() {

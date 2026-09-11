@@ -130,6 +130,31 @@ source "$SCRIPTS_DIR/lib/dashboard.sh"
 
 export VERBOSE DRY_RUN INSTALL_LOG AUTO_MODE UNATTENDED AUTO_CONFIRM
 
+# Sudo keep-alive: long runs (full -Syu + batch installs + mkinitcpio -P)
+# outlive the default sudo timestamp. Refresh in the background so a hidden
+# password prompt never hangs a step whose stdout is redirected to the log.
+# Started once after the first authenticated sudo use; killed on exit via
+# save_log_on_exit / cleanup_on_error.
+start_sudo_keepalive() {
+  [[ "${DRY_RUN:-false}" == true ]] && return 0
+  if [[ -n "${SUDO_KEEPALIVE_PID:-}" ]] && kill -0 "$SUDO_KEEPALIVE_PID" 2>/dev/null; then
+    return 0
+  fi
+  if ! sudo -n true 2>/dev/null; then
+    return 1
+  fi
+  ( while true; do sudo -n true 2>/dev/null; sleep 50; kill -0 $$ 2>/dev/null || exit 0; done ) &
+  SUDO_KEEPALIVE_PID=$!
+  export SUDO_KEEPALIVE_PID
+}
+
+stop_sudo_keepalive() {
+  if [[ -n "${SUDO_KEEPALIVE_PID:-}" ]]; then
+    kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+    unset SUDO_KEEPALIVE_PID
+  fi
+}
+
 # Install gum only when we are actually going to modify the system. Dry-run is
 # guaranteed not to install helpers or alter the target machine.
 if [[ "$DRY_RUN" != true ]] && ! command -v gum >/dev/null 2>&1; then
@@ -139,6 +164,12 @@ if [[ "$DRY_RUN" != true ]] && ! command -v gum >/dev/null 2>&1; then
   else
     log_to_file "Failed to install gum, falling back to basic UI"
   fi
+fi
+
+# Authenticate once up front so keep-alive can run non-interactively after.
+if [[ "$DRY_RUN" != true ]]; then
+  sudo -v || log_to_file "WARNING: sudo authentication failed; keep-alive disabled"
+  start_sudo_keepalive || true
 fi
 
 init_core
@@ -193,7 +224,7 @@ check_system_requirements() {
   if [ -n "$root_device" ]; then
     if echo "$root_device" | grep -q "nvme"; then
       log_to_file "NVMe storage detected - NVMe optimizations will be applied"
-    elif [ -b "/dev/$root_device" ] && [ "$(cat /sys/block/${root_device}/queue/rotational 2>/dev/null)" = "0" ]; then
+    elif [ -b "/dev/$root_device" ] && [ "$(cat /sys/block/"${root_device}"/queue/rotational 2>/dev/null)" = "0" ]; then
       log_to_file "SSD storage detected - SSD optimizations will be applied"
     else
       log_to_file "HDD storage detected - HDD optimizations will be applied"
@@ -270,9 +301,7 @@ cleanup_on_error() {
     log_error "Check the log file for details: $INSTALL_LOG"
 
     # Kill sudo keep-alive if running
-    if [ -n "${SUDO_KEEPALIVE_PID:-}" ]; then
-      kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
-    fi
+    stop_sudo_keepalive || true
 
     # Check if steps actually failed — if all steps completed, don't mark as failure
     # Use state file as source of truth (more reliable than ERRORS array which runs in subshells)
@@ -302,9 +331,7 @@ INSTALLATION_SUCCESS=true
 INSTALLER_EXITING=false
 
 save_log_on_exit() {
-  if [ -n "${SUDO_KEEPALIVE_PID:-}" ]; then
-    kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
-  fi
+  stop_sudo_keepalive || true
 
   {
     echo ""
@@ -426,14 +453,14 @@ run_install_step 7 system_services "System Services" "$SCRIPTS_DIR/modules/syste
 run_install_step 8 fail2ban_setup "Fail2ban Setup" "$SCRIPTS_DIR/modules/fail2ban.sh"
 
 dashboard_step "Wake-on-LAN Configuration" 9
-if is_step_complete wakeonlan_config; then
+if is_step_done wakeonlan_config; then
   dashboard_skip
 else
   dashboard_run "$SCRIPTS_DIR/modules/wakeonlan_config.sh"
   wol_exit=$?
   case "$wol_exit" in
     0) mark_step_complete_with_progress wakeonlan_config completed; dashboard_ok ;;
-    2) mark_step_complete_with_progress wakeonlan_config completed; dashboard_warn ;;
+    2) mark_step_complete_with_progress wakeonlan_config skipped; dashboard_warn "Skipped — no WoL-capable NIC" ;;
     *) mark_step_complete_with_progress wakeonlan_config failed; dashboard_fail; log_error "Wake-on-LAN configuration failed"; ui_warn "Wake-on-LAN configuration failed but continuing installation" ;;
   esac
 fi

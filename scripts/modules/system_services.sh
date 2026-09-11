@@ -25,23 +25,46 @@ setup_firewall_and_services() {
   # splash params (step 6) are managed here.
 }
 
+# Detect effective sshd port (sshd -T is authoritative, fallback to
+# /etc/ssh/sshd_config, then 22). Used so firewall rules never lock out
+# remote sessions on a custom port.
+get_sshd_port() {
+  local port=""
+  if command -v sshd &>/dev/null; then
+    port=$(sudo sshd -T 2>/dev/null | awk '$1=="port" {print $2; exit}')
+  fi
+  if [[ ! "$port" =~ ^[0-9]+$ ]]; then
+    port=$(sudo awk 'tolower($1)=="port" {print $2; exit}' /etc/ssh/sshd_config 2>/dev/null || true)
+  fi
+  if [[ ! "$port" =~ ^[0-9]+$ ]]; then
+    port=22
+  fi
+  echo "$port"
+}
+
 configure_firewalld() {
+  local ssh_port
+  ssh_port=$(get_sshd_port)
   # Start and enable firewalld
   sudo systemctl start firewalld
   sudo systemctl enable firewalld
 
-  # Set default zone to drop — deny incoming, allow outgoing, explicit allow for services
-  sudo firewall-cmd --set-default-zone=drop
-  log_success "Default zone set to drop (incoming denied, outgoing allowed)"
-
-  # Allow SSH
-  if ! sudo firewall-cmd --list-all | grep -q "22/tcp"; then
-    sudo firewall-cmd --add-service=ssh --permanent
-    sudo firewall-cmd --reload
-    log_success "SSH allowed through Firewalld."
+  # Allow SSH BEFORE setting default zone to drop — otherwise a remote
+  # session is disconnected mid-install between the two commands.
+  if ! sudo firewall-cmd --list-all 2>/dev/null | grep -qE "${ssh_port}/tcp|service: ssh"; then
+    sudo firewall-cmd --add-service=ssh --permanent >>"$INSTALL_LOG" 2>&1 || true
+    if [[ "$ssh_port" != "22" ]]; then
+      sudo firewall-cmd --add-port="${ssh_port}/tcp" --permanent >>"$INSTALL_LOG" 2>&1 || true
+    fi
+    sudo firewall-cmd --reload >>"$INSTALL_LOG" 2>&1 || true
+    log_success "SSH (port ${ssh_port}) allowed through Firewalld before lockdown."
   else
     log_warning "SSH is already allowed. Skipping SSH service configuration."
   fi
+
+  # Set default zone to drop — deny incoming, allow outgoing, explicit allow for services
+  sudo firewall-cmd --set-default-zone=drop
+  log_success "Default zone set to drop (incoming denied, outgoing allowed)"
 
   # Check if KDE Connect is installed
   if pacman -Q kdeconnect &>/dev/null; then
@@ -67,10 +90,23 @@ configure_firewalld() {
 }
 
 configure_ufw() {
+  local ssh_port
+  ssh_port=$(get_sshd_port)
   # Install UFW if not present
   if ! command -v ufw >/dev/null 2>&1; then
     install_packages_quietly ufw
     log_success "UFW installed successfully."
+  fi
+
+  # Allow SSH BEFORE enabling — enabling first with deny-incoming would
+  # disconnect remote sessions before the allow rule is added.
+  # Port rule is authoritative on Arch. The OpenSSH app profile
+  # only exists where the distro ships it (e.g. Ubuntu) — Arch's ufw has no
+  # /etc/ufw/applications.d entry for it, so probe first to avoid
+  # "Could not find a profile matching 'OpenSSH'" noise in the log/summary.
+  sudo ufw allow "${ssh_port}/tcp" >>"$INSTALL_LOG" 2>&1 || true
+  if sudo ufw app list 2>/dev/null | grep -qi openssh; then
+    sudo ufw allow OpenSSH >>"$INSTALL_LOG" 2>&1 || true
   fi
 
   # Enable UFW ( --force avoids "Proceed with operation (y|n)?" hang under dashboard_run where stdout is to log)
@@ -84,21 +120,13 @@ configure_ufw() {
   sudo ufw default allow outgoing
   log_success "Default policy set to allow all outgoing connections."
 
-  # Allow SSH - port rule is authoritative on Arch. The OpenSSH app profile
-  # only exists where the distro ships it (e.g. Ubuntu) — Arch's ufw has no
-  # /etc/ufw/applications.d entry for it, so probe first to avoid
-  # "Could not find a profile matching 'OpenSSH'" noise in the log/summary.
-  sudo ufw allow 22/tcp >>"$INSTALL_LOG" 2>&1 || true
-  if sudo ufw app list 2>/dev/null | grep -qi openssh; then
-    sudo ufw allow OpenSSH >>"$INSTALL_LOG" 2>&1 || true
-  fi
-  # Verify and log
-  if sudo ufw status 2>/dev/null | grep -qE "22/tcp|22\s|OpenSSH"; then
-    log_success "SSH allowed through UFW."
+  # Verify and log (port-aware: custom sshd ports must verify, not just 22)
+  if sudo ufw status 2>/dev/null | grep -qE "${ssh_port}/tcp|${ssh_port}\s|OpenSSH"; then
+    log_success "SSH (port ${ssh_port}) allowed through UFW."
   else
     # Fallback try ssh alias
     sudo ufw allow ssh >>"$INSTALL_LOG" 2>&1 || true
-    if sudo ufw status 2>/dev/null | grep -qE "22|ssh|OpenSSH"; then
+    if sudo ufw status 2>/dev/null | grep -qE "22|ssh|OpenSSH|${ssh_port}"; then
       log_success "SSH allowed through UFW."
     else
       log_warning "UFW ssh rule may not be active - check sudo ufw status"
@@ -155,68 +183,26 @@ configure_user_groups() {
   done
 }
 
-# Snapper integration (mirrors the Timeshift/timeshift-autosnap handling):
-# if snapper is already installed, add snap-pac (pacman hook that
-# auto-snapshots on every transaction). btrfs-assistant (GUI snapshot
-# manager) is included only when $1 is true — headless servers skip it.
-# Both are official repo packages (no AUR helper needed) and hook/GUI-only
-# with nothing to enable. Snapper without btrfs on / is pointless, so bail.
+# Snapper integration: compat wrapper — single source lives in common.sh
+# setup_snapshot_stack (handles snapper AND timeshift, skips when neither
+# is installed). Kept so existing callers keep working.
 setup_snapper_integration() {
-  local with_gui="${1:-true}"
-
-  if ! pacman -Q snapper &>/dev/null; then
-    log_info "Snapper not detected - skipping snap-pac installation"
-    return 0
-  fi
-
-  if ! is_btrfs_system; then
-    log_info "Snapper detected but root is not btrfs — skipping snap-pac."
-    return 0
-  fi
-
-  log_success "Snapper detected on btrfs - installing snap-pac..."
-  local snapper_pkgs=()
-  pacman -Q snap-pac &>/dev/null || snapper_pkgs+=(snap-pac)
-  if [[ "$with_gui" == true ]]; then
-    pacman -Q btrfs-assistant &>/dev/null || snapper_pkgs+=(btrfs-assistant)
-  fi
-  if [ ${#snapper_pkgs[@]} -gt 0 ]; then
-    install_packages_quietly "${snapper_pkgs[@]}"
-  else
-    log_info "snapper integration packages already installed"
-  fi
-
-  # Snapshot schedule (both modes — pure systemd, no GUI needed)
-  configure_snapper_schedule
+  setup_snapshot_stack "${1:-true}"
 }
 
-# Snapshot schedule for snapper: one "boot" snapshot at startup plus one
-# "daily" snapshot (Persistent timer catches up after downtime). Both use
-# cleanup-algorithm=number so snapper-cleanup prunes them via the config's
-# NUMBER_LIMIT — no manual maintenance. btrfs-assistant (when installed)
-# picks these up automatically for browsing/rollback.
+# Snapshot schedule for snapper: compat wrapper around common.sh
+# snapper_enable_timers (ArchWiki timeline + cleanup + boot). Keeps the
+# legacy fallback (custom boot service when stock timer is missing) and the
+# migration away from the old custom daily timer. No-op without snapper.
 configure_snapper_schedule() {
-  # Single source in common.sh - no duplication, fast guard, optimized for re-runs
-  snapper_apply_btrfs_assistant_profile
-
-  # ArchWiki way: use snapper's own timers (not custom number timers)
-  # timeline (hourly creates, daily cleanup) + cleanup + boot
-  # Previously custom snapper-boot-snapshot.service with --cleanup-algorithm number
-  # made TIMELINE_LIMIT_DAILY irrelevant and NUMBER_LIMIT never enforced without cleanup timer
-  sudo systemctl daemon-reload 2>/dev/null || true
-  # Enable standard ArchWiki timers
-  if sudo systemctl enable --now snapper-timeline.timer >>"$INSTALL_LOG" 2>&1; then
-    log_success "Timeline snapshots enabled (snapper-timeline.timer hourly)"
-  else
-    log_warning "Failed to enable snapper-timeline.timer"
+  if ! pacman -Q snapper &>/dev/null; then
+    return 0
   fi
-  if sudo systemctl enable --now snapper-cleanup.timer >>"$INSTALL_LOG" 2>&1; then
-    log_success "Cleanup enabled (snapper-cleanup.timer daily) - enforces NUMBER_LIMIT 8"
-  else
-    log_warning "Failed to enable snapper-cleanup.timer"
+  if ! is_btrfs_system 2>/dev/null; then
+    return 0
   fi
-  if sudo systemctl enable --now snapper-boot.timer >>"$INSTALL_LOG" 2>&1; then
-    log_success "Boot snapshot enabled (snapper-boot.timer - ArchWiki single type, Number 8)"
+  if snapper_enable_timers; then
+    :
   else
     log_warning "Failed to enable snapper-boot.timer, trying fallback custom service"
     # Fallback: keep custom boot service for compatibility if stock timer missing
@@ -261,6 +247,15 @@ enable_services() {
       paccache.timer
       sshd.service
     )
+    # Snapshot stack: whatever is installed (snapper and/or timeshift),
+    # headless skips GUI packages. Skips cleanly when neither is present.
+    # Queues timeshift-autosnap.timer when upstream ships one.
+    TIMESHIFT_AUTOSNAP_TIMER=""
+    setup_snapshot_stack false
+    if [[ -n "${TIMESHIFT_AUTOSNAP_TIMER:-}" ]]; then
+      services+=("$TIMESHIFT_AUTOSNAP_TIMER")
+      log_success "$TIMESHIFT_AUTOSNAP_TIMER will be enabled for automatic snapshots."
+    fi
     step "Enabling the following system services:"
     for svc in "${services[@]}"; do
       echo -e "  - $svc"
@@ -280,9 +275,6 @@ enable_services() {
     else
       log_warning "Some services failed to enable: ${server_failed[*]}"
     fi
-
-    # Headless: snap-pac only (btrfs-assistant is a GUI, useless on a server)
-    setup_snapper_integration false
 
     # Continue to shared optimizations (memory, filesystem, storage, audio, kernel)
   else
@@ -318,13 +310,17 @@ enable_services() {
     # Add user to libvirt group and enable service
     if groups "$USER" | grep -qE '\blibvirt\b'; then
       log_info "User already in libvirt group"
+    elif sudo usermod -aG libvirt "$USER" 2>/dev/null; then
+      log_success "Added user to libvirt group"
     else
-      sudo usermod -aG libvirt "$USER" 2>/dev/null && log_success "Added user to libvirt group" || log_warning "Failed to add user to libvirt group"
+      log_warning "Failed to add user to libvirt group"
     fi
     if systemctl is-enabled libvirtd &>/dev/null 2>&1; then
       log_info "libvirtd service already enabled"
+    elif sudo systemctl enable --now libvirtd 2>/dev/null; then
+      log_success "libvirtd service enabled"
     else
-      sudo systemctl enable --now libvirtd 2>/dev/null && log_success "libvirtd service enabled" || log_warning "Failed to enable libvirtd service"
+      log_warning "Failed to enable libvirtd service"
     fi
   fi
 
@@ -353,33 +349,15 @@ enable_services() {
     log_warning "power-profiles-daemon installed but conflicting power manager (tlp/auto-cpufreq) detected. Skipping."
   fi
 
-  # Check if Timeshift is already installed and install timeshift-autosnap if needed
-  if pacman -Q timeshift &>/dev/null; then
-    log_success "Timeshift detected - installing timeshift-autosnap for automatic snapshots..."
-    if command -v yay >/dev/null 2>&1; then
-      if yay -S --noconfirm --needed timeshift-autosnap >>"$INSTALL_LOG" 2>&1; then
-        log_success "timeshift-autosnap installed successfully"
-        sudo systemctl daemon-reload
-        # Upstream ships a hook, not necessarily a timer unit — only queue
-        # it when the unit actually exists.
-        if systemctl list-unit-files "timeshift-autosnap.timer" 2>/dev/null | grep -q "timeshift-autosnap.timer"; then
-          services+=(timeshift-autosnap.timer)
-          log_success "timeshift-autosnap.timer will be enabled for automatic snapshots."
-        else
-          log_info "No timeshift-autosnap.timer unit shipped — the pacman hook needs no enabling."
-        fi
-      else
-        log_error "Failed to install timeshift-autosnap from AUR"
-      fi
-    else
-      log_warning "yay not available - cannot install timeshift-autosnap"
-    fi
-  else
-    log_info "Timeshift not detected - skipping timeshift-autosnap installation"
+  # Snapshot stack: whatever is installed (snapper and/or timeshift),
+  # desktop includes GUI helpers. Skips cleanly when neither is present.
+  # Queues timeshift-autosnap.timer when upstream ships one.
+  TIMESHIFT_AUTOSNAP_TIMER=""
+  setup_snapshot_stack true
+  if [[ -n "${TIMESHIFT_AUTOSNAP_TIMER:-}" ]]; then
+    services+=("$TIMESHIFT_AUTOSNAP_TIMER")
+    log_success "$TIMESHIFT_AUTOSNAP_TIMER will be enabled for automatic snapshots."
   fi
-
-  # Desktop: full snapper integration including the GUI manager
-  setup_snapper_integration true
 
   step "Enabling the following system services:"
   for svc in "${services[@]}"; do
@@ -469,7 +447,7 @@ detect_and_install_gpu_drivers() {
     install_packages_quietly "${nvidia_packages[@]}"
     log_success "NVIDIA drivers and Vulkan support installed"
     log_info "NVIDIA GPU will use proprietary driver after reboot"
-    log_info "Ensure 'nvidia-dkms' is in your mkinitcpio MODULES array if using custom kernel"
+    ensure_nvidia_initramfs_modules
   fi
 
   if [[ "$has_intel" == true ]]; then
@@ -506,6 +484,40 @@ detect_and_install_gpu_drivers() {
   verify_gpu_driver
 }
 
+# Ensure NVIDIA DRM modules are in mkinitcpio MODULES for early KMS.
+# Idempotent: adds missing tokens only, preserves existing ones.
+# No rebuild here — bootloader step collects rebuilds; next kernel update
+# also regenerates. Dracut systems are skipped (dracut auto-detects).
+ensure_nvidia_initramfs_modules() {
+  local mkconf="/etc/mkinitcpio.conf"
+  [[ -f "$mkconf" ]] || { log_debug "No mkinitcpio.conf — skipping NVIDIA MODULES wiring"; return 0; }
+  command -v mkinitcpio &>/dev/null || { log_debug "mkinitcpio not in use — skipping NVIDIA MODULES wiring"; return 0; }
+  local needed=(nvidia nvidia_modeset nvidia_uvm nvidia_drm)
+  local line current missing=()
+  line=$(grep -E '^MODULES=' "$mkconf" | head -1 || echo "")
+  [[ -z "$line" ]] && { log_warning "No MODULES line in $mkconf — skipping NVIDIA wiring"; return 0; }
+  current="$line"
+  local m
+  for m in "${needed[@]}"; do
+    echo "$current" | grep -qw "$m" || missing+=("$m")
+  done
+  if [[ ${#missing[@]} -eq 0 ]]; then
+    log_info "NVIDIA initramfs MODULES already present"
+    return 0
+  fi
+  validate_config_file "$mkconf" >/dev/null 2>&1 || true
+  local new_mods
+  new_mods=$(echo "$current" | sed -E 's/^MODULES=\((.*)\)/\1/' | xargs)
+  new_mods="$new_mods ${missing[*]}"
+  new_mods=$(echo "$new_mods" | tr -s ' ')
+  if sudo sed -i -E "s|^MODULES=.*|MODULES=($new_mods)|" "$mkconf" \
+    && grep -E '^MODULES=' "$mkconf" | grep -qw "nvidia_drm"; then
+    log_success "Added NVIDIA modules to mkinitcpio MODULES: ${missing[*]} (applies on next initramfs rebuild)"
+  else
+    log_warning "Failed to wire NVIDIA modules into $mkconf"
+  fi
+}
+
 # Function to verify GPU driver is loaded correctly
 verify_gpu_driver() {
   step "Verifying GPU driver installation"
@@ -530,6 +542,73 @@ verify_gpu_driver() {
   else
     log_info "Install vulkan-tools to verify Vulkan support: sudo pacman -S vulkan-tools"
   fi
+}
+
+# Install guest agents when this machine is itself a VM guest (copy-paste,
+# dynamic resolution, host-guest communication). spice-vdagent is the SPICE
+# clipboard/resolution agent — it only helps inside a SPICE guest (e.g. this
+# installer running in a GNOME Boxes VM), which is why it is gated on is_vm()
+# here rather than on gnome-boxes (host-side). The programs.yaml entry covers
+# Standard hosts too (harmless on bare metal, needed for nested VMs).
+install_vm_guest_agents() {
+  is_vm 2>/dev/null || return 0
+
+  step "Installing VM guest agents"
+
+  local virt="unknown"
+  virt=$(systemd-detect-virt 2>/dev/null || echo "unknown")
+
+  case "$virt" in
+    oracle)
+      log_info "VirtualBox guest detected — installing guest utils"
+      install_packages_quietly virtualbox-guest-utils
+      if sudo systemctl enable --now vboxservice.service >>"$INSTALL_LOG" 2>&1; then
+        log_success "vboxservice enabled (clipboard + shared folders)"
+      else
+        log_warning "Failed to enable vboxservice"
+      fi
+      ;;
+    vmware)
+      log_info "VMware guest detected — installing open-vm-tools"
+      install_packages_quietly open-vm-tools
+      if sudo systemctl enable --now vmtoolsd.service >>"$INSTALL_LOG" 2>&1; then
+        log_success "vmtoolsd enabled (clipboard + dynamic resolution)"
+      else
+        log_warning "Failed to enable vmtoolsd"
+      fi
+      ;;
+    *)
+      # qemu/kvm (incl. GNOME Boxes SPICE sessions) and unknown hypervisors:
+      # SPICE agent for clipboard/resolution + qemu agent for host comms.
+      # Headless servers have no graphical clipboard, so they only need the
+      # qemu agent.
+      log_info "QEMU/KVM guest detected ($virt) — installing SPICE + qemu agents"
+      if [[ "${INSTALL_MODE:-}" == "server" ]]; then
+        install_packages_quietly qemu-guest-agent
+      else
+        install_packages_quietly spice-vdagent qemu-guest-agent
+      fi
+      # Arch ships qemu-guest-agent without an [Install] section, and the
+      # service additionally needs a virtio guest-agent channel from the
+      # host (GNOME Boxes doesn't add one by default). Best effort only:
+      # SPICE clipboard/resolution works through spice-vdagentd regardless.
+      if sudo systemctl enable --now qemu-guest-agent.service >>"$INSTALL_LOG" 2>&1; then
+        log_success "qemu-guest-agent enabled"
+      elif sudo systemctl start qemu-guest-agent.service >>"$INSTALL_LOG" 2>&1; then
+        log_success "qemu-guest-agent started (no [Install] section — runs without enablement)"
+      else
+        log_info "qemu-guest-agent installed but not started (no guest-agent channel in this VM — add a virtio serial channel on the host if you need it; SPICE copy-paste is unaffected)"
+      fi
+      if [[ "${INSTALL_MODE:-}" != "server" ]]; then
+        if sudo systemctl enable --now spice-vdagentd.service >>"$INSTALL_LOG" 2>&1; then
+          log_success "spice-vdagentd enabled (seamless clipboard + dynamic resolution)"
+        else
+          log_warning "Failed to enable spice-vdagentd"
+        fi
+      fi
+      ;;
+  esac
+  return 0
 }
 
 # NOTE: is_laptop() uses the cached version from system.sh (sourced via common.sh)
@@ -1116,6 +1195,25 @@ check_battery_status() {
   fi
 }
 
+# Shared WMI vendor setup: install ACPI (smart), load <vendor>-wmi for
+# function keys, enable acpid. Thin table-driven helper so the six vendor
+# functions below don't each carry a copy of the same 10 lines.
+setup_wmi_vendor() {
+  local label="$1" module="$2"
+  log_info "Installing ${label}-specific tools..."
+  install_smart_acpi
+  if [[ -n "$module" ]]; then
+    sudo modprobe "$module" 2>/dev/null || true
+    if lsmod | grep -q "${module//-/_}"; then
+      log_success "${label} WMI module loaded for function key support"
+    else
+      log_warning "${label} WMI module not available - function keys may not work properly"
+    fi
+  fi
+  sudo systemctl enable acpid.service 2>/dev/null || true
+  sudo systemctl start acpid.service 2>/dev/null || true
+}
+
 # Function to setup Intel-specific laptop optimizations
 setup_intel_laptop_optimizations() {
   step "Configuring Intel-specific laptop optimizations"
@@ -1188,11 +1286,6 @@ setup_lenovo_optimizations() {
 setup_hp_optimizations() {
   step "Configuring HP-specific optimizations"
 
-  # Install HP-specific packages
-  log_info "Installing HP-specific tools..."
-  # Install ACPI with smart compatibility handling
-  install_smart_acpi
-  
   if command -v yay >/dev/null 2>&1; then
     # Install HP Omen gaming tools if detected
     if grep -qi "omen" /sys/class/dmi/id/product_name 2>/dev/null; then
@@ -1201,17 +1294,7 @@ setup_hp_optimizations() {
     fi
   fi
 
-  # Configure HP function keys
-  sudo modprobe hp-wmi 2>/dev/null
-  if lsmod | grep -q hp_wmi; then
-    log_success "HP WMI module loaded for function key support"
-  else
-    log_warning "HP WMI module not available - function keys may not work properly"
-  fi
-
-  # Enable ACPI services
-  sudo systemctl enable acpid.service 2>/dev/null
-  sudo systemctl start acpid.service 2>/dev/null
+  setup_wmi_vendor "HP" "hp-wmi"
 
   log_success "HP optimizations completed"
 }
@@ -1220,11 +1303,6 @@ setup_hp_optimizations() {
 setup_dell_optimizations() {
   step "Configuring Dell-specific optimizations"
 
-  # Install Dell-specific packages
-  log_info "Installing Dell-specific tools..."
-  # Install ACPI with smart compatibility handling
-  install_smart_acpi
-  
   if command -v yay >/dev/null 2>&1; then
     # Install Dell XPS tools if detected
     if grep -qi "xps" /sys/class/dmi/id/product_name 2>/dev/null; then
@@ -1233,17 +1311,7 @@ setup_dell_optimizations() {
     fi
   fi
 
-  # Configure Dell function keys
-  sudo modprobe dell-wmi 2>/dev/null
-  if lsmod | grep -q dell_wmi; then
-    log_success "Dell WMI module loaded for function key support"
-  else
-    log_warning "Dell WMI module not available - function keys may not work properly"
-  fi
-
-  # Enable ACPI services
-  sudo systemctl enable acpid.service 2>/dev/null
-  sudo systemctl start acpid.service 2>/dev/null
+  setup_wmi_vendor "Dell" "dell-wmi"
 
   log_success "Dell optimizations completed"
 }
@@ -1252,11 +1320,6 @@ setup_dell_optimizations() {
 setup_acer_optimizations() {
   step "Configuring Acer-specific optimizations"
 
-  # Install Acer-specific packages
-  log_info "Installing Acer-specific tools..."
-  # Install ACPI with smart compatibility handling
-  install_smart_acpi
-  
   if command -v yay >/dev/null 2>&1; then
     # Install Acer Nitro gaming tools if detected
     if grep -qi "nitro\|predator" /sys/class/dmi/id/product_name 2>/dev/null; then
@@ -1265,17 +1328,7 @@ setup_acer_optimizations() {
     fi
   fi
 
-  # Configure Acer function keys
-  sudo modprobe acer-wmi 2>/dev/null
-  if lsmod | grep -q acer_wmi; then
-    log_success "Acer WMI module loaded for function key support"
-  else
-    log_warning "Acer WMI module not available - function keys may not work properly"
-  fi
-
-  # Enable ACPI services
-  sudo systemctl enable acpid.service 2>/dev/null
-  sudo systemctl start acpid.service 2>/dev/null
+  setup_wmi_vendor "Acer" "acer-wmi"
 
   log_success "Acer optimizations completed"
 }
@@ -1284,11 +1337,6 @@ setup_acer_optimizations() {
 setup_asus_optimizations() {
   step "Configuring ASUS-specific optimizations"
 
-  # Install ASUS-specific packages
-  log_info "Installing ASUS-specific tools..."
-  # Install ACPI with smart compatibility handling
-  install_smart_acpi
-  
   if command -v yay >/dev/null 2>&1; then
     # Install ASUS ROG gaming tools if detected
     if grep -qi "rog\|zenbook" /sys/class/dmi/id/product_name 2>/dev/null; then
@@ -1298,17 +1346,7 @@ setup_asus_optimizations() {
     fi
   fi
 
-  # Configure ASUS function keys
-  sudo modprobe asus-wmi 2>/dev/null
-  if lsmod | grep -q asus_wmi; then
-    log_success "ASUS WMI module loaded for function key support"
-  else
-    log_warning "ASUS WMI module not available - function keys may not work properly"
-  fi
-
-  # Enable ACPI services
-  sudo systemctl enable acpid.service 2>/dev/null
-  sudo systemctl start acpid.service 2>/dev/null
+  setup_wmi_vendor "ASUS" "asus-wmi"
 
   log_success "ASUS optimizations completed"
 }
@@ -1317,11 +1355,6 @@ setup_asus_optimizations() {
 setup_msi_optimizations() {
   step "Configuring MSI-specific optimizations"
 
-  # Install MSI-specific packages
-  log_info "Installing MSI-specific tools..."
-  # Install ACPI with smart compatibility handling
-  install_smart_acpi
-  
   if command -v yay >/dev/null 2>&1; then
     # Install MSI gaming tools
     log_info "Installing MSI gaming optimizations..."
@@ -1329,17 +1362,7 @@ setup_msi_optimizations() {
     install_aur_quietly msi-per-keyboard
   fi
 
-  # Configure MSI function keys
-  sudo modprobe msi-wmi 2>/dev/null
-  if lsmod | grep -q msi_wmi; then
-    log_success "MSI WMI module loaded for function key support"
-  else
-    log_warning "MSI WMI module not available - function keys may not work properly"
-  fi
-
-  # Enable ACPI services
-  sudo systemctl enable acpid.service 2>/dev/null
-  sudo systemctl start acpid.service 2>/dev/null
+  setup_wmi_vendor "MSI" "msi-wmi"
 
   log_success "MSI optimizations completed"
 }
@@ -1728,6 +1751,7 @@ if [[ "${DRY_RUN:-false}" == true ]]; then
 fi
 setup_firewall_and_services
 detect_and_install_gpu_drivers
+install_vm_guest_agents
 check_battery_status
 detect_memory_size
 detect_filesystem_type

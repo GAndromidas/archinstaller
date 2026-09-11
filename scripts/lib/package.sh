@@ -79,7 +79,7 @@ pacman_install_single() {
     else
         [ "$verbose" = true ] && printf '%b' "${THEME_ERROR} ✗ Failed${RESET}\n"
         if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
-            echo "$output" | sed 's/^/    /'
+            while IFS= read -r line; do printf '    %s\n' "$line"; done <<<"$output"
         fi
         FAILED_PACKAGES+=("$pkg")
         return 1
@@ -109,7 +109,7 @@ yay_install_single() {
     else
         [ "$verbose" = true ] && printf '%b' "${THEME_ERROR} ✗ Failed${RESET}\n"
         if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
-            echo "$output" | sed 's/^/    /'
+            while IFS= read -r line; do printf '    %s\n' "$line"; done <<<"$output"
         fi
         FAILED_PACKAGES+=("$pkg")
         return 1
@@ -139,7 +139,7 @@ flatpak_install_single() {
     else
         [ "$verbose" = true ] && printf '%b' "${THEME_ERROR} ✗ Failed${RESET}\n"
         if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
-            echo "$output" | sed 's/^/    /'
+            while IFS= read -r line; do printf '    %s\n' "$line"; done <<<"$output"
         fi
         FAILED_PACKAGES+=("$pkg")
         return 1

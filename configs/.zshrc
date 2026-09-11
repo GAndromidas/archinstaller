@@ -8,6 +8,13 @@ export ZSH="$HOME/.oh-my-zsh"
 # Add local bin to PATH if it exists
 [ -d "$HOME/.local/bin" ] && export PATH="$HOME/.local/bin:$PATH"
 
+# Non-interactive shells (scripts, CI, scp) must not inherit aliases,
+# prompt init, or fastfetch output — they break argument parsing.
+# Everything below this guard is interactive-only.
+if [[ $- != *i* ]]; then
+  return
+fi
+
 # Themes
 ZSH_THEME="agnoster"
 DEFAULT_USER=$USER
@@ -22,9 +29,9 @@ plugins=(git fzf)
 
 source $ZSH/oh-my-zsh.sh
 
-# Manually source additional plugins
-source /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh
-source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+# Source plugins only when the files exist (fresh installs may lack them)
+[ -f /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh ] && source /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh
+[ -f /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ] && source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 
 # =============================================================================
 # FZF Configuration - Compact list with colors
@@ -80,7 +87,7 @@ alias clean='echo "🧹 Starting Arch Linux Deep Clean..." && \
   echo "→ Removing unused Flatpaks..." && \
   sudo flatpak uninstall --unused -y && \
   echo "→ Removing orphaned packages..." && \
-  if [ -n "$(pacman -Qtdq)" ]; then sudo pacman -Rns $(pacman -Qtdq) --noconfirm; fi && \
+  if [ -n "$(pacman -Qtdq 2>/dev/null)" ]; then sudo pacman -Rns $(pacman -Qtdq) --noconfirm; else echo "  (no orphans)"; fi && \
   echo "→ Vacuuming systemd journal (keep 3 days)..." && \
   sudo journalctl --vacuum-time=3d && \
   echo "→ Wiping thumbnail & browser caches..." && \
@@ -200,9 +207,11 @@ alias aliases='cat ~/.zshrc | grep "^alias" | sed "s/alias //" | column -t -s="#
 # -----------------------------------------------------------------------------
 # Package Management
 # -----------------------------------------------------------------------------
-alias unlock='sudo rm /var/lib/pacman/db.lck'                                     # Remove pacman lock
+# NOTE: no `unlock` alias — blindly deleting /var/lib/pacman/db.lck while
+# another pacman holds it corrupts the db. If locked, check
+# `ps aux | grep pacman` first, then remove only when no holder exists.
 alias rip='expac --timefmt="%d-%m-%Y %T" "%l\t%n %v" | sort | tail -200 | nl'     # Recently installed packages
-alias orphans='sudo pacman -Rns $(pacman -Qtdq) 2>/dev/null'                      # Remove orphaned packages
+alias orphans='if [ -n "$(pacman -Qtdq 2>/dev/null)" ]; then sudo pacman -Rns $(pacman -Qtdq) --noconfirm; else echo "No orphaned packages"; fi'                      # Remove orphaned packages (safe on empty)
 
 # -----------------------------------------------------------------------------
 # Utilities
@@ -216,14 +225,21 @@ alias ports-used='netstat -tulanp | grep ESTABLISHED'                           
 # =============================================================================
 
 # Zoxide - Smart cd replacement (use 'z dirname' to jump to frequently used directories)
-eval "$(zoxide init zsh)"
-alias cd='z'  # Replace cd with zoxide for smart directory jumping
+# NOTE: deliberately not aliasing cd=z — overriding cd breaks scripts and
+# muscle memory for `cd -`, `cd ..`. Use `z` explicitly.
+if command -v zoxide >/dev/null 2>&1; then
+  eval "$(zoxide init zsh)"
+fi
 
 # Starship - Modern prompt with git integration
-eval "$(starship init zsh)"
+if command -v starship >/dev/null 2>&1; then
+  eval "$(starship init zsh)"
+fi
 
-# Fastfetch - Display system information on shell start
-fastfetch
+# Fastfetch - Display system information on interactive login shells only
+if command -v fastfetch >/dev/null 2>&1; then
+  fastfetch
+fi
 
 # =============================================================================
 # Additional Functions

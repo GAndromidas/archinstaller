@@ -14,9 +14,24 @@ DASHBOARD_CURRENT_STEP=0
 DASHBOARD_STEP_SEC=-1
 DASHBOARD_FRAME_END=0
 DASHBOARD_ROW_OFFSET=0
+DASHBOARD_PLAIN=false
+
+# Non-TTY (piped/CI) fallback: tput cup/el emits garbage when stdout is not
+# a terminal. In plain mode every dashboard_* call degrades to simple
+# step() logging so `./install.sh | tee` stays readable.
+dashboard_is_tty() {
+  [[ -t 1 ]] && [[ "${TERM:-dumb}" != dumb ]]
+}
 
 dashboard_init() {
-    if [[ -t 1 ]] && [[ "${TERM:-dumb}" != dumb ]]; then clear; fi
+    if dashboard_is_tty; then clear; fi
+    if ! dashboard_is_tty; then
+      DASHBOARD_PLAIN=true
+      DASHBOARD_START_SEC=$SECONDS
+      echo "Arch Installer (plain output — non-interactive terminal)"
+      return 0
+    fi
+    DASHBOARD_PLAIN=false
     DASHBOARD_STEP_SEC=-1
     DASHBOARD_STEP_TIMES=()
     DASHBOARD_STEP_NAMES=()
@@ -95,6 +110,14 @@ dashboard_init() {
 
 dashboard_step() {
     local name=$1 num=$2
+    if [[ "$DASHBOARD_PLAIN" == true ]]; then
+      DASHBOARD_CURRENT_STEP=$num
+      DASHBOARD_STEP_NAMES[$num]="$name"
+      DASHBOARD_STEP_SEC=$SECONDS
+      DASHBOARD_STEP_STATUSES[$num]="running"
+      echo "▶ Step $num: $name"
+      return 0
+    fi
     local total=${TOTAL_STEPS:-10}
     local w=$DASHBOARD_INNER_W
 
@@ -166,10 +189,16 @@ dashboard_run() {
 }
 
 dashboard_ok() {
+    local num=$DASHBOARD_CURRENT_STEP
     local elapsed=0
     [ "$DASHBOARD_STEP_SEC" -ge 0 ] && elapsed=$((SECONDS - DASHBOARD_STEP_SEC))
     (( elapsed < 0 )) && elapsed=0
-    local num=$DASHBOARD_CURRENT_STEP
+    if [[ "$DASHBOARD_PLAIN" == true ]]; then
+      DASHBOARD_STEP_STATUSES[$num]="ok"
+      DASHBOARD_STEP_TIMES[$num]=$elapsed
+      echo "✓ Step $num done (${elapsed}s)"
+      return 0
+    fi
     local w=$DASHBOARD_INNER_W
     DASHBOARD_STEP_STATUSES[$num]="ok"
     DASHBOARD_STEP_TIMES[$num]=$elapsed
@@ -188,10 +217,15 @@ dashboard_ok() {
 }
 
 dashboard_fail() {
+    local num=$DASHBOARD_CURRENT_STEP
+    if [[ "$DASHBOARD_PLAIN" == true ]]; then
+      DASHBOARD_STEP_STATUSES[$num]="fail"
+      echo "✗ Step $num failed"
+      return 0
+    fi
     local elapsed=0
     [ "$DASHBOARD_STEP_SEC" -ge 0 ] && elapsed=$((SECONDS - DASHBOARD_STEP_SEC))
     (( elapsed < 0 )) && elapsed=0
-    local num=$DASHBOARD_CURRENT_STEP
     local w=$DASHBOARD_INNER_W
     DASHBOARD_STEP_STATUSES[$num]="fail"
     DASHBOARD_STEP_TIMES[$num]=$elapsed
@@ -212,6 +246,11 @@ dashboard_fail() {
 dashboard_skip() {
     local msg="${1:-Already completed}"
     local num=$DASHBOARD_CURRENT_STEP
+    if [[ "$DASHBOARD_PLAIN" == true ]]; then
+      DASHBOARD_STEP_STATUSES[$num]="skip"
+      echo "◇ Step $num skipped — $msg"
+      return 0
+    fi
     local w=$DASHBOARD_INNER_W
     DASHBOARD_STEP_STATUSES[$num]="skip"
     DASHBOARD_STEP_TIMES[$num]=0
@@ -232,6 +271,12 @@ dashboard_skip() {
 
 dashboard_warn() {
     local msg="${1:-Warning}"
+    local num=$DASHBOARD_CURRENT_STEP
+    if [[ "$DASHBOARD_PLAIN" == true ]]; then
+      DASHBOARD_STEP_STATUSES[$num]="warn"
+      echo "⚠ Step $num warning — $msg"
+      return 0
+    fi
     local elapsed=0
     [ "$DASHBOARD_STEP_SEC" -ge 0 ] && elapsed=$((SECONDS - DASHBOARD_STEP_SEC))
     (( elapsed < 0 )) && elapsed=0
@@ -254,7 +299,7 @@ dashboard_warn() {
 }
 
 dashboard_finish() {
-    if [[ -t 1 ]] && [[ "${TERM:-dumb}" != dumb ]]; then clear; fi
+    if dashboard_is_tty; then clear; fi
 
     local total=${TOTAL_STEPS:-10}
     local success=0 fail=0 skip=0 warn=0
@@ -312,7 +357,7 @@ dashboard_finish() {
         if [ "$st" = "skip" ]; then
             time_str="  --  "
         else
-            time_str="$(format_time $tm)"
+            time_str="$(format_time "$tm")"
             time_str=$(printf "%6s" "$time_str")
         fi
         printf "${color}  %s  Step %2d: %-28s${THEME_MUTED} %s${RESET}\n" \

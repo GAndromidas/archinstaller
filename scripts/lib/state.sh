@@ -49,6 +49,17 @@ is_step_complete() {
   [[ -f "$STATE_FILE" ]] && grep -qFx "COMPLETED: $1" "$STATE_FILE"
 }
 
+is_step_skipped() {
+  [[ -f "$STATE_FILE" ]] && grep -qFx "SKIPPED: $1" "$STATE_FILE"
+}
+
+# COMPLETED or SKIPPED both mean "don't re-run this step on resume".
+# Use is_step_complete / is_step_skipped when the distinction matters
+# (e.g. gaming re-offers when skipped, wake-on-lan does not).
+is_step_done() {
+  is_step_complete "$1" || is_step_skipped "$1"
+}
+
 state_has_failure() {
   [[ -f "$STATE_FILE" ]] && grep -q '^FAILED:' "$STATE_FILE"
 }

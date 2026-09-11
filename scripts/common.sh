@@ -164,6 +164,12 @@ check_system_compatibility() {
     if [ ! -d /boot ] && ! sudo test -d "/boot" 2>/dev/null; then
         issues+=("Boot directory not found")
     fi
+
+    # yq is preferred for YAML parsing; lib/config.sh falls back to a
+    # plain-text parser when missing, so this is a warning, not a blocker.
+    if ! command -v yq &>/dev/null; then
+        log_warning "yq not found — using built-in fallback YAML parser (install yq for stricter parsing)"
+    fi
     
     # Report issues
     if [ ${#issues[@]} -gt 0 ]; then
@@ -196,32 +202,15 @@ atomic_write() {
         validate_config_file "$target_file" "$backup_dir"
     fi
     
-    # Write to temporary file first - use /tmp for privileged targets (/boot is 700)
-    # so bare > doesn't fail when archinstall locks /boot to root-only
-    local privileged_target=false
-    if [[ "$target_file" == /boot/* ]] || [[ "$target_file" == /efi/* ]] || { sudo test -d "$(dirname "$target_file")" 2>/dev/null && ! test -w "$(dirname "$target_file")" 2>/dev/null; }; then
-        # Check if target dir is actually root-only
-        if sudo test -d "$target_dir" 2>/dev/null && ! sudo test -w "$target_dir" 2>/dev/null && ! [ -w "$target_dir" ] 2>/dev/null; then
-            privileged_target=true
-        elif sudo test -d "$target_dir" 2>/dev/null && ! [ -w "$target_dir" ] 2>/dev/null; then
-            # Fallback for systems without sudo test -w distinction
-            if is_boot_privileged 2>/dev/null; then
-                privileged_target=true
-            fi
-        fi
-    fi
-
-    if [[ "$privileged_target" == true ]]; then
+    # Write to temporary file first — try alongside target, fall back to
+    # /tmp for privileged targets (/boot is 700 on archinstall systems, so
+    # a bare `> /boot/...tmp` fails while /tmp always works).
+    temp_file="${target_file}.tmp.$$"
+    if ! echo "$content" > "$temp_file" 2>/dev/null; then
         temp_file=$(mktemp /tmp/archinstaller.XXXXXX 2>/dev/null || echo "/tmp/archinstaller.$$.tmp")
         if ! echo "$content" > "$temp_file" 2>/dev/null; then
             log_error "Failed to write to temporary file $temp_file"
             rm -f "$temp_file"
-            return 1
-        fi
-    else
-        temp_file="${target_file}.tmp.$$"
-        if ! echo "$content" > "$temp_file"; then
-            log_error "Failed to write to temporary file $temp_file"
             return 1
         fi
     fi
@@ -337,19 +326,53 @@ snapper_ensure_config_with_workaround() {
   return 1
 }
 
-snapper_apply_btrfs_assistant_profile() {
-  # Fast guard - if already 8/Daily 1, skip 13 seds
-  if [[ "$SNAPPER_BTRFS_PROFILE_DONE" == true ]]; then
+snapper_ensure_home_config() {
+  # Companion to snapper_ensure_config_with_workaround, for /home: only when
+  # /home is its own btrfs subvolume and no config exists yet. The installer
+  # manages root + home with the same retention profile (Btrfs Assistant
+  # shows one tab per config). No-op everywhere else.
+  local conf="/etc/snapper/configs/home"
+  if [[ -f "$conf" ]]; then
     return 0
   fi
-  local conf="/etc/snapper/configs/root"
-  if ! snapper_ensure_config_with_workaround; then
+  if ! pacman -Q snapper &>/dev/null; then
+    return 1
+  fi
+  if [[ "$(findmnt -n -o FSTYPE /home 2>/dev/null || echo "")" != "btrfs" ]]; then
+    return 1
+  fi
+  if ! sudo btrfs subvolume show /home &>/dev/null; then
+    log_info "/home is not a separate btrfs subvolume — skipping home snapper config."
+    return 1
+  fi
+  log_info "No snapper config for /home — creating one..."
+  if sudo snapper -c home create-config /home >>"$INSTALL_LOG" 2>&1; then
     return 0
   fi
-  if [[ ! -f "$conf" ]]; then
+  log_warning "Initial home create-config failed, trying workaround..."
+  if mountpoint -q /home/.snapshots 2>/dev/null; then sudo umount /home/.snapshots 2>/dev/null || true; fi
+  sudo rm -rf /home/.snapshots 2>/dev/null || true
+  if sudo snapper -c home create-config /home >>"$INSTALL_LOG" 2>&1; then
+    log_success "Snapper home config created after workaround"
+    sudo btrfs subvolume delete /home/.snapshots 2>/dev/null || true
+    sudo mkdir -p /home/.snapshots 2>/dev/null || true
+    sudo mount -a 2>/dev/null || true
     return 0
   fi
-  # Idempotent _snapper_set (handles #KEY, missing, different quotes)
+  log_warning "Could not create snapper config for /home"
+  return 1
+}
+
+_snapper_apply_profile_to_conf() {
+  # Idempotent per-file setter (handles #KEY, missing, different quotes).
+  # Per-file fast guard: matching files are skipped so re-runs stay cheap.
+  local conf="$1"
+  if sudo grep -qE '^NUMBER_LIMIT="8"' "$conf" 2>/dev/null \
+    && sudo grep -qE '^TIMELINE_LIMIT_DAILY="1"' "$conf" 2>/dev/null \
+    && sudo grep -qE '^TIMELINE_CREATE="yes"' "$conf" 2>/dev/null; then
+    log_info "Snapper profile already applied to $(basename "$conf")"
+    return 0
+  fi
   local key val
   for kv in 'TIMELINE_MIN_AGE:1800' 'TIMELINE_LIMIT_HOURLY:0' 'TIMELINE_LIMIT_DAILY:1' 'TIMELINE_LIMIT_WEEKLY:0' 'TIMELINE_LIMIT_MONTHLY:0' 'TIMELINE_LIMIT_QUARTERLY:0' 'TIMELINE_LIMIT_YEARLY:0' 'NUMBER_MIN_AGE:1800' 'NUMBER_LIMIT:8' 'NUMBER_LIMIT_IMPORTANT:8' 'TIMELINE_CREATE:yes' 'TIMELINE_CLEANUP:yes' 'NUMBER_CLEANUP:yes' 'EMPTY_PRE_POST_CLEANUP:yes' 'BACKGROUND_COMPARISON:yes'; do
     key=${kv%%:*}; val=${kv#*:}
@@ -359,8 +382,33 @@ snapper_apply_btrfs_assistant_profile() {
       echo "${key}=\"${val}\"" | sudo tee -a "$conf" >/dev/null
     fi
   done
+}
+
+snapper_apply_btrfs_assistant_profile() {
+  # Applies the retention profile to EVERY snapper config (root, home, ...),
+  # not just root — Btrfs Assistant shows one tab per config and each needs
+  # the same values. Files + timers are persistent (survive reboot, no
+  # daemon needed to keep them).
+  if [[ "$SNAPPER_BTRFS_PROFILE_DONE" == true ]]; then
+    return 0
+  fi
+  if ! snapper_ensure_config_with_workaround; then
+    return 0
+  fi
+  snapper_ensure_home_config || true
+  local applied=0 conf
+  for conf in /etc/snapper/configs/*; do
+    [[ -f "$conf" ]] || continue
+    if _snapper_apply_profile_to_conf "$conf"; then
+      applied=$((applied + 1))
+    else
+      log_warning "Failed to apply snapper profile to $conf"
+    fi
+  done
   SNAPPER_BTRFS_PROFILE_DONE=true
-  log_success "Btrfs-Assistant profile applied: Daily 1, Boot 1, Hourly/Weekly/Monthly/Quarterly/Yearly 0, Number 8 (from 50) - single source"
+  if [[ "$applied" -gt 0 ]]; then
+    log_success "Btrfs-Assistant profile applied to $applied config(s): Daily 1, Boot 1, Hourly/Weekly/Monthly/Quarterly/Yearly 0, Number 8 (from 50) - single source"
+  fi
 }
 
 snapper_ensure_aux_packages() {
@@ -380,6 +428,118 @@ snapper_ensure_aux_packages() {
     log_info "Snapper detected — ensuring aux for all bootloaders: ${pkgs[*]}"
     install_packages_quietly "${pkgs[@]}" 2>>"$INSTALL_LOG" || log_warning "Failed snapper aux: ${pkgs[*]}"
   fi
+}
+
+# Timeshift companion hook. Installs timeshift-autosnap (pacman hook that
+# auto-snapshots before every transaction) when timeshift itself is present.
+# Sets TIMESHIFT_AUTOSNAP_TIMER to the timer unit name when upstream ships
+# one, empty otherwise (hook-only needs no enabling). No-op when timeshift
+# is absent. Never fails the install.
+TIMESHIFT_AUTOSNAP_TIMER=""
+timeshift_ensure_autosnap() {
+  TIMESHIFT_AUTOSNAP_TIMER=""
+  if ! pacman -Q timeshift &>/dev/null; then
+    return 0
+  fi
+  log_success "Timeshift detected - ensuring timeshift-autosnap..."
+  if ! command -v yay &>/dev/null; then
+    log_warning "yay not available - cannot install timeshift-autosnap"
+    return 0
+  fi
+  if ! pacman -Q timeshift-autosnap &>/dev/null; then
+    if yay -S --noconfirm --needed timeshift-autosnap >>"$INSTALL_LOG" 2>&1; then
+      log_success "timeshift-autosnap installed successfully"
+    else
+      log_warning "Failed to install timeshift-autosnap from AUR"
+      return 0
+    fi
+  else
+    log_info "timeshift-autosnap already installed"
+  fi
+  sudo systemctl daemon-reload 2>/dev/null || true
+  # Upstream ships a hook, not necessarily a timer unit — only report it
+  # when the unit actually exists.
+  if systemctl list-unit-files "timeshift-autosnap.timer" 2>/dev/null | grep -q "timeshift-autosnap.timer"; then
+    TIMESHIFT_AUTOSNAP_TIMER="timeshift-autosnap.timer"
+    log_success "timeshift-autosnap.timer available for automatic snapshots."
+  else
+    log_info "No timeshift-autosnap.timer unit shipped — the pacman hook needs no enabling."
+  fi
+}
+
+# Shared snapper timers (ArchWiki: timeline + cleanup + boot). Idempotent —
+# safe to call from system_services and bootloader_config. No-op when
+# snapper is absent or root is not btrfs.
+snapper_enable_timers() {
+  if ! pacman -Q snapper &>/dev/null; then
+    return 0
+  fi
+  if ! is_btrfs_system 2>/dev/null; then
+    return 0
+  fi
+  snapper_apply_btrfs_assistant_profile
+  sudo systemctl daemon-reload 2>/dev/null || true
+  if sudo systemctl enable --now snapper-timeline.timer >>"$INSTALL_LOG" 2>&1; then
+    log_success "Timeline snapshots enabled (snapper-timeline.timer hourly)"
+  else
+    log_warning "Failed to enable snapper-timeline.timer"
+  fi
+  if sudo systemctl enable --now snapper-cleanup.timer >>"$INSTALL_LOG" 2>&1; then
+    log_success "Cleanup enabled (snapper-cleanup.timer daily) - enforces NUMBER_LIMIT 8"
+  else
+    log_warning "Failed to enable snapper-cleanup.timer"
+  fi
+  if sudo systemctl enable --now snapper-boot.timer >>"$INSTALL_LOG" 2>&1; then
+    log_success "Boot snapshot enabled (snapper-boot.timer - ArchWiki single type, Number 8)"
+  else
+    log_warning "Failed to enable snapper-boot.timer"
+    return 1
+  fi
+}
+
+# Unified snapshot dispatcher: configures whatever snapshot system is
+# already installed, skips cleanly when neither is present.
+# - snapper (+btrfs): aux packages (snap-pac, btrfs-assistant unless
+#   headless / with_gui=false), Btrfs-Assistant profile, timers, scrub.
+# - timeshift: timeshift-autosnap hook (+ timer when shipped).
+# Never installs snapper or timeshift themselves — those are archinstall /
+# user choices this step only complements. Safe to call twice (idempotent).
+setup_snapshot_stack() {
+  local with_gui="${1:-true}"
+  local has_snapper=false has_timeshift=false
+  pacman -Q snapper &>/dev/null && has_snapper=true
+  pacman -Q timeshift &>/dev/null && has_timeshift=true
+
+  if [[ "$has_snapper" == false && "$has_timeshift" == false ]]; then
+    log_info "Neither snapper nor timeshift detected — skipping snapshot configuration."
+    return 0
+  fi
+
+  if [[ "$has_snapper" == true ]]; then
+    if ! is_btrfs_system 2>/dev/null; then
+      log_info "Snapper detected but root is not btrfs — skipping snapper stack."
+    elif [[ "$with_gui" == true ]]; then
+      log_success "Snapper detected on btrfs - ensuring aux packages (GUI)..."
+      snapper_ensure_aux_packages
+      snapper_enable_timers || true
+    else
+      log_success "Snapper detected on btrfs - installing snap-pac (headless)..."
+      if ! pacman -Q snap-pac &>/dev/null; then
+        install_packages_quietly snap-pac
+      else
+        log_info "snapper integration packages already installed"
+      fi
+      snapper_apply_btrfs_assistant_profile
+      snapper_enable_timers || true
+    fi
+  fi
+
+  if [[ "$has_timeshift" == true ]]; then
+    timeshift_ensure_autosnap || true
+  fi
+
+  # Monthly scrub for bit-rot detection — snapper stack only, never with timeshift
+  enable_btrfs_scrub_timer || true
 }
 
 enable_btrfs_scrub_timer() {

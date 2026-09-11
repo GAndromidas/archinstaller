@@ -20,6 +20,17 @@ yay_programs=()              # Holds final list of AUR packages to install
 flatpak_programs=()          # Holds final list of flatpak packages to install
 specific_install_programs=() # DE-specific installs
 specific_remove_programs=() # DE-specific removals
+# YAML-loaded lists (populated by load_package_lists_from_yaml via namerefs;
+# initialized here so shellcheck SC2154 knows they are assigned).
+pacman_descriptions=()
+essential_programs_default=(); essential_descriptions_default=()
+essential_programs_minimal=(); essential_descriptions_minimal=()
+essential_descriptions_server=()
+yay_programs_default=(); yay_descriptions_default=()
+yay_programs_minimal=(); yay_descriptions_minimal=()
+kde_install_programs=(); kde_remove_programs=()
+gnome_install_programs=(); gnome_remove_programs=()
+cosmic_install_programs=(); cosmic_remove_programs=()
 
 # ===== Local Helper Functions =====
 # Using centralized functions from common.sh to avoid duplication
@@ -88,12 +99,26 @@ determine_package_lists() {
 	esac
 }
 
-# Normalize XDG_CURRENT_DESKTOP into one of: kde, gnome, cosmic, "" (unknown).
+# Normalize desktop into one of: kde, gnome, cosmic, "" (unknown).
+# Detection order: installed packages first (works from TTY, where
+# XDG_CURRENT_DESKTOP is empty), then live env var as fallback.
 # Substring match (not exact) because real-world values vary — e.g. some
 # session managers report compound values. Shared by handle_de_packages and
 # handle_flatpak_packages so the detection rule lives in exactly one place.
 detect_normalized_de() {
 	local raw="${XDG_CURRENT_DESKTOP:-}"
+	# Installed-package detection works even when run from a TTY.
+	if command -v pacman &>/dev/null; then
+		if pacman -Q plasma-desktop &>/dev/null 2>&1 || pacman -Q plasma-workspace &>/dev/null 2>&1; then
+			echo "kde"; return 0
+		fi
+		if pacman -Q gnome-shell &>/dev/null 2>&1 || pacman -Q gnome-session &>/dev/null 2>&1; then
+			echo "gnome"; return 0
+		fi
+		if pacman -Q cosmic-session &>/dev/null 2>&1 || pacman -Q cosmic-comp &>/dev/null 2>&1; then
+			echo "cosmic"; return 0
+		fi
+	fi
 	local lower
 	lower=$(echo "$raw" | tr '[:upper:]' '[:lower:]')
 	case "$lower" in

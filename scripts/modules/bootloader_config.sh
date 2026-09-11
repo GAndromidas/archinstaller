@@ -383,9 +383,11 @@ configure_uki_cmdline() {
   esp_mount=$(findmnt -n -o TARGET /boot/efi 2>/dev/null || findmnt -n -o TARGET /boot 2>/dev/null || echo "/boot")
   local uki_dir="${esp_mount}/EFI/Linux"
   if [[ ! -d "$uki_dir" ]]; then
-    sudo mkdir -p "$uki_dir" 2>/dev/null && \
-      log_info "Created UKI output directory: $uki_dir" || \
+    if sudo mkdir -p "$uki_dir" 2>/dev/null; then
+      log_info "Created UKI output directory: $uki_dir"
+    else
       log_warning "Failed to create $uki_dir"
+    fi
   fi
 
   # Defer the (slow) full rebuild: collected once at end of step 6.
@@ -980,6 +982,8 @@ set_loader_config() {
     # Matches: timeout 1, #timeout 1, #console-mode keep, console-mode max
     if echo "$current_content" | grep -qE "^[#]*${key}[[:space:]]"; then
         # Replace existing or uncomment and replace (handles #console-mode keep -> console-mode max)
+        # shellcheck disable=SC2001
+        # sed needed here: pattern uses regex character classes + variable key
         new_content=$(echo "$current_content" | sed "s/^[#]*${key}[[:space:]].*/${key} ${value}/")
     else
         # Append new key-value pair if not found
@@ -1072,6 +1076,33 @@ _limine_append_snapshots_marker() {
   printf '\n  //Snapshots\n' | sudo tee -a "$1" >/dev/null
 }
 
+# Remove helper executed under with_limine_lock (plain function, same shell).
+_limine_remove_file() {
+  sudo rm -f "$1"
+}
+
+# Delete one top-level /<name> entry block (through the next top-level entry
+# or EOF). Top-level headers start at column 0 with a single slash; //
+# children belong to the block. Returns 0 when removed, 2 when absent,
+# 1 on error — so callers can log accurately.
+limine_remove_top_entry() {
+  local conf="$1" name="$2"
+  sudo grep -qE "^/${name}[[:space:]]*$" "$conf" 2>/dev/null || return 2
+  local tmp
+  tmp=$(mktemp /tmp/limine_rm_entry.XXXXXX) || return 1
+  if sudo cat "$conf" 2>/dev/null | awk -v name="$name" '
+      /^\// && $0 !~ /^\/\// { cur = substr($0, 2); sub(/[ \t\r]+$/, "", cur); in_target = (cur == name) }
+      !in_target { print }
+    ' > "$tmp" && [[ -s "$tmp" ]]; then
+    with_limine_lock _limine_write_file "$tmp" "$conf"
+    local rc=$?
+    rm -f "$tmp"
+    return $rc
+  fi
+  rm -f "$tmp"
+  return 1
+}
+
 # patch_limine_cmdlines <conf> <unified> — merge unified params into BASE
 # entry cmdline: lines. Snapshot entries (rootflags pointing into
 # /@/.snapshots) belong to limine-snapper-sync: it derives them from the base
@@ -1083,8 +1114,10 @@ _limine_append_snapshots_marker() {
 # is never an option.
 patch_limine_cmdlines() {
   local conf="$1" unified="$2"
+  # Both cmdline key spellings: archinstall writes `cmdline:`, entry-tool
+  # writes `kernel_cmdline:`. Values merge identically either way.
   local entry_lns=()
-  mapfile -t entry_lns < <(sudo grep -nE '^[[:space:]]*cmdline:' "$conf" 2>/dev/null | cut -d: -f1)
+  mapfile -t entry_lns < <(sudo grep -nE '^[[:space:]]*(kernel_)?cmdline:' "$conf" 2>/dev/null | cut -d: -f1)
   if [ ${#entry_lns[@]} -eq 0 ]; then
     return 0
   fi
@@ -1092,7 +1125,7 @@ patch_limine_cmdlines() {
   local patched=0 skipped=0 snap_skipped=0
   local ln existing merged indent
   for ln in "${entry_lns[@]}"; do
-    existing=$(sudo sed -n "${ln}p" "$conf" 2>/dev/null | sed -E 's/^[[:space:]]*cmdline:[[:space:]]*//')
+    existing=$(sudo sed -n "${ln}p" "$conf" 2>/dev/null | sed -E 's/^[[:space:]]*(kernel_)?cmdline:[[:space:]]*//')
     if echo "$existing" | grep -q '/\.snapshots'; then
       log_to_file "Limine $conf line $ln is a snapshot entry — left for limine-snapper-sync."
       ((snap_skipped++))
@@ -1104,7 +1137,7 @@ patch_limine_cmdlines() {
       ((skipped++))
       continue
     fi
-    indent=$(sudo sed -n "${ln}p" "$conf" 2>/dev/null | sed -E 's/^([[:space:]]*cmdline:).*/\1/')
+    indent=$(sudo sed -n "${ln}p" "$conf" 2>/dev/null | sed -E 's/^([[:space:]]*(kernel_)?cmdline:).*/\1/')
     with_limine_lock _limine_replace_line "$conf" "$ln" "$indent $merged"
     log_to_file "Limine $conf line $ln cmdline: $merged"
     ((patched++))
@@ -1350,6 +1383,67 @@ install_limine_mkinitcpio_hook() {
   limine_install_aur_pkg "limine-mkinitcpio-hook" "$answer"
 }
 
+# NVRAM hygiene for the two-binary problem. limine-mkinitcpio-hook deploys
+# its own binary to ${ESP}/EFI/limine/limine_x64.efi and registers a fresh
+# NVRAM entry for it on install — usually first in BootOrder. That binary
+# has no limine.conf in its directory, so the next reboot lands on
+# "[config file not found]" with an empty menu even though the real,
+# fully-configured install sits one directory over (observed on a real KVM
+# reboot, not theorized). Our own binaries are BOOTX64.EFI et al., so the
+# exact loader filename below can never match them.
+limine_prune_hook_entries() {
+  local verbose_list
+  verbose_list=$(sudo efibootmgr -v 2>/dev/null || true)
+  if [[ -z "$verbose_list" ]]; then
+    log_warning "efibootmgr unavailable — skipping NVRAM hygiene (if boot order looks wrong, pick the ${limine_dir:-Limine} entry manually in firmware)."
+    return 0
+  fi
+  local line num pruned=0
+  while IFS= read -r line; do
+    [[ "$line" =~ ^Boot([0-9A-Fa-f]{4}) ]] || continue
+    num="${BASH_REMATCH[1]}"
+    echo "$line" | grep -qiE '\\EFI\\limine\\limine_x64\.efi' || continue
+    if sudo efibootmgr -b "$num" -B >>"$INSTALL_LOG" 2>&1; then
+      log_success "Removed hook-binary NVRAM entry Boot$num (\\EFI\\limine\\limine_x64.efi has no config — booting it shows '[config file not found]')."
+      pruned=$((pruned + 1))
+    else
+      log_warning "Could not remove NVRAM entry Boot$num."
+    fi
+  done <<< "$verbose_list"
+  if [[ "$pruned" -eq 0 ]]; then
+    log_info "No hook-binary NVRAM entries found."
+  fi
+}
+
+# Move an existing boot entry first in BootOrder, preserving the relative
+# order of everything else. Never deletes anything.
+limine_order_entry_first() {
+  local want="$1"
+  local order
+  order=$(sudo efibootmgr 2>/dev/null | grep -i '^BootOrder:' | cut -d: -f2 | tr -d ' ' || true)
+  if [[ -z "$order" ]]; then
+    log_warning "Could not read BootOrder — skipping reorder."
+    return 0
+  fi
+  local want_up
+  want_up=$(echo "$want" | tr 'a-f' 'A-F')
+  local new_order="$want_up" seen=",$want_up," p p_up
+  local IFS=','
+  # shellcheck disable=SC2162
+  for p in $order; do
+    [[ -n "$p" ]] || continue
+    p_up=$(echo "$p" | tr 'a-f' 'A-F')
+    [[ "$seen" == *",$p_up,"* ]] && continue
+    seen+="$p_up,"
+    new_order="$new_order,$p_up"
+  done
+  if sudo efibootmgr -o "$new_order" >>"$INSTALL_LOG" 2>&1; then
+    log_success "BootOrder set to $new_order (configured Limine first)."
+  else
+    log_warning "Could not set BootOrder."
+  fi
+}
+
 # --- Limine + Snapper Configuration ---
 configure_limine_snapper() {
   step "Configuring Limine bootloader with Snapper support"
@@ -1462,8 +1556,10 @@ configure_limine_snapper() {
       log_warning "/.snapshots could not be mounted and 'snapper -c root list' failed. Check 'sudo btrfs subvolume list /' and /etc/fstab after reboot — snapshots won't work until this is resolved."
     fi
 
-    sudo systemctl enable --now snapper-timeline.timer 2>/dev/null || true
-    sudo systemctl enable --now snapper-cleanup.timer 2>/dev/null || true
+    # Shared snapper timers (timeline + cleanup + boot) + scrub.
+    # snapper_enable_timers is a no-op without snapper/btrfs; scrub skips
+    # when timeshift is present (competing stack).
+    snapper_enable_timers || true
     log_success "Snapper timers enabled."
     # Monthly scrub for bit-rot detection — snapper stack only, never with timeshift
     enable_btrfs_scrub_timer || true
@@ -1587,11 +1683,20 @@ configure_limine_snapper() {
 
   # Apply Limine theme for better looking boot menu - handles all locations including /boot/limine.conf (user's case)
   # Robust for 700 /boot via privileged write + FAT32 mutex, idempotent, handles auto-generated limine-entry-tool
+  # Deliberately NOT theming /boot/limine.conf or /boot/limine/limine.conf
+  # anymore — Limine's own mkinitcpio hook explicitly calls /boot/limine.conf
+  # "the default" that it IGNORES in favor of the real ESP-located config
+  # (confirmed via a real install log: the hook auto-creates this file on
+  # every kernel rebuild and warns "Detected conflicting config" every
+  # single time). Theming a file Limine's own hook says it ignores just
+  # keeps it looking legitimate instead of helping the user notice and
+  # remove it — see the cleanup step near the end of this function instead,
+  # which removes it once the real config is confirmed configured.
   {
     local _theme_targets=()
     [[ -n "${limine_conf:-}" ]] && _theme_targets+=("$limine_conf")
     [[ -n "${limine_dir:-}" ]] && _theme_targets+=("$limine_dir/limine.conf")
-    _theme_targets+=("/boot/limine.conf" "/boot/limine/limine.conf" "$esp_mount/limine.conf" "$esp_mount/EFI/limine/limine.conf" "$esp_mount/EFI/BOOT/limine.conf" "/boot/EFI/limine/limine.conf")
+    _theme_targets+=("$esp_mount/EFI/limine/limine.conf" "$esp_mount/EFI/BOOT/limine.conf" "/boot/EFI/limine/limine.conf")
     local _seen=" "
     local _lc
     for _lc in "${_theme_targets[@]}"; do
@@ -1605,11 +1710,25 @@ configure_limine_snapper() {
     unset _lc _theme_targets _seen
   }
 
-  # Ensure an NVRAM entry exists pointing at the REAL install dir (firmware
-  # entries get wiped by updates/resets; archinstall skips this for removable
-  # installs, so re-check every run). Loader path is ESP-relative.
-  if sudo efibootmgr 2>/dev/null | grep -qi limine; then
-    log_info "Limine EFI boot entry already exists."
+  # NVRAM hygiene for the two-binary problem (see limine_prune_hook_entries):
+  # the hook registers its config-less binary first in BootOrder on install,
+  # so prune those entries, match OURS by loader path (bare "Limine" labels
+  # collide between archinstall's entry and the hook's), and order ours first.
+  limine_prune_hook_entries || true
+
+  # ESP-relative loader path for OUR binary, e.g. /boot/EFI/BOOT -> \EFI\BOOT\BOOTX64.EFI
+  local efi_bin="BOOTX64.EFI"
+  if ! sudo test -f "$limine_dir/$efi_bin" 2>/dev/null; then
+    efi_bin=$(sudo ls "$limine_dir" 2>/dev/null | grep -im1 '\.efi$' || echo "BOOTX64.EFI")
+  fi
+  local loader_path="${limine_dir#"$esp_mount"}/$efi_bin"
+  loader_path=${loader_path//\//\\}
+
+  local limine_bootnum
+  limine_bootnum=$(sudo efibootmgr -v 2>/dev/null | grep -iF "$loader_path" | grep -oE '^Boot[0-9A-Fa-f]{4}' | head -1 | sed 's/^Boot//' || true)
+
+  if [[ -n "$limine_bootnum" ]]; then
+    log_info "Limine EFI boot entry already exists (Boot$limine_bootnum → $loader_path)."
   else
     local esp_dev esp_disk esp_part
     esp_dev=$(findmnt -n -o SOURCE "$esp_mount" 2>/dev/null || true)
@@ -1628,11 +1747,6 @@ configure_limine_snapper() {
     fi
 
     if [[ -n "${esp_disk:-}" ]]; then
-      # ESP-relative loader path, e.g. /boot/EFI/arch-limine -> \EFI\arch-limine\BOOTX64.EFI
-      local efi_bin="BOOTX64.EFI"
-      sudo test -f "$limine_dir/$efi_bin" 2>/dev/null || efi_bin=$(sudo ls "$limine_dir" 2>/dev/null | grep -im1 '\.efi$' || echo "BOOTX64.EFI")
-      local loader_path="${limine_dir#"$esp_mount"}/$efi_bin"
-      loader_path=${loader_path//\//\\}
       log_info "Creating EFI NVRAM entry ($loader_path)..."
       if sudo efibootmgr --create \
           --disk "$esp_disk" \
@@ -1641,10 +1755,17 @@ configure_limine_snapper() {
           --loader "$loader_path" \
           --unicode >>"$INSTALL_LOG" 2>&1; then
         log_success "EFI boot entry created."
+        limine_bootnum=$(sudo efibootmgr -v 2>/dev/null | grep -iF "$loader_path" | grep -oE '^Boot[0-9A-Fa-f]{4}' | head -1 | sed 's/^Boot//' || true)
       else
         log_warning "efibootmgr failed — you may need to create the Limine entry manually."
       fi
     fi
+  fi
+
+  # Boot through the configured install even after NVRAM resets or future
+  # hook reinstalls re-register their binary: ours first, rest untouched.
+  if [[ -n "$limine_bootnum" ]]; then
+    limine_order_entry_first "$limine_bootnum" || true
   fi
 
   # Configure limine-snapper-sync settings (btrfs only)
@@ -1694,6 +1815,9 @@ configure_limine_snapper() {
     limine_set_default_key "COMMANDS_BEFORE_SAVE" "\"\""
     limine_set_default_key "COMMANDS_AFTER_SAVE" "\"\""
     limine_set_default_key "SPACE_NUMBER" "5"
+    # No "EFI Fallback" menu entry: it chainloads the same loader the
+    # firmware/NVRAM already resolves, so it's redundant menu clutter.
+    limine_set_default_key "ENABLE_LIMINE_FALLBACK" "no"
     log_success "limine-snapper-sync configured at $limine_defaults"
   fi
 
@@ -1746,6 +1870,29 @@ configure_limine_snapper() {
     fi
   fi
 
+  # Drop the redundant "EFI Fallback" menu entry (chainloads the same loader
+  # firmware/NVRAM already resolves). Runs right after the regen above so a
+  # freshly generated entry is pruned in the same run; ENABLE_LIMINE_FALLBACK
+  # (set with the other defaults) stops it coming back. Skipped under Secure
+  # Boot config enrollment like all other limine.conf edits.
+  if [[ "$skip_conf_edit" != true ]]; then
+    local _lfc _seen_lfc=" " _rc
+    for _lfc in /boot/limine.conf "${limine_conf:-}"; do
+      [[ -n "$_lfc" ]] || continue
+      [[ "$_seen_lfc" == *" $_lfc "* ]] && continue
+      _seen_lfc+=" $_lfc "
+      sudo test -f "$_lfc" 2>/dev/null || continue
+      limine_remove_top_entry "$_lfc" "EFI Fallback"
+      _rc=$?
+      if [[ "$_rc" -eq 0 ]]; then
+        log_success "Removed redundant EFI Fallback entry from $_lfc."
+      elif [[ "$_rc" -ne 2 ]]; then
+        log_warning "Could not prune EFI Fallback entry in $_lfc."
+      fi
+    done
+    unset _lfc _seen_lfc _rc
+  fi
+
   # Patch EVERY cmdline: line in limine.conf (base + snapshot entries), even
   # after limine-update just regenerated them: tools write entries from their
   # own sources and can drop root=, which boots into "Failed to mount '' on
@@ -1753,7 +1900,7 @@ configure_limine_snapper() {
   if [[ "$skip_conf_edit" == true ]]; then
     : # warned above (Secure Boot enrolled config)
   elif sudo test -f "$limine_conf" 2>/dev/null; then
-    if sudo grep -qE '^[[:space:]]*cmdline:' "$limine_conf" 2>/dev/null; then
+    if sudo grep -qE '^[[:space:]]*(kernel_)?cmdline:' "$limine_conf" 2>/dev/null; then
       patch_limine_cmdlines "$limine_conf" "$unified_cmdline"
     else
       log_warning "No cmdline entries in $limine_conf — leaving it untouched."
@@ -1762,10 +1909,68 @@ configure_limine_snapper() {
     log_warning "Limine config not found at $limine_conf — skipping kernel parameter update."
   fi
 
+  # Single-config migration. limine-entry-tool and
+  # limine-snapper-sync manage ONLY $ESP/limine.conf (/boot/limine.conf here)
+  # and never touch deep configs — while a deep archinstall-format config
+  # beside it either shadows the real menu or, once a bare //Snapshots
+  # marker lands on its flat protocol-bearing entry, turns that entry into
+  # an unbootable directory node ("PANIC: Boot protocol not specified",
+  # observed on a real reboot). So when the entry-tool file is healthy
+  # (has protocol-bearing leaves), back up the deep configs and remove them;
+  # everything downstream (marker, sync, verify, theme) then targets the
+  # single config via $limine_conf. On ANY doubt, abort and keep the old
+  # deep-config behavior rather than risk a config-less boot.
+  if [[ "$esp_mount" == "/boot" && -n "${limine_conf:-}" && "$limine_conf" != "/boot/limine.conf" ]] \
+      && sudo test -f /boot/limine.conf 2>/dev/null \
+      && sudo grep -qE '^[[:space:]]*protocol:' /boot/limine.conf 2>/dev/null; then
+    local _seen=" " _migrated_any=false deep bts
+    bts="/var/tmp/archinstaller_backups"
+    sudo mkdir -p "$bts" 2>/dev/null || true
+    for deep in "$limine_conf" "$esp_mount/EFI/BOOT/limine.conf" "$esp_mount/EFI/arch-limine/limine.conf" "$esp_mount/EFI/limine/limine.conf"; do
+      [[ -n "$deep" && "$deep" != "/boot/limine.conf" ]] || continue
+      [[ "$_seen" == *" $deep "* ]] && continue
+      _seen+=" $deep "
+      sudo test -f "$deep" 2>/dev/null || continue
+      bts_name="$(basename "$(dirname "$deep")")_limine.conf.backup.$(date +%Y%m%d_%H%M%S)"
+      sudo cp "$deep" "$bts/$bts_name" 2>/dev/null || true
+      sudo cp "$deep" "$deep.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
+      if with_limine_lock _limine_remove_file "$deep"; then
+        log_success "Removed shadowing deep config $deep (backed up to $bts/$bts_name)."
+        _migrated_any=true
+      else
+        log_warning "Could not remove $deep — leaving it (may shadow the menu)."
+      fi
+    done
+    unset deep bts bts_name
+    if [[ "$_migrated_any" == true ]]; then
+      limine_conf="/boot/limine.conf"
+      log_success "Limine now uses the single entry-tool config /boot/limine.conf."
+    else
+      log_warning "Deep-config migration skipped (nothing removed) — keeping $limine_conf."
+    fi
+    unset _seen _migrated_any
+  else
+    log_info "Skipping single-config migration (separate ESP or /boot/limine.conf not entry-tool-healthy) — keeping ${limine_conf:-unknown}."
+  fi
+
+  # Post-migration the single config uses entry-tool `kernel_cmdline:` keys
+  # (patch_limine_cmdlines handles both spellings). Belt and suspenders on
+  # top of /etc/kernel/cmdline, which limine-update already consumed.
+  if [[ "${limine_conf:-}" == "/boot/limine.conf" && "$skip_conf_edit" != true ]]; then
+    patch_limine_cmdlines "$limine_conf" "$unified_cmdline"
+  fi
+
   if [[ "$want_snapper" == true ]]; then
-    if sudo test -f "$limine_conf" 2>/dev/null && ! sudo grep -q 'Snapshots' "$limine_conf" 2>/dev/null; then
+    # The marker is only safe on entry-tool-style files (existing //
+    # children): on a flat archinstall entry it would convert the bootable
+    # entry itself into an empty directory node. Sync only manages the
+    # entry-tool file anyway, so skipping the marker elsewhere loses nothing.
+    if sudo test -f "$limine_conf" 2>/dev/null && ! sudo grep -q 'Snapshots' "$limine_conf" 2>/dev/null \
+        && sudo grep -qE '^[[:space:]]*//' "$limine_conf" 2>/dev/null; then
       with_limine_lock _limine_append_snapshots_marker "$limine_conf"
       log_success "Added //Snapshots marker to $limine_conf."
+    elif sudo test -f "$limine_conf" 2>/dev/null && ! sudo grep -q 'Snapshots' "$limine_conf" 2>/dev/null; then
+      log_info "Skipping //Snapshots marker for $limine_conf (flat entry format — the snapshot boot menu needs entry-tool //Kernel leaves)."
     fi
 
     if command -v limine-snapper-sync &>/dev/null; then
@@ -1784,15 +1989,36 @@ configure_limine_snapper() {
   fi
 
   # Final verification AFTER the sync above: every cmdline must name a root
-  # device. Anything still rootless is NOT safe to boot.
+  # device. Anything still rootless is NOT safe to boot. Both key spellings
+  # (archinstall `cmdline:`, entry-tool `kernel_cmdline:`) are checked.
   if sudo test -f "$limine_conf" 2>/dev/null; then
     local bad_lines
-    bad_lines=$(sudo grep -E '^[[:space:]]*cmdline:' "$limine_conf" 2>/dev/null | grep -vE 'root=[^ ]+' || true)
+    bad_lines=$(sudo grep -E '^[[:space:]]*(kernel_)?cmdline:' "$limine_conf" 2>/dev/null | grep -vE 'root=[^ ]+' || true)
     if [[ -n "$bad_lines" ]]; then
       log_error "Rootless cmdline lines remain in $limine_conf — DO NOT boot these entries:"
       echo "$bad_lines" | while IFS= read -r bl; do log_error "  $bl"; done
     else
       log_success "All Limine cmdline entries name a root device."
+    fi
+    # A menu with no protocol-bearing leaf panics at boot time with "Boot
+    # protocol not specified for this entry" — fail loudly here instead.
+    if ! sudo grep -qE '^[[:space:]]*protocol:' "$limine_conf" 2>/dev/null; then
+      log_error "No protocol: entries in $limine_conf — the menu would show but nothing in it can boot."
+    else
+      log_success "Bootable (protocol-bearing) entries present in $limine_conf."
+    fi
+  fi
+
+  # Same check for a separate /boot/limine.conf (abort path: entry-tool's own
+  # file beside a deep config; a rootless entry there breaks that menu only).
+  if [[ "${limine_conf:-}" != "/boot/limine.conf" ]] && sudo test -f /boot/limine.conf 2>/dev/null; then
+    local fallback_bad
+    fallback_bad=$(sudo grep -E '^[[:space:]]*(kernel_)?cmdline:' /boot/limine.conf 2>/dev/null | grep -vE 'root=[^ ]+' || true)
+    if [[ -n "$fallback_bad" ]]; then
+      log_warning "Rootless cmdline lines in /boot/limine.conf fallback:"
+      echo "$fallback_bad" | while IFS= read -r bl; do log_warning "  $bl"; done
+    else
+      log_success "Fallback /boot/limine.conf cmdlines all name a root device."
     fi
   fi
 
@@ -1881,8 +2107,16 @@ HELPER_EOF
   log_success "Helper script installed: /usr/local/bin/snap-manager"
   fi
 
+  # Post-migration there is only the single config; on the abort path both
+  # files remain (each readable by any Limine binary on the ESP).
+  if [[ "${limine_conf:-}" == "/boot/limine.conf" ]]; then
+    log_info "Single Limine config in effect: /boot/limine.conf (deep backups in /var/tmp/archinstaller_backups)."
+  elif sudo test -f /boot/limine.conf 2>/dev/null; then
+    log_info "Two Limine configs remain ($limine_conf + /boot/limine.conf) — either boots."
+  fi
+
   # Summary (no reboot here — the main installer offers one reboot at the end)
-  log_success "Limine setup complete: $esp_mount/limine.conf"
+  log_success "Limine setup complete: ${limine_conf:-$esp_mount/limine.conf}"
   if [[ "$want_snapper" == true ]]; then
     log_info "Snapshots created by snap-pac will appear in the Limine menu after reboot."
     log_info "Useful: snap-manager list | snap-manager create 'desc' | snap-manager sync"
@@ -1958,7 +2192,14 @@ if [[ "$NEEDS_INITRAMFS_REBUILD" == true ]]; then
     else
       log_warning "Initramfs regeneration had issues — check mkinitcpio presets"
     fi
+  elif command -v dracut &>/dev/null && [[ -d /etc/dracut.conf.d || -f /etc/dracut.conf ]]; then
+    ui_info "Regenerating initramfs with dracut..."
+    if sudo dracut --regenerate-all --force >>"$INSTALL_LOG" 2>&1; then
+      log_success "Initramfs regenerated with dracut"
+    else
+      log_warning "Dracut regeneration had issues — check dracut configuration"
+    fi
   else
-    log_info "Initramfs rebuild requested but mkinitcpio not in use — skipping"
+    log_info "Initramfs rebuild requested but neither mkinitcpio nor dracut in use — skipping"
   fi
 fi

@@ -165,13 +165,21 @@ set_sudo_pwfeedback() {
 
 install_cpu_microcode() {
   step "Detecting CPU and installing appropriate microcode"
+  # archinstall already installs the correct microcode at install time
+  # (Installer._get_microcode) and deliberately installs NONE on VMs — so
+  # this is a verify-only ensure, never a reinstall. Skip fast when the
+  # package is already present, and never install ucode inside a VM guest.
+  if is_vm 2>/dev/null; then
+    log_info "VM guest detected — archinstall installs no microcode on VMs, skipping."
+    return 0
+  fi
   local pkg=""
 
   if grep -q "Intel" /proc/cpuinfo; then
-    log_info "Intel CPU detected - installing intel-ucode"
+    log_info "Intel CPU detected - ensuring intel-ucode (usually already installed by archinstall)"
     pkg="intel-ucode"
   elif grep -q "AMD" /proc/cpuinfo; then
-    log_info "AMD CPU detected - installing amd-ucode"
+    log_info "AMD CPU detected - ensuring amd-ucode (usually already installed by archinstall)"
     pkg="amd-ucode"
   else
     log_warning "Unable to determine CPU type. No microcode package will be installed."
@@ -179,7 +187,7 @@ install_cpu_microcode() {
 
   if [ -n "$pkg" ]; then
     if pacman -Q "$pkg" &>/dev/null; then
-      log_to_file "$pkg already installed"
+      log_info "$pkg already installed (provided by archinstall) — nothing to do"
     else
       if sudo pacman -S --noconfirm --needed "$pkg" >>"$INSTALL_LOG" 2>&1; then
         log_success "$pkg installed successfully"
@@ -239,25 +247,37 @@ install_kernel_headers_for_all() {
   echo -e "\\n${THEME_SUCCESS}Kernel headers installation completed${RESET}\\n"
 }
 
-# Fixed locale set: en_US (system default) + el_GR (Greece). No geo-IP
+# Fixed locale set: en_US (system default, already configured by archinstall
+# via set_locale) + el_GR (Greece, archinstaller's extra). No geo-IP
 # detection — external lookups are slow behind captive portals and
 # nondeterministic across runs.
 generate_locales() {
   step "Configuring system locales (en_US + el_GR)"
 
+  # archinstall already uncomments the chosen sys_lang (normally en_US),
+  # runs locale-gen and writes /etc/locale.conf — re-doing that is pure
+  # overhead (locale-gen is slow). Only touch a locale line when it is
+  # actually still commented, and only regenerate when something changed.
+  # el_GR is archinstaller's own extra on top of the archinstall default.
+  local changed=false
   local locale
   for locale in "en_US.UTF-8" "el_GR.UTF-8"; do
     if grep -q "^#${locale} UTF-8" /etc/locale.gen; then
       sudo sed -i "s/^#${locale} UTF-8/${locale} UTF-8/" /etc/locale.gen
       log_success "Enabled locale: $locale"
+      changed=true
     elif grep -q "^${locale} UTF-8" /etc/locale.gen; then
-      log_info "Locale already enabled: $locale"
+      log_info "Locale already enabled by archinstall: $locale — skipping"
     else
       log_warning "Locale not found in /etc/locale.gen: $locale"
     fi
   done
 
-  run_step "Regenerating locales" sudo locale-gen
+  if [[ "$changed" == true ]]; then
+    run_step "Regenerating locales" sudo locale-gen
+  else
+    log_info "Locales already configured — skipping locale-gen (no changes)"
+  fi
 }
 
 # Execute system preparation — optimized order:

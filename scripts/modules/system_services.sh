@@ -408,8 +408,14 @@ enable_services() {
 detect_and_install_gpu_drivers() {
   step "Detecting and installing graphics drivers"
 
-  # Install base Mesa first (needed for all GPU types)
-  install_packages_quietly mesa lib32-mesa
+  # archinstall's gfx-driver step already installs mesa plus the selected
+  # vendor stack — so every install below is gap-fill only: skip any stack
+  # whose packages are already present instead of reinstalling it.
+  if pacman -Q mesa &>/dev/null 2>&1 && pacman -Q lib32-mesa &>/dev/null 2>&1; then
+    log_info "Mesa base already installed by archinstall — skipping"
+  else
+    install_packages_quietly mesa lib32-mesa
+  fi
 
   # Capture lspci once and test each vendor independently so:
   #  - an AMD-only box NEVER installs NVIDIA drivers, and
@@ -432,28 +438,50 @@ detect_and_install_gpu_drivers() {
   echo "$lspci_out" | grep -Eiq 'qxl|virtio.*gpu|vmware svga|cirrus|bochs' && has_vm=true
 
   if [[ "$has_amd" == true ]]; then
-    echo -e "${THEME_TEXT}AMD GPU detected. Installing AMD drivers and Vulkan support...${RESET}"
-    install_packages_quietly xf86-video-amdgpu vulkan-radeon lib32-vulkan-radeon
-    log_success "AMD drivers and Vulkan support installed"
+    echo -e "${THEME_TEXT}AMD GPU detected. Ensuring AMD drivers and Vulkan support...${RESET}"
+    if pacman -Q xf86-video-amdgpu &>/dev/null 2>&1 && pacman -Q vulkan-radeon &>/dev/null 2>&1 && pacman -Q lib32-vulkan-radeon &>/dev/null 2>&1; then
+      log_info "AMD driver stack already installed by archinstall — skipping"
+    else
+      install_packages_quietly xf86-video-amdgpu vulkan-radeon lib32-vulkan-radeon
+      log_success "AMD drivers and Vulkan support installed"
+    fi
     log_info "AMD GPU will use AMDGPU driver after reboot"
   fi
 
   if [[ "$has_nvidia" == true ]]; then
-    echo -e "${THEME_TEXT}NVIDIA GPU detected. Installing NVIDIA drivers and Vulkan support...${RESET}"
+    echo -e "${THEME_TEXT}NVIDIA GPU detected. Ensuring NVIDIA drivers and Vulkan support...${RESET}"
     # Determine correct NVIDIA package set based on installed kernels
     local nvidia_packages=(nvidia-dkms nvidia-utils lib32-nvidia-utils vulkan-icd-loader lib32-vulkan-icd-loader)
     # Add nvidia-settings for GUI configuration
     nvidia_packages+=(nvidia-settings)
-    install_packages_quietly "${nvidia_packages[@]}"
-    log_success "NVIDIA drivers and Vulkan support installed"
+    local missing_nvidia=()
+    local npkg
+    for npkg in "${nvidia_packages[@]}"; do
+      # archinstall installs nvidia-open for newer GPUs instead of
+      # nvidia-dkms — either one satisfies the kernel-module slot.
+      if [[ "$npkg" == "nvidia-dkms" ]] && { pacman -Q nvidia-dkms &>/dev/null 2>&1 || pacman -Q nvidia-open &>/dev/null 2>&1; }; then
+        continue
+      fi
+      pacman -Q "$npkg" &>/dev/null 2>&1 || missing_nvidia+=("$npkg")
+    done
+    if [[ ${#missing_nvidia[@]} -eq 0 ]]; then
+      log_info "NVIDIA driver stack already installed by archinstall — skipping"
+    else
+      install_packages_quietly "${missing_nvidia[@]}"
+      log_success "NVIDIA drivers and Vulkan support installed"
+    fi
     log_info "NVIDIA GPU will use proprietary driver after reboot"
     ensure_nvidia_initramfs_modules
   fi
 
   if [[ "$has_intel" == true ]]; then
-    echo -e "${THEME_TEXT}Intel GPU detected. Installing Intel drivers and Vulkan support...${RESET}"
-    install_packages_quietly vulkan-intel lib32-vulkan-intel
-    log_success "Intel drivers and Vulkan support installed"
+    echo -e "${THEME_TEXT}Intel GPU detected. Ensuring Intel drivers and Vulkan support...${RESET}"
+    if pacman -Q vulkan-intel &>/dev/null 2>&1 && pacman -Q lib32-vulkan-intel &>/dev/null 2>&1; then
+      log_info "Intel driver stack already installed by archinstall — skipping"
+    else
+      install_packages_quietly vulkan-intel lib32-vulkan-intel
+      log_success "Intel drivers and Vulkan support installed"
+    fi
     log_info "Intel GPU will use i915 or xe driver after reboot"
   fi
 
@@ -469,15 +497,28 @@ detect_and_install_gpu_drivers() {
     # needed for it.
     echo -e "${THEME_TEXT}Virtualized GPU detected. Installing lightweight VM graphics drivers...${RESET}"
     local vm_packages=(xf86-video-qxl xf86-video-fbdev vulkan-swrast lib32-vulkan-swrast)
-    install_packages_quietly "${vm_packages[@]}"
-    log_success "VM graphics drivers installed"
+    local missing_vm=()
+    local vpkg
+    for vpkg in "${vm_packages[@]}"; do
+      pacman -Q "$vpkg" &>/dev/null 2>&1 || missing_vm+=("$vpkg")
+    done
+    if [[ ${#missing_vm[@]} -eq 0 ]]; then
+      log_info "VM graphics drivers already installed by archinstall — skipping"
+    else
+      install_packages_quietly "${missing_vm[@]}"
+      log_success "VM graphics drivers installed"
+    fi
     log_info "Virtualized/VM GPU detected — using guest drivers (QXL/VirtIO) plus the built-in modesetting driver for VMware/other virtual adapters"
   fi
 
   if [[ "$has_amd" == false && "$has_nvidia" == false && "$has_intel" == false && "$has_vm" == false ]]; then
     echo -e "${THEME_WARN}No recognizable GPU detected. Using basic Mesa drivers already installed.${RESET}"
     # In a VM without the above device IDs, still try the software rasterizer
-    install_packages_quietly vulkan-swrast lib32-vulkan-swrast
+    if pacman -Q vulkan-swrast &>/dev/null 2>&1 && pacman -Q lib32-vulkan-swrast &>/dev/null 2>&1; then
+      log_info "Software rasterizer already installed — skipping"
+    else
+      install_packages_quietly vulkan-swrast lib32-vulkan-swrast
+    fi
   fi
 
   # Verify GPU driver is loaded
@@ -1103,9 +1144,21 @@ detect_audio_system() {
 
   if systemctl --user is-active --quiet pipewire 2>/dev/null || systemctl is-active --quiet pipewire 2>/dev/null; then
     log_success "PipeWire audio system detected"
-    # Install PipeWire specific packages if not already installed
-    install_packages_quietly pipewire-alsa pipewire-jack pipewire-pulse
-    log_success "PipeWire compatibility packages installed"
+    # archinstall's audio_config already installs the full PipeWire set
+    # (pipewire pipewire-alsa pipewire-jack pipewire-pulse
+    # gst-plugin-pipewire libpulse wireplumber) — only fill gaps instead
+    # of reinstalling the whole stack.
+    local missing_audio=()
+    local apkg
+    for apkg in pipewire-alsa pipewire-jack pipewire-pulse; do
+      pacman -Q "$apkg" &>/dev/null 2>&1 || missing_audio+=("$apkg")
+    done
+    if [[ ${#missing_audio[@]} -eq 0 ]]; then
+      log_info "PipeWire compatibility packages already installed by archinstall — skipping"
+    else
+      install_packages_quietly "${missing_audio[@]}"
+      log_success "PipeWire compatibility packages installed (${missing_audio[*]})"
+    fi
   elif systemctl --user is-active --quiet pulseaudio 2>/dev/null || pgrep -x pulseaudio >/dev/null 2>&1; then
     log_success "PulseAudio audio system detected"
     # Ensure PulseAudio bluetooth support

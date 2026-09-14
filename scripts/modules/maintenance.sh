@@ -22,18 +22,23 @@ cleanup_and_optimize() {
 # Periodic TRIM via the native systemd timer (weekly, standard practice)
 # instead of a single one-shot fstrim right after install — but also runs
 # one immediate trim so the benefit isn't delayed a full week on first boot.
+# archinstall already enables fstrim.timer on non-btrfs installs
+# (enable_periodic_trim), so skip the re-enable when it is already active.
 enable_trim_timer() {
   if ! command_exists systemctl; then
     log_warning "systemctl unavailable; cannot enable fstrim.timer"
     return 1
   fi
-  if sudo systemctl enable --now fstrim.timer >>"$INSTALL_LOG" 2>&1; then
+  if systemctl is-enabled --quiet fstrim.timer 2>/dev/null; then
+    log_info "fstrim.timer already enabled by archinstall — skipping re-enable"
+  elif sudo systemctl enable --now fstrim.timer >>"$INSTALL_LOG" 2>&1; then
     log_success "Enabled systemd fstrim.timer for periodic TRIM"
-    sudo systemctl start fstrim.service >>"$INSTALL_LOG" 2>&1 || true
-    return 0
+  else
+    log_warning "Could not enable fstrim.timer; leaving existing TRIM configuration unchanged"
+    return 1
   fi
-  log_warning "Could not enable fstrim.timer; leaving existing TRIM configuration unchanged"
-  return 1
+  sudo systemctl start fstrim.service >>"$INSTALL_LOG" 2>&1 || true
+  return 0
 }
 
 setup_maintenance() {

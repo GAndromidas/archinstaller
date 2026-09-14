@@ -96,6 +96,7 @@ Gaming Mode is offered as an optional extra step during Standard/Minimal install
 -d, --dry-run   Preview what will be installed without making changes
 -a, --auto      Automatically select the recommended installation mode
 -y, --yes       Non-interactive mode: accept safe/default prompts automatically
+-c, --check     Read-only health check (runs scripts/verify.sh, changes nothing)
 ```
 
 `--yes` will never trigger the final automatic reboot — it always leaves that
@@ -212,6 +213,7 @@ After rebooting, run:
 ```bash
 bash scripts/verify.sh          # summary
 bash scripts/verify.sh --verbose  # with extra detail (cmdline, driver names, etc.)
+./install.sh --check            # same summary via the installer entry point (read-only)
 ```
 
 It's entirely read-only — no writes, safe to run any time, as many times as
@@ -263,6 +265,18 @@ bash tests/syntax.sh
 
 This runs `bash -n` across every script in the repository. It's intentionally
 simple (no external dependencies) so it can run anywhere, including CI.
+
+A broader harness is also included:
+
+```bash
+bash tests/integration.sh            # static checks (syntax, unit, shellcheck errors)
+bash tests/integration.sh --run-vm   # plus: boot the Arch ISO in QEMU with
+                                     # this project shared in (needs ARCH_ISO)
+```
+
+The VM phase is opt-in and skips cleanly when QEMU/OVMF/ISO are missing —
+it prepares the VM and prints the exact in-guest commands, since the
+in-guest archinstall run itself is interactive and version-sensitive.
 
 For deeper static analysis during development, [ShellCheck](https://www.shellcheck.net/)
 is recommended:

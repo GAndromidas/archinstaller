@@ -46,6 +46,21 @@ run_with_retry() {
 }
 fi
 
+# AUR helper selection: prefer yay (installed by step 3), fall back to paru
+# when the user already has it. Resolved lazily at call time so step
+# ordering and pre-installed helpers both work.
+if ! declare -f aur_helper >/dev/null 2>&1; then
+aur_helper() {
+    if command -v yay &>/dev/null; then
+        echo "yay"
+    elif command -v paru &>/dev/null; then
+        echo "paru"
+    else
+        echo "yay"
+    fi
+}
+fi
+
 if ! declare -f is_package_installed >/dev/null 2>&1; then
 is_package_installed() {
     local manager="$1"
@@ -91,9 +106,11 @@ if ! declare -f yay_install_single >/dev/null 2>&1; then
 yay_install_single() {
     local pkg="$1"
     local verbose="${2:-false}"
+    local helper
+    helper=$(aur_helper)
 
-    if ! command -v yay &>/dev/null; then
-        log_error "AUR helper (yay) not found"
+    if ! command -v "$helper" &>/dev/null; then
+        log_error "AUR helper not found (looked for yay, paru)"
         return 1
     fi
 
@@ -102,7 +119,7 @@ yay_install_single() {
     fi
 
     local output
-    if output=$(run_with_retry yay -S --noconfirm --needed "$pkg"); then
+    if output=$(run_with_retry "$helper" -S --noconfirm --needed "$pkg"); then
         [ "$verbose" = true ] && printf '%b' "${THEME_SUCCESS} ✓ Success${RESET}\n"
         INSTALLED_PACKAGES+=("$pkg")
         return 0
@@ -230,7 +247,7 @@ install_package_generic() {
                     error_output=$(run_with_retry sudo pacman -S --noconfirm --needed "$pkg") && install_result=0
                     ;;
                 aur)
-                    error_output=$(run_with_retry yay -S --noconfirm --needed "$pkg") && install_result=0
+                    error_output=$(run_with_retry "$(aur_helper)" -S --noconfirm --needed "$pkg") && install_result=0
                     ;;
                 flatpak)
                     error_output=$(sudo flatpak install -y --noninteractive flathub "$pkg" 2>&1) && install_result=0
@@ -310,6 +327,12 @@ fi
 if ! declare -f update_system >/dev/null 2>&1; then
 update_system() {
     ui_info "Updating system packages..."
+    # Refresh the keyring first: on stale ISOs/installs the bundled
+    # archlinux-keyring is older than the signatures on current packages,
+    # which fails the whole -Syu with signature errors. Cheap, idempotent.
+    if ! sudo pacman -Sy --noconfirm --needed archlinux-keyring >/dev/null 2>&1; then
+        log_warning "Could not refresh archlinux-keyring, continuing anyway"
+    fi
     if sudo pacman -Syu --noconfirm; then
         ui_success "System updated successfully"
     else

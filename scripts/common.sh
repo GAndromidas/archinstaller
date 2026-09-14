@@ -684,7 +684,24 @@ update_system_mirrors() {
   if ! command -v rate-mirrors >/dev/null 2>&1; then
     return 0
   fi
-  
+
+  # Rank once: re-ranking on every resume/re-run is slow and can swap a
+  # good mirror list for a worse one. Skip when the state file records a
+  # ranking less than 7 days old (and the mirrorlist is non-empty).
+  if [[ -s /etc/pacman.d/mirrorlist && -f "${STATE_FILE:-}" ]]; then
+    local last_ranked=""
+    last_ranked=$(grep -E '^MIRRORS_RANKED: ' "$STATE_FILE" 2>/dev/null | tail -1 | awk '{print $2}' || true)
+    if [[ "$last_ranked" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+      local now_sec=0 ranked_sec=0
+      now_sec=$(date +%s 2>/dev/null || echo 0)
+      ranked_sec=$(date -d "$last_ranked" +%s 2>/dev/null || echo 0)
+      if (( now_sec > ranked_sec )) && (( now_sec - ranked_sec < 7*24*3600 )); then
+        log_info "Mirrors ranked on $last_ranked (<7 days ago) — skipping re-rank"
+        return 0
+      fi
+    fi
+  fi
+
   local mirror_repo="arch"
   
   # Detect mirror repo silently
@@ -696,6 +713,11 @@ update_system_mirrors() {
   if sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist "$mirror_repo" >>"$INSTALL_LOG" 2>&1; then
     sudo pacman -Syy >>"$INSTALL_LOG" 2>&1
     ui_success "Mirrors updated successfully"
+    # Record the ranking so resume/re-runs skip it for 7 days. Never
+    # written in dry-run (preview runs must not mutate resume state).
+    if [[ "${DRY_RUN:-false}" != true ]] && declare -f state_write >/dev/null 2>&1; then
+      state_write "MIRRORS_RANKED: $(date +%F)"
+    fi
   else
     log_warning "Mirror update failed, continuing with existing mirrors"
   fi
@@ -1119,6 +1141,7 @@ prompt_reboot() {
     echo -e "  ${THEME_TEXT}•${RESET} Wake-on-LAN is enabled — this machine can now be woken remotely once shut down."
   fi
   echo -e "  ${THEME_TEXT}•${RESET} Full details of everything this run did: ${THEME_MUTED}${INSTALL_LOG:-/var/tmp/archinstaller.log}${RESET}"
+  echo -e "  ${THEME_TEXT}•${RESET} After rebooting, confirm the install actually worked: ${THEME_SECONDARY}bash scripts/verify.sh${RESET} (or: ${THEME_SECONDARY}./install.sh --check${RESET})"
 
   echo ""
   echo -e "${THEME_WARN}It is strongly recommended to reboot now to apply all changes.${RESET}"
@@ -1157,8 +1180,10 @@ prompt_reboot() {
 # Parameters: $@ - Packages to install
 # Returns: 0 on success, 1 on failure
 install_aur_quietly() {
-  if ! command -v yay &>/dev/null; then
-    log_error "AUR helper (yay) not found. Cannot install AUR packages." "Install yay first with: git clone https://aur.archlinux.org/yay.git && cd yay && makepkg -si"
+  local helper
+  helper=$(aur_helper)
+  if ! command -v "$helper" &>/dev/null; then
+    log_error "AUR helper not found (looked for yay, paru)." "Install yay first with: git clone https://aur.archlinux.org/yay.git && cd yay && makepkg -si"
     return 1
   fi
   install_package_generic "aur" "$@"

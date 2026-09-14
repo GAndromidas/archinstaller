@@ -6,6 +6,7 @@ INSTALL_LOG="${INSTALL_LOG:-/var/tmp/archinstaller.log}"
 AUTO_MODE=false
 UNATTENDED=false
 AUTO_CONFIRM=false
+CHECK_MODE=false
 
 # Function to show help
 show_help() {
@@ -22,6 +23,7 @@ OPTIONS:
     -d, --dry-run   Preview what will be installed without making changes
     -a, --auto      Automatically select the recommended installation mode
     -y, --yes       Non-interactive mode: accept safe/default prompts automatically
+    -c, --check     Read-only health check (runs scripts/verify.sh, changes nothing)
 
 DESCRIPTION:
     ArchInstaller transforms a fresh Arch Linux installation into a fully
@@ -113,9 +115,20 @@ for arg in "$@"; do
     --dry-run|-d) DRY_RUN=true; VERBOSE=true ;;
     --auto|-a) AUTO_MODE=true ;;
     --yes|-y) AUTO_MODE=true; UNATTENDED=true; AUTO_CONFIRM=true ;;
+    --check|-c) CHECK_MODE=true ;;
     *) echo "Unknown option: $arg"; echo "Use --help for usage information"; exit 1 ;;
   esac
 done
+
+# Read-only health check: runs the post-reboot verifier without changing
+# anything. Handled before any sourcing, sudo use, or state writes.
+if [[ "$CHECK_MODE" == true ]]; then
+  if [[ "$VERBOSE" == true ]]; then
+    exec bash "$SCRIPT_DIR/scripts/verify.sh" --verbose
+  else
+    exec bash "$SCRIPT_DIR/scripts/verify.sh"
+  fi
+fi
 
 # Source modular libraries once. common.sh remains a compatibility facade for
 # older modules and third-party callers.

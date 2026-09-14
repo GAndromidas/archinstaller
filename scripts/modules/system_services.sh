@@ -21,15 +21,84 @@ setup_firewall_and_services() {
   # Then handle services
   run_step "Enabling system services" enable_services
 
+  # Safe SSH hardening (drop-in, verified, reload-only)
+  run_step "Applying SSH hardening" harden_sshd
+
   # Plymouth theme/hooks/initramfs belong to archinstall — only the kernel
   # splash params (step 6) are managed here.
+}
+
+# Safe SSH hardening via a drop-in (never edits sshd_config itself, so
+# distro updates and user edits can't conflict). Only settings with zero
+# lockout risk: root keeps key auth (prohibit-password), regular users and
+# password auth are untouched, fail2ban already handles brute force.
+# Every write is validated with `sshd -t` and rolled back on failure, and
+# the daemon is reloaded (not restarted) so active sessions survive.
+harden_sshd() {
+  step "Applying safe SSH hardening"
+
+  if ! command -v sshd &>/dev/null; then
+    log_info "openssh not installed — skipping SSH hardening"
+    return 0
+  fi
+
+  local dropin_dir="/etc/ssh/sshd_config.d"
+  local dropin="$dropin_dir/10-archinstaller-hardening.conf"
+  local created_by_us=false
+  [[ -f "$dropin" ]] || created_by_us=true
+
+  local want_permit="prohibit-password"
+  local effective=""
+  effective=$(sudo sshd -T 2>/dev/null | awk '$1=="permitrootlogin" {print $2; exit}' || true)
+  if [[ "${effective,,}" == "${want_permit,,}" ]]; then
+    log_info "SSH hardening already in effect (PermitRootLogin $effective) — nothing to do"
+    return 0
+  fi
+
+  sudo mkdir -p "$dropin_dir" 2>/dev/null || true
+  # Backup an existing drop-in we didn't create; ours is regenerated.
+  if [[ "$created_by_us" == false ]]; then
+    sudo cp "$dropin" "${dropin}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
+  fi
+  if ! printf '%s\n' \
+    "# Managed by archinstaller — safe SSH hardening (drop-in, sshd_config untouched)" \
+    "PermitRootLogin prohibit-password" \
+    "MaxAuthTries 3" \
+    "LoginGraceTime 60" \
+    "MaxStartups 10:30:60" \
+    "ClientAliveInterval 300" \
+    "ClientAliveCountMax 2" | sudo tee "$dropin" >/dev/null; then
+    log_warning "Failed to write $dropin — skipping SSH hardening"
+    return 0
+  fi
+
+  # Arch's sshd_config ships `Include sshd_config.d/*.conf`; on a system
+  # where it was removed the drop-in is silently ignored — detect that via
+  # the effective config and fall back to the main file if needed.
+  if ! sudo sshd -t 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
+    log_warning "sshd config test failed after hardening — rolling back"
+    if [[ "$created_by_us" == true ]]; then
+      sudo rm -f "$dropin" 2>/dev/null || true
+    fi
+    return 0
+  fi
+  effective=$(sudo sshd -T 2>/dev/null | awk '$1=="permitrootlogin" {print $2; exit}' || true)
+  if [[ "${effective,,}" != "${want_permit,,}" ]]; then
+    log_warning "Drop-in ignored (no Include directive?) — leaving $dropin in place, no fallback applied to avoid touching sshd_config"
+    return 0
+  fi
+
+  if sudo systemctl reload sshd.service 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
+    log_success "SSH hardening applied and reloaded (root password login off, key auth unaffected)"
+  else
+    log_warning "Hardening written but sshd reload failed — takes effect on next restart"
+  fi
 }
 
 # Detect effective sshd port (sshd -T is authoritative, fallback to
 # /etc/ssh/sshd_config, then 22). Used so firewall rules never lock out
 # remote sessions on a custom port.
-get_sshd_port() {
-  local port=""
+get_sshd_port() {  local port=""
   if command -v sshd &>/dev/null; then
     port=$(sudo sshd -T 2>/dev/null | awk '$1=="port" {print $2; exit}')
   fi
@@ -230,7 +299,82 @@ EOF
   enable_btrfs_scrub_timer
 }
 
+# Ensure the machine has working network management after reboot.
+# archinstall installs NetworkManager only when its own network_config asks
+# for it — a minimal/custom install can otherwise reboot with no network at
+# all. Never fights an existing manager: systemd-networkd (enabled or
+# active) is left alone, and iwd+NetworkManager coexist fine.
+ensure_network_manager() {
+  step "Ensuring network management (NetworkManager)"
+
+  if systemctl is-enabled --quiet NetworkManager.service 2>/dev/null; then
+    log_info "NetworkManager already enabled — nothing to do"
+    return 0
+  fi
+  if systemctl is-enabled --quiet systemd-networkd.service 2>/dev/null \
+    || systemctl is-active --quiet systemd-networkd.service 2>/dev/null; then
+    log_info "systemd-networkd is managing the network — leaving NetworkManager alone"
+    return 0
+  fi
+
+  if ! pacman -Q networkmanager &>/dev/null 2>&1; then
+    log_info "No network manager active — installing NetworkManager..."
+    if ! install_packages_quietly networkmanager; then
+      log_warning "Failed to install networkmanager — reboot may have no network"
+      return 0
+    fi
+  fi
+  if sudo systemctl enable --now NetworkManager.service 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
+    log_success "NetworkManager enabled"
+  else
+    log_warning "Failed to enable NetworkManager"
+  fi
+}
+
+# Single power-manager policy: exactly one userspace power manager active,
+# decided in one place. Priority: an already-installed tlp wins (whoever
+# installed it meant it), else power-profiles-daemon, else auto-cpufreq.
+# Server mode wants none (kernel defaults). Losers are disabled, never
+# removed — removal could strand dependencies. Idempotent.
+ensure_single_power_manager() {
+  step "Applying power-manager policy (exactly one active)"
+
+  local winner=""
+  if [[ "${INSTALL_MODE:-}" == "server" ]]; then
+    log_info "Server mode — no userspace power manager (kernel defaults)"
+  elif pacman -Q tlp &>/dev/null 2>&1; then
+    winner="tlp.service"
+  elif pacman -Q power-profiles-daemon &>/dev/null 2>&1; then
+    winner="power-profiles-daemon.service"
+  elif pacman -Q auto-cpufreq &>/dev/null 2>&1; then
+    winner="auto-cpufreq.service"
+  else
+    log_info "No power manager installed — using kernel defaults"
+    return 0
+  fi
+
+  local svc
+  for svc in tlp.service power-profiles-daemon.service auto-cpufreq.service; do
+    if [[ -n "$winner" && "$svc" == "$winner" ]]; then
+      if systemctl is-enabled --quiet "$svc" 2>/dev/null; then
+        log_info "$svc already enabled (policy winner) — nothing to do"
+      elif sudo systemctl enable --now "$svc" 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
+        log_success "$svc enabled (policy winner)"
+      else
+        log_warning "Failed to enable $svc"
+      fi
+    elif systemctl is-enabled --quiet "$svc" 2>/dev/null; then
+      if sudo systemctl disable --now "$svc" 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
+        log_info "$svc disabled (conflicts with ${winner:-kernel defaults})"
+      fi
+    fi
+  done
+}
+
 enable_services() {
+  # Network first: a minimal archinstall may not have enabled any manager.
+  ensure_network_manager
+
   # Ensure openssh is installed before trying to enable sshd
   if ! pacman -Q openssh &>/dev/null; then
     log_info "openssh not found — installing..."
@@ -252,6 +396,8 @@ enable_services() {
     # Queues timeshift-autosnap.timer when upstream ships one.
     TIMESHIFT_AUTOSNAP_TIMER=""
     setup_snapshot_stack false
+    # Server policy: no userspace power manager (disables stragglers).
+    ensure_single_power_manager
     if [[ -n "${TIMESHIFT_AUTOSNAP_TIMER:-}" ]]; then
       services+=("$TIMESHIFT_AUTOSNAP_TIMER")
       log_success "$TIMESHIFT_AUTOSNAP_TIMER will be enabled for automatic snapshots."
@@ -341,13 +487,10 @@ enable_services() {
     log_info "lact is not installed. Skipping lactd.service."
   fi
 
-  # Conditionally add power-profiles-daemon.service if installed
-  if pacman -Qi power-profiles-daemon &>/dev/null && ! pacman -Qi tlp &>/dev/null && ! pacman -Qi auto-cpufreq &>/dev/null; then
-    services+=(power-profiles-daemon.service)
-    log_success "power-profiles-daemon.service will be enabled."
-  elif pacman -Qi power-profiles-daemon &>/dev/null; then
-    log_warning "power-profiles-daemon installed but conflicting power manager (tlp/auto-cpufreq) detected. Skipping."
-  fi
+  # Power management is decided by the single policy in
+  # ensure_single_power_manager (called below) — never append a power
+  # manager to the bulk-enable list, or two managers could end up active.
+  run_step "Applying power-manager policy" ensure_single_power_manager
 
   # Snapshot stack: whatever is installed (snapper and/or timeshift),
   # desktop includes GUI helpers. Skips cleanly when neither is present.
@@ -647,6 +790,266 @@ install_vm_guest_agents() {
           log_warning "Failed to enable spice-vdagentd"
         fi
       fi
+      ;;
+  esac
+  return 0
+}
+
+# Secure Boot signing maintenance: with SB active, a kernel/bootloader
+# update that isn't signed leaves an unbootable system. archinstall can
+# enroll sbctl, whose pacman hook signs future updates — this step verifies
+# the current state and signs whatever the hook missed. Read-mostly and
+# safe: never enrolls keys (a manual, one-time owner action), only signs
+# with keys already enrolled on this machine.
+ensure_sb_signing() {
+  step "Checking Secure Boot signing"
+
+  local sb_last=""
+  sb_last=$(od -An -tu1 /sys/firmware/efi/efivars/SecureBoot-* 2>/dev/null | awk '{print $NF}' || true)
+  if [[ "$sb_last" != "1" ]]; then
+    log_info "Secure Boot not active — skipping signing maintenance"
+    return 0
+  fi
+  if ! command -v sbctl &>/dev/null; then
+    log_warning "Secure Boot is active but sbctl is not installed — kernel updates may stop booting until you install sbctl and enroll keys"
+    return 0
+  fi
+  if ! sudo sbctl status 2>/dev/null | grep -qiE 'installed:\s*(yes|✓|true)'; then
+    log_warning "sbctl present but keys are not enrolled — signing would do nothing; enroll manually with: sudo sbctl enroll-keys -m"
+    return 0
+  fi
+
+  local verify_out=""
+  if verify_out=$(sudo sbctl verify 2>&1); then
+    log_success "Secure Boot: all files signed"
+    return 0
+  fi
+  echo "$verify_out" >>"$INSTALL_LOG" 2>&1 || true
+  log_info "Some files are unsigned — signing them with the enrolled keys..."
+  local unsigned=""
+  unsigned=$(echo "$verify_out" | grep -oE '✗ [^ ]+ is not signed' | awk '{print $2}' || true)
+  if [[ -z "$unsigned" ]]; then
+    log_warning "sbctl verify reported issues but no unsigned files could be parsed — run 'sudo sbctl verify' manually"
+    return 0
+  fi
+  local f failed=0
+  # shellcheck disable=SC2086
+  for f in $unsigned; do
+    if sudo sbctl sign --save "$f" 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
+      log_success "Signed $f"
+    else
+      log_warning "Failed to sign $f"
+      failed=1
+    fi
+  done
+  if [[ "$failed" -eq 0 ]]; then
+    log_success "Secure Boot signing maintenance complete"
+  fi
+  return 0
+}
+
+# Append a kernel param to every base Limine cmdline line in one config
+# file (snapshot entries belong to limine-snapper-sync and are skipped —
+# it regenerates them from the base entries). Idempotent per line.
+_hibernate_limine_file() {
+  local conf="$1" param="$2"
+  local lns
+  lns=$(sudo grep -nE '^[[:space:]]*(kernel_)?cmdline:' "$conf" 2>/dev/null | cut -d: -f1 || true)
+  [[ -z "$lns" ]] && return 0
+  sudo cp "$conf" "${conf}.backup.$(date +%Y%m%d_%H%M%S)"
+  local ln line patched=0
+  for ln in $lns; do
+    line=$(sudo sed -n "${ln}p" "$conf" 2>/dev/null || true)
+    echo "$line" | grep -q '/\.snapshots' && continue
+    echo "$line" | grep -qF "$param" && continue
+    # sed -i rewrites the whole file in one go (small torn-write window on
+    # FAT32); the limine mutex lives in bootloader_config.sh and is not
+    # available here, so snapshot entries are left for the watcher.
+    sudo sed -i "${ln}s|$| $param|" "$conf" && patched=$((patched + 1))
+  done
+  log_to_file "Limine $conf: appended resume param to $patched line(s)"
+}
+
+# Opt-in hibernation (resume from a swap partition). archinstall sets up
+# zram swap by default, which cannot hibernate — so this only offers when
+# a real swap partition exists. Default answer is No (also under --yes):
+# it rebuilds the initramfs and touches bootloader entries. Everything is
+# append-only and idempotent; any failure warns and never aborts the run.
+setup_hibernation() {
+  step "Hibernation (resume from swap) — optional"
+
+  if is_vm 2>/dev/null; then
+    log_info "VM guest detected — hibernation is meaningless here, skipping"
+    return 0
+  fi
+
+  local swapdev
+  swapdev=$(sudo blkid -t TYPE=swap -o device 2>/dev/null | head -1 || true)
+  if [[ -z "$swapdev" ]]; then
+    log_info "No swap partition found (zram-only?) — hibernation needs a swap partition, skipping"
+    return 0
+  fi
+  if ! swapon --show=NAME --noheadings 2>/dev/null | grep -qxF "$swapdev" \
+    && ! grep -qE "^[[:space:]]*$swapdev([[:space:]]|$)" /etc/fstab 2>/dev/null; then
+    log_warning "Swap device $swapdev is neither active nor in fstab — skipping hibernation"
+    return 0
+  fi
+  local swap_uuid
+  swap_uuid=$(sudo blkid -s UUID -o value "$swapdev" 2>/dev/null || true)
+  if [[ -z "$swap_uuid" ]]; then
+    log_warning "Cannot determine UUID of $swapdev — skipping hibernation"
+    return 0
+  fi
+
+  local ram_kb swap_kb
+  ram_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+  swap_kb=$(sudo blockdev --getsize64 "$swapdev" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
+  if [[ "$swap_kb" -gt 0 && "$swap_kb" -lt "$ram_kb" ]]; then
+    log_warning "Swap is smaller than RAM — hibernation may fail when memory is full"
+  fi
+
+  if ! ui_confirm "Enable hibernation (resume from swap)?" "Adds the resume hook, rebuilds the initramfs (slow, one-time), and appends resume=UUID=$swap_uuid to your bootloader entries. Swap: $swapdev." false; then
+    log_info "Hibernation skipped by user"
+    return 0
+  fi
+
+  local resume_param="resume=UUID=$swap_uuid"
+
+  # 1. resume hook (mkinitcpio only).
+  local mkconf="/etc/mkinitcpio.conf"
+  if ! command -v mkinitcpio &>/dev/null || [[ ! -f "$mkconf" ]]; then
+    log_warning "mkinitcpio not in use — add resume support manually for your initramfs generator"
+    return 0
+  fi
+  if grep -qE '^HOOKS=.*\bresume\b' "$mkconf"; then
+    log_info "resume hook already present — skipping hook edit"
+  else
+    validate_config_file "$mkconf" >/dev/null 2>&1 || true
+    if grep -qE '^HOOKS=.*\bblock\b' "$mkconf"; then
+      sudo sed -i -E 's/^(HOOKS=.*\bblock\b)/\1 resume/' "$mkconf"
+    elif grep -qE '^HOOKS=.*\bfilesystems\b' "$mkconf"; then
+      sudo sed -i -E 's/^(HOOKS=.*)\bfilesystems\b/\1resume filesystems/' "$mkconf"
+    else
+      sudo sed -i -E 's/^(HOOKS=\(.*)\)/\1 resume)/' "$mkconf"
+    fi
+    if grep -qE '^HOOKS=.*\bresume\b' "$mkconf"; then
+      log_success "Added resume hook to mkinitcpio"
+    else
+      log_warning "Failed to add resume hook — aborting hibernation setup (bootloader untouched)"
+      return 0
+    fi
+  fi
+
+  # 2. Kernel param, per bootloader (append-only, idempotent).
+  _hibernate_add_boot_param "$resume_param" || return 0
+
+  # 3. Rebuild once so hook + params apply.
+  log_info "Rebuilding initramfs with resume support (slow, one-time)..."
+  if sudo mkinitcpio -P 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
+    log_success "Initramfs rebuilt — hibernation ready (test with: systemctl hibernate)"
+  else
+    log_warning "Initramfs rebuild failed — hibernation not active; re-run mkinitcpio -P manually"
+  fi
+  return 0
+}
+
+# Append one kernel param to the active bootloader's config (and regenerate
+# where required). Never removes or replaces anything archinstall wrote.
+_hibernate_add_boot_param() {
+  local param="$1"
+  local bl
+  bl=$(detect_bootloader)
+
+  # UKI systems boot from /etc/kernel/cmdline.
+  if is_uki_system 2>/dev/null; then
+    local cmdline_file="/etc/kernel/cmdline"
+    local current=""
+    if sudo test -f "$cmdline_file" 2>/dev/null; then
+      current=$(sudo cat "$cmdline_file" 2>/dev/null || true)
+    fi
+    if echo " $current " | grep -qF " $param "; then
+      log_info "resume param already in $cmdline_file"
+    else
+      [[ -n "$current" ]] && sudo cp "$cmdline_file" "${cmdline_file}.backup.$(date +%Y%m%d_%H%M%S)"
+      if echo "${current:+$current }$param" | sudo tee "$cmdline_file" >/dev/null; then
+        log_success "Added $param to $cmdline_file"
+      else
+        log_warning "Failed to update $cmdline_file"
+        return 1
+      fi
+    fi
+    return 0
+  fi
+
+  case "$bl" in
+    systemd-boot)
+      local entries_dir
+      entries_dir=$(find_systemd_boot_entries_dir)
+      if [[ -z "$entries_dir" ]]; then
+        log_warning "No systemd-boot entries dir found — add $param manually"
+        return 1
+      fi
+      local entry updated=0
+      while IFS= read -r -d '' entry; do
+        if sudo grep -q "^options " "$entry" 2>/dev/null; then
+          sudo grep "^options " "$entry" 2>/dev/null | grep -qF "$param" && continue
+          # shellcheck disable=SC2086
+          if sudo sed -i "s|^options \(.*\)|options \1 $param|" "$entry"; then
+            updated=$((updated + 1))
+          fi
+        fi
+      done < <(sudo find "$entries_dir" -maxdepth 1 -name "*.conf" ! -name "*fallback*" -print0 2>/dev/null)
+      log_success "Added resume param to $updated systemd-boot entries"
+      ;;
+    grub)
+      local grub_config="/etc/default/grub"
+      local current=""
+      current=$(grep -E '^GRUB_CMDLINE_LINUX_DEFAULT=' "$grub_config" 2>/dev/null | cut -d= -f2- | tr -d '"' || true)
+      if echo " $current " | grep -qF " $param "; then
+        log_info "resume param already in GRUB_CMDLINE_LINUX_DEFAULT"
+      else
+        sudo cp "$grub_config" "${grub_config}.backup.$(date +%Y%m%d_%H%M%S)"
+        local merged
+        merged=$(echo "$current $param" | tr -s ' ' | sed 's/^ //; s/ $//')
+        if grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=' "$grub_config" 2>/dev/null; then
+          sudo sed -i "s|^GRUB_CMDLINE_LINUX_DEFAULT=.*|GRUB_CMDLINE_LINUX_DEFAULT=\"$merged\"|" "$grub_config"
+        else
+          echo "GRUB_CMDLINE_LINUX_DEFAULT=\"$merged\"" | sudo tee -a "$grub_config" >/dev/null
+        fi
+        if grep -qF "$param" "$grub_config" 2>/dev/null; then
+          log_success "Added resume param to GRUB defaults"
+        else
+          log_warning "Failed to update $grub_config"
+          return 1
+        fi
+      fi
+      if sudo test -f /boot/grub/grub.cfg 2>/dev/null; then
+        if sudo grub-mkconfig -o /boot/grub/grub.cfg 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
+          log_success "GRUB configuration regenerated with resume param"
+        else
+          log_warning "grub-mkconfig failed — resume param saved but not yet active"
+        fi
+      else
+        log_warning "grub.cfg not found — resume param saved but GRUB not regenerated"
+      fi
+      ;;
+    limine)
+      local conf found_any=false
+      while IFS= read -r conf; do
+        [[ -z "$conf" ]] && continue
+        found_any=true
+        _hibernate_limine_file "$conf" "$param"
+      done < <(sudo find /boot /efi /boot/efi -maxdepth 4 -name limine.conf 2>/dev/null || true)
+      if [[ "$found_any" == true ]]; then
+        log_success "Limine cmdlines updated with resume param"
+      else
+        log_warning "No limine.conf found — add $param manually"
+        return 1
+      fi
+      ;;
+    *)
+      log_warning "Bootloader '$bl' resume params are manual — add $param to your kernel cmdline yourself"
+      return 1
       ;;
   esac
   return 0
@@ -1039,6 +1442,93 @@ detect_memory_size() {
   log_success "Memory-based optimizations applied"
 }
 
+# Enable TRIM through LUKS: SSDs behind device-mapper need the `discard`
+# crypttab option, which archinstall does not set. Only touches SSD-backed
+# setups, backs up crypttab first, is idempotent, and rebuilds the
+# initramfs when the root volume's entry changed (mkinitcpio embeds a copy
+# of crypttab, so the option would otherwise not apply at early boot).
+ensure_luks_discard() {
+  local crypttab="/etc/crypttab"
+  if [[ ! -f "$crypttab" ]]; then
+    log_info "No /etc/crypttab — nothing to do"
+    return 0
+  fi
+
+  local missing
+  missing=$(grep -vE '^[[:space:]]*(#|$)' "$crypttab" 2>/dev/null | grep -vE '(^|[[:space:],])discard([[:space:],]|$)' || true)
+  if [[ -z "$missing" ]]; then
+    log_info "crypttab already allows discard everywhere — nothing to do"
+    return 0
+  fi
+
+  # discard only helps flash storage — skip HDD-backed encryption.
+  local ssd_found=false
+  local dev parent rota
+  while IFS= read -r dev; do
+    [[ -z "$dev" ]] && continue
+    parent=$(lsblk -n -o PKNAME "/dev/$dev" 2>/dev/null || true)
+    [[ -z "$parent" ]] && parent="$dev"
+    if [[ "$parent" == nvme* ]]; then
+      ssd_found=true
+      break
+    fi
+    rota=$(cat "/sys/block/$parent/queue/rotational" 2>/dev/null || echo 1)
+    if [[ "$rota" == "0" ]]; then
+      ssd_found=true
+      break
+    fi
+  done < <(lsblk -n -o NAME,FSTYPE 2>/dev/null | awk '$2=="crypto_LUKS" {print $1}')
+  if [[ "$ssd_found" != true ]]; then
+    log_info "Encrypted volumes are HDD-backed — discard gains nothing, skipping"
+    return 0
+  fi
+
+  sudo cp "$crypttab" "${crypttab}.backup.$(date +%Y%m%d_%H%M%S)"
+  local tmp
+  tmp=$(mktemp /tmp/crypttab.XXXXXX) || { log_warning "Cannot create temp file for crypttab edit"; return 0; }
+  # NOTE: awk re-joins fields with a single space, normalizing the original
+  # column whitespace. crypttab is whitespace-separated, so this is safe.
+  awk 'BEGIN { OFS=" " }
+    /^[[:space:]]*#/ || /^[[:space:]]*$/ { print; next }
+    /(^|[[:space:],])discard([[:space:],]|$)/ { print; next }
+    NF < 4 { $4 = "discard"; print; next }
+    $4 == "-" || $4 == "none" { $4 = "discard"; print; next }
+    { $4 = $4 ",discard"; print }' "$crypttab" > "$tmp"
+  if [[ ! -s "$tmp" ]]; then
+    log_warning "crypttab rewrite produced empty output — leaving file untouched"
+    rm -f "$tmp"
+    return 0
+  fi
+  if sudo cp "$tmp" "$crypttab"; then
+    rm -f "$tmp"
+    log_success "Enabled discard in /etc/crypttab (backup kept alongside)"
+  else
+    log_warning "Failed to write $crypttab — leaving it untouched"
+    rm -f "$tmp"
+    return 0
+  fi
+
+  # The root volume is opened from the initramfs-embedded crypttab copy —
+  # rebuild so the new option applies at early boot. Data-only volumes are
+  # opened later from the live file and need no rebuild.
+  local root_src=""
+  root_src=$(findmnt -n -o SOURCE / 2>/dev/null | cut -d'[' -f1 || true)
+  if [[ "$root_src" != /dev/mapper/* && "$root_src" != /dev/dm-* ]]; then
+    log_info "Root is not on LUKS — no initramfs rebuild needed"
+    return 0
+  fi
+  if command -v mkinitcpio &>/dev/null && [[ -f /etc/mkinitcpio.conf ]]; then
+    log_info "Rebuilding initramfs so crypttab discard applies at boot (slow, one-time)..."
+    if sudo mkinitcpio -P 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
+      log_success "Initramfs rebuilt with discard-enabled crypttab"
+    else
+      log_warning "Initramfs rebuild failed — restore ${crypttab}.backup.* and re-run mkinitcpio -P manually"
+    fi
+  else
+    log_warning "mkinitcpio not in use — run your initramfs rebuild manually so crypttab discard applies at boot"
+  fi
+}
+
 # Function to detect filesystem type and apply optimizations
 detect_filesystem_type() {
   step "Detecting filesystem type and applying optimizations"
@@ -1074,11 +1564,9 @@ detect_filesystem_type() {
   # Check for LUKS encryption
   if lsblk -o NAME,FSTYPE | grep -q crypto_LUKS; then
     log_info "LUKS encryption detected"
-    # Check if SSD
-    local encrypted_device=$(lsblk -o NAME,FSTYPE,TYPE | grep crypto_LUKS | head -1 | awk '{print $1}')
-    if [ -n "$encrypted_device" ]; then
-      log_success "Encrypted storage detected - TRIM support should be enabled in crypttab"
-    fi
+    # Enable TRIM passthrough on SSD-backed encryption (archinstall
+    # doesn't set the discard option).
+    ensure_luks_discard
   fi
 }
 
@@ -1732,6 +2220,10 @@ setup_laptop_optimizations() {
       ;;
   esac
 
+  # Re-apply the single power-manager policy last: vendor setup above may
+  # have installed tlp (ThinkPads), which outranks the PPD enabled earlier.
+  ensure_single_power_manager
+
   # Show summary
   show_laptop_summary
 }
@@ -1811,5 +2303,7 @@ detect_filesystem_type
 detect_storage_type
 detect_audio_system
 detect_kernel_type
+ensure_sb_signing
 setup_advanced_optimizations
 setup_laptop_optimizations
+setup_hibernation

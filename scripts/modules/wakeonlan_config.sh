@@ -524,33 +524,6 @@ prompt_interface_selection() {
     done
 }
 
-# Confirm on /dev/tty explicitly (this module's callers may capture stdout,
-# so a plain `read` without redirecting to /dev/tty wouldn't be visible to
-# the user) and gracefully decline instead of erroring when no TTY exists.
-wol_confirm_tty() {
-    local question="${1:-Continue?}"
-    local answer=""
-    if [[ "${AUTO_CONFIRM:-false}" == true ]]; then
-        log_info "Auto-confirmed: $question"
-        return 0
-    fi
-    local prompt_text="Y/n"
-    if _wol_has_tty; then
-        while true; do
-            printf '%s [%s]: ' "$question" "$prompt_text" >/dev/tty 2>/dev/null || printf '%s [%s]: ' "$question" "$prompt_text" >&2
-            read -r answer </dev/tty || { return 1; }
-            case "${answer,,}" in
-                ""|y|yes) return 0 ;;
-                n|no) return 1 ;;
-                *) wol_say "Please answer Y (yes) or N (no)." ;;
-            esac
-        done
-    else
-        # No TTY (redirected test): decline non-essential prompts by default
-        return 1
-    fi
-}
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -580,18 +553,15 @@ configure_wakeonlan() {
         fi
     fi
 
-    # --- Guard 3: laptops — offer opt-in instead of silent skip -------------
+    # --- Guard 3: laptops — note only, consent is handled below -----------
+    # Laptops get the same explicit opt-in prompt as everything else (default
+    # No), so no separate laptop-only question is needed here.
     if wol_is_laptop; then
         if [[ "${WOL_FORCE:-0}" == "1" ]]; then
             log_info "Laptop detected but WOL_FORCE=1 — configuring anyway"
         else
             ui_info "Laptop system detected - Wake-on-LAN is usually only useful on desktops/servers"
-            if ! wol_confirm_tty "Enable Wake-on-LAN on this laptop anyway?"; then
-                ui_info "Wake-on-LAN configuration skipped (laptop)"
-                log_info "Laptop detected, user declined - WoL configuration skipped"
-                return 2
-            fi
-            log_info "Laptop detected, user opted in - continuing WoL configuration"
+            log_info "Laptop detected — explicit opt-in prompt follows"
         fi
     fi
 
@@ -653,6 +623,21 @@ configure_wakeonlan() {
         log_info "No WoL-capable interfaces among: ${interfaces[*]}"
         return 2
     fi
+
+    # --- Explicit opt-in (Gum, default No) ------------------------------------
+    # Wake-on-LAN is never enabled automatically: the user must actively
+    # choose Yes. Uses the shared ui_confirm helper (gum confirm with
+    # plain-text fallback), consistent with every other Archinstaller prompt.
+    # Unsupported hardware never reaches this prompt (returned 2 above).
+    {
+        local _wol_ifaces_list="${capable[*]}"
+        if ! ui_confirm "Enable Wake-on-LAN?" "Wake-on-LAN is supported on: ${_wol_ifaces_list}. A systemd unit + udev rule will keep it enabled across reboots." false; then
+            ui_info "Wake-on-LAN configuration skipped (not enabled)"
+            log_info "User declined Wake-on-LAN — no WoL configuration changed"
+            return 2
+        fi
+        log_info "User opted in — continuing WoL configuration"
+    }
 
     # --- Selection -------------------------------------------------------------
     local selection=""

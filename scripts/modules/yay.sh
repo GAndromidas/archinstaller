@@ -107,7 +107,7 @@ install_yay() {
   fi
 
   # Configure yay for faster AUR builds
-  ui_info "Configuring yay for optimal performance..."
+  ui_info "Configuring yay..."
   local yay_config_dir="$HOME/.config/yay"
   mkdir -p "$yay_config_dir"
   cat > "$yay_config_dir/config.json" << 'YAYEOF'

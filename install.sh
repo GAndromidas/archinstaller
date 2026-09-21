@@ -18,6 +18,7 @@ USAGE:
 
 OPTIONS:
     -h, --help      Show this help message and exit
+    -V, --version   Show version information and exit
     -v, --verbose   Enable verbose output (show all package installation details)
     -q, --quiet     Quiet mode (minimal output)
     -d, --dry-run   Preview what will be installed without making changes
@@ -27,10 +28,9 @@ OPTIONS:
 
 DESCRIPTION:
     ArchInstaller transforms a fresh Arch Linux installation into a fully
-    configured, optimized system with intelligent hardware detection and 
-    tailored optimizations. It applies targeted optimizations rather than 
-    one-size-fits-all settings, ensuring optimal performance for your 
-    specific configuration.
+    configured system with hardware detection and tailored system
+    configuration. It applies hardware-specific configuration rather than 
+    one-size-fits-all settings.
 
 INSTALLATION MODES:
     Standard        Complete setup with all recommended packages (intermediate users)
@@ -42,24 +42,21 @@ INSTALLATION MODES:
 FEATURES:
     - Hardware-aware CPU detection (Intel/AMD with microcode updates)
     - Automatic GPU driver detection and installation (AMD/Intel)
-    - Storage optimization (NVMe/SSD/HDD with I/O scheduling)
-    - Desktop environment detection and optimization (KDE Plasma 6+, GNOME 46+, Cosmic)
+    - Storage detection (NVMe/SSD/HDD reported, kernel scheduler defaults kept)
+    - Desktop environment detection and configuration (KDE Plasma 6+, GNOME 46+, Cosmic)
     - Security hardening (UFW/Firewalld + Fail2ban with SSH protection)
-    - Advanced performance tuning
-    - Smart AMD P-State system with gaming mode detection
-    - Wake-on-LAN configuration for ethernet devices (desktops only)
+    - AMD P-State detection (driver enabled via kernel cmdline where supported)
+    - Wake-on-LAN configuration for ethernet devices (explicit opt-in, desktops only)
     - Zsh shell with Oh-My-Zsh and Starship prompt
     - Resume functionality for interrupted installations
 
 SYSTEM INTELLIGENCE:
-    - Dynamic memory management (RAM-based swappiness)
-    - Intelligent storage optimization (storage-type I/O scheduling)
-    - Hardware-aware configuration (NVMe detection, zRAM monitoring)
-    - Transparent hugepages optimization for desktop systems
-    - Persistent settings via udev rules and systemd services
+    - Hardware-aware configuration (NVMe/SSD/HDD and memory reporting)
+    - Kernel defaults respected (I/O scheduler, swappiness, CPU governor left to the kernel)
+    - Persistent settings via systemd services where a feature requires it
 
 BOOTLOADER SUPPORT:
-    - GRUB with timeout optimization and boot menu management
+    - GRUB with timeout configuration and boot menu management (kernels, snapshots, os-prober second OS, no firmware entry)
     - systemd-boot with LTS kernel fallback and EFI support
     - Limine with modern UEFI and fast boot support
 
@@ -110,6 +107,7 @@ DRY_RUN=false
 for arg in "$@"; do
   case "$arg" in
     -h|--help) show_help ;;
+    -V|--version) echo "ArchInstaller $(git -C "$SCRIPT_DIR" describe --tags --always --dirty 2>/dev/null || echo dev)"; exit 0 ;;
     --verbose|-v) VERBOSE=true ;;
     --quiet|-q) VERBOSE=false ;;
     --dry-run|-d) DRY_RUN=true; VERBOSE=true ;;
@@ -236,11 +234,11 @@ check_system_requirements() {
   local root_device=$(findmnt -n -o SOURCE / | cut -d'[' -f1 | cut -d'/' -f3)
   if [ -n "$root_device" ]; then
     if echo "$root_device" | grep -q "nvme"; then
-      log_to_file "NVMe storage detected - NVMe optimizations will be applied"
+      log_to_file "NVMe storage detected (kernel default scheduler kept)"
     elif [ -b "/dev/$root_device" ] && [ "$(cat /sys/block/"${root_device}"/queue/rotational 2>/dev/null)" = "0" ]; then
-      log_to_file "SSD storage detected - SSD optimizations will be applied"
+      log_to_file "SSD storage detected (kernel default scheduler kept)"
     else
-      log_to_file "HDD storage detected - HDD optimizations will be applied"
+      log_to_file "HDD storage detected (kernel default scheduler kept)"
     fi
   else
     hardware_issues+=("Could not determine root storage device")
@@ -251,7 +249,7 @@ check_system_requirements() {
   if [ "$total_mem_gb" -lt 2 ]; then
     hardware_issues+=("Low memory detected (${total_mem_gb}GB) - at least 2GB recommended")
   else
-    log_to_file "System memory: ${total_mem_gb}GB - appropriate optimizations will be applied"
+    log_to_file "System memory: ${total_mem_gb}GB (kernel default memory management kept)"
   fi
 
   if [ ${#hardware_issues[@]} -gt 0 ]; then

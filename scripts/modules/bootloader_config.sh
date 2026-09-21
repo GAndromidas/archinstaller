@@ -132,13 +132,16 @@ get_kernel_params() {
 
   local params=""
 
-  # Base parameters (all systems)
-  params="quiet loglevel=3 nowatchdog"
-
-  # Hide boot text so the Plymouth theme (installed and configured by
-  # archinstall) shows instead. Harmless when Plymouth is absent, and merge
-  # dedups it on re-runs.
-  params="$params splash vt.global_cursor_default=0"
+  # Base parameters (all systems). Each one has a concrete reason:
+  #   quiet loglevel=3 ............ standard quiet boot (cosmetic, universally expected)
+  #   splash ...................... show the Plymouth splash installed by archinstall
+  #                                 (harmless when Plymouth is absent; merge dedups on re-runs)
+  #   vt.global_cursor_default=0 .. hide the blinking text cursor under the splash
+  # No generic "performance" parameters are added here. In particular,
+  # `nowatchdog` was removed: disabling the watchdog saves negligible power
+  # and removes a hang-recovery mechanism, so the kernel default (watchdogs
+  # enabled) is the safer choice.
+  params="quiet loglevel=3 splash vt.global_cursor_default=0"
 
   # GPU-specific parameters (multi-GPU aware: a hybrid AMD iGPU + NVIDIA dGPU
   # needs BOTH sets; an AMD-only box must never get nvidia_drm.*).
@@ -166,7 +169,17 @@ get_kernel_params() {
       params="$params radeon.si_support=0 amdgpu.si_support=1"
       params="$params radeon.cik_support=0 amdgpu.cik_support=1"
     fi
-    # AMD P-State for CPUs with CPPC support (Ryzen 5000+ / Zen 3+)
+    # AMD P-State for CPUs with CPPC support (Ryzen 5000+ / Zen 3+).
+    # Kept deliberately: supported Arch kernels default to amd_pstate active
+    # mode (CONFIG_X86_AMD_PSTATE_DEFAULT_MODE=3), but not every platform
+    # enables it automatically — firmware without a proper _CPC/CPPC setup
+    # and some server platforms still fall back to passive mode or
+    # acpi_cpufreq (ArchWiki "CPU frequency scaling", amd_pstate section).
+    # Passing amd_pstate=active pins the autonomous (EPP) mode on capable
+    # hardware and is a no-op where the kernel already selected it. Gated on
+    # detected driver support, so non-AMD or pre-Zen systems never get it.
+    # This selects the scaling *driver mode*, not a governor — no userspace
+    # governor forcing is done here.
     if grep -qi "amd_pstate" /proc/cpuinfo 2>/dev/null || [ -d /sys/devices/system/cpu/amd_pstate ]; then
       params="$params amd_pstate=active"
     fi
@@ -219,9 +232,10 @@ get_kernel_params() {
 # those lines wholesale would drop them and render encrypted/hibernating
 # systems unbootable. So this installer OWNS only the keys below and MERGES:
 # existing unmanaged params are preserved verbatim, managed keys are replaced.
-# NOTE: `video` stays in this list as cleanup-only: get_kernel_params() no
-# longer generates video=WxH, so keeping the key here strips stale video=
-# tokens from existing entries on the next run instead of preserving them.
+# NOTE: `video` and `nowatchdog` stay in this list as cleanup-only:
+# get_kernel_params() no longer generates video=WxH or nowatchdog, so keeping
+# the keys here strips those stale tokens from existing entries on the next
+# run instead of preserving them.
 MANAGED_PARAM_KEYS="quiet loglevel nowatchdog splash vt.global_cursor_default nvidia_drm.modeset nvidia_drm.fbdev NVreg_DynamicPowerManagement NVreg_PreserveVideoMemoryAllocations NVreg_TemporaryFilePath radeon.si_support amdgpu.si_support radeon.cik_support amdgpu.cik_support amd_pstate i915.enable_guc rootflags video"
 
 _merge_param_key() {
@@ -452,12 +466,12 @@ configure_boot() {
   if [ -n "$loader_conf" ] && sudo test -f "$loader_conf" 2>/dev/null; then
     set_loader_config "timeout" "3"
     set_loader_config "console-mode" "max"
-    ui_info "Set timeout to 3s and console-mode to max (optimal settings)"
+    ui_info "Set timeout to 3s and console-mode to max"
   else
     # /boot is 700 after archinstall, bare [ -f ] fails - try to create via set_loader_config
     if [ -n "$loader_conf" ] && set_loader_config "timeout" "3"; then
       set_loader_config "console-mode" "max"
-      ui_info "Set timeout to 3s and console-mode to max (optimal settings) - created loader.conf"
+      ui_info "Set timeout to 3s and console-mode to max - created loader.conf"
     else
       log_warning "loader.conf not found. Skipping loader.conf configuration for systemd-boot."
     fi
@@ -837,7 +851,7 @@ configure_grub() {
 
     # Traditional system: configure GRUB
     set_grub_config "GRUB_TIMEOUT" "3"
-    ui_info "Set GRUB timeout to 3 seconds (optimal setting)"
+    ui_info "Set GRUB timeout to 3 seconds"
 
     step "Configuring GRUB: set saved entry as default"
     set_grub_config "GRUB_DEFAULT" "saved"
@@ -861,6 +875,11 @@ configure_grub() {
     # Quote: /etc/default/grub is shell-sourced, unquoted spaces break it.
     set_grub_config "GRUB_CMDLINE_LINUX_DEFAULT" "\"$grub_merged\""
     ui_info "Kernel parameters: $grub_merged"
+
+    # Menu layout: kernels first, snapshots second, other OSes third, no
+    # firmware entry. Runs before the kernel check so the layout persists
+    # even when grub-mkconfig itself has to wait for kernels to appear.
+    configure_grub_menu_order
 
     local KERNELS=()
     mapfile -t KERNELS < <(sudo ls /boot/vmlinuz-* 2>/dev/null | sed 's|/boot/vmlinuz-||g')
@@ -915,6 +934,91 @@ configure_grub() {
     fi
 }
 
+# GRUB menu layout: kernels on top, snapshots second, second OS third, and
+# no "UEFI Firmware Settings" entry. Stock /etc/grub.d numbering runs
+# 10_linux, then 30_os-prober and 30_uefi-firmware, and only then the
+# grub-btrfs 41_snapshots-btrfs script — so without intervention the order is
+# kernels → other OSes → firmware → snapshots. Every change below is
+# idempotent and re-applied on each run (a grub/grub-btrfs package update can
+# restore stock script permissions).
+configure_grub_menu_order() {
+    step "Configuring GRUB menu order (kernels, snapshots, other OSes)"
+
+    # 1. Remove the "UEFI Firmware Settings" entry completely. Upstream GRUB
+    # provides no GRUB_* knob for it — the supported mechanism is making
+    # 30_uefi-firmware non-executable so grub-mkconfig skips it.
+    if [[ -x /etc/grub.d/30_uefi-firmware ]]; then
+        if sudo chmod -x /etc/grub.d/30_uefi-firmware 2>/dev/null; then
+            log_success "Disabled UEFI Firmware Settings menu entry"
+        else
+            log_warning "Could not disable 30_uefi-firmware"
+        fi
+    else
+        log_info "UEFI Firmware Settings entry already disabled"
+    fi
+
+    # 2. Second OS via os-prober. Upstream GRUB disables os-prober by default;
+    # it is explicitly enabled here (user opt-in) and only ever generates
+    # entries when another OS is actually detected.
+    if ! pacman -Q os-prober &>/dev/null 2>&1; then
+        log_info "Installing os-prober for second-OS detection..."
+        install_packages_quietly os-prober 2>>"$INSTALL_LOG" \
+            || log_warning "os-prober install failed — second-OS entries unavailable"
+    fi
+    if pacman -Q os-prober &>/dev/null 2>&1; then
+        set_grub_config "GRUB_DISABLE_OS_PROBER" "false"
+        log_success "os-prober enabled (entries appear only if a second OS is found)"
+    fi
+
+    # 3. Snapshots between kernels and os-prober (btrfs + snapper/timeshift
+    # only). The package ships 41_snapshots-btrfs, which sorts after
+    # 30_os-prober — so a managed 15_ copy is kept in sync ahead of it while
+    # the 41 original stays non-executable (entries generated exactly once).
+    if ! is_btrfs_system 2>/dev/null; then
+        log_info "Root is not btrfs — skipping snapshot menu entries"
+        return 0
+    fi
+    if ! pacman -Q snapper &>/dev/null 2>&1 && ! pacman -Q timeshift &>/dev/null 2>&1; then
+        log_info "Neither snapper nor timeshift installed — skipping snapshot menu entries"
+        return 0
+    fi
+    local snap_src="/etc/grub.d/41_snapshots-btrfs"
+    local snap_dst="/etc/grub.d/15_snapshots-btrfs"
+    if ! pacman -Q grub-btrfs &>/dev/null 2>&1; then
+        log_info "Installing grub-btrfs for snapshot boot entries..."
+        if ! install_packages_quietly grub-btrfs 2>>"$INSTALL_LOG"; then
+            log_warning "grub-btrfs install failed — skipping snapshot menu entries"
+            [[ -f "$snap_dst" ]] && sudo grep -q "Managed by archinstaller" "$snap_dst" 2>/dev/null \
+                && sudo rm -f "$snap_dst" 2>/dev/null || true
+            return 0
+        fi
+    fi
+    if [[ -f "$snap_src" ]]; then
+        if [[ ! -f "$snap_dst" ]] || [[ "$snap_src" -nt "$snap_dst" ]]; then
+            if sudo cp "$snap_src" "$snap_dst" 2>/dev/null \
+                && echo "# Managed by archinstaller — runs snapshot entries ahead of os-prober" \
+                    | sudo tee -a "$snap_dst" >/dev/null; then
+                log_success "Snapshot menu entries placed ahead of os-prober (15_snapshots-btrfs)"
+            else
+                log_warning "Could not install 15_snapshots-btrfs"
+                return 0
+            fi
+        else
+            log_info "Snapshot menu order already in place (15_snapshots-btrfs)"
+        fi
+        sudo chmod +x "$snap_dst" 2>/dev/null || true
+        sudo chmod -x "$snap_src" 2>/dev/null || true
+    else
+        log_warning "grub-btrfs installed but $snap_src missing — snapshot entries unavailable"
+        return 0
+    fi
+    if sudo systemctl enable --now grub-btrfsd.service >>"$INSTALL_LOG" 2>&1; then
+        log_success "grub-btrfsd enabled (snapshot menu refreshes automatically)"
+    else
+        log_warning "Could not enable grub-btrfsd — snapshot entries still generate at grub-mkconfig time"
+    fi
+}
+
 # PART 3: HELPER FUNCTIONS
 
 set_grub_config() {
@@ -923,7 +1027,14 @@ set_grub_config() {
     local grub_config="/etc/default/grub"
 
     if grep -q "^${key}=" "$grub_config" 2>/dev/null; then
-        sudo sed -i "s/^${key}=.*/${key}=${value}/" "$grub_config"
+        # Values can contain '/' (e.g. rootflags=subvol=/@) and '&', both of
+        # which are special in the sed replacement — escape them first, or the
+        # write silently fails with "unknown option to `s'" (observed on a
+        # real btrfs run: GRUB_CMDLINE_LINUX_DEFAULT never updated).
+        local escaped_value="${value//\\/\\\\}"
+        escaped_value="${escaped_value//\//\\/}"
+        escaped_value="${escaped_value//&/\\&}"
+        sudo sed -i "s/^${key}=.*/${key}=${escaped_value}/" "$grub_config"
     else
         echo "${key}=${value}" | sudo tee -a "$grub_config" >/dev/null
     fi

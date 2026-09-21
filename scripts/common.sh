@@ -839,7 +839,7 @@ show_gum_menu() {
   echo ""
   
   gum style --margin "1 0" --foreground "$GUM_WARN" "This script will transform your fresh Arch Linux installation into a"
-  gum style --margin "0 0 1 0" --foreground "$GUM_WARN" "fully configured, optimized system with all the tools you need!"
+  gum style --margin "0 0 1 0" --foreground "$GUM_WARN" "fully configured system with all the tools you need!"
 
   local choice=$(gum choose --cursor="-> " --selected.foreground "$GUM_PRIMARY" --cursor.foreground "$GUM_PRIMARY" \
     "Standard - Complete setup with all packages (intermediate users)" \
@@ -898,7 +898,7 @@ show_traditional_menu() {
   echo "Your OS is: $detected_os"
   echo ""
   echo "This script will transform your fresh Arch Linux installation into a"
-  echo "fully configured, optimized system with all the tools you need!"
+  echo "fully configured system with all the tools you need!"
   echo ""
   echo -e "${THEME_HEADER}Choose your installation mode:${RESET}"
   echo ""

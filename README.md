@@ -2,7 +2,7 @@
 
 **Automated, hardware-aware post-installation setup for Arch Linux and EndeavourOS.**
 
-ArchInstaller turns a fresh, minimal Arch install into a fully configured, optimized
+ArchInstaller turns a fresh, minimal Arch install into a fully configured
 desktop or server in one guided run. It detects your CPU, GPU, storage type, laptop
 model, desktop environment, and bootloader, then applies targeted configuration for
 *your* hardware instead of generic one-size-fits-all settings — and it's safe to
@@ -36,17 +36,17 @@ re-run if something is interrupted.
 
 ## Features
 
-- **Hardware-aware CPU tuning** — Intel/AMD detection with the correct microcode package
+- **Hardware-aware CPU configuration** — Intel/AMD detection with the correct microcode package
 - **Automatic GPU driver installation** — AMD/Intel, picks the right driver stack
-- **Storage-aware I/O tuning** — NVMe/SSD/HDD get the appropriate scheduler
+- **Storage detection** — NVMe/SSD/HDD reported, kernel scheduler defaults kept
 - **Desktop environment detection** — KDE Plasma 6+, GNOME 46+, Cosmic get DE-specific tweaks
-- **Laptop detection and optimization** — manufacturer/model-aware power and function-key handling
+- **Laptop detection and configuration** — manufacturer/model-aware power and function-key handling
 - **Security hardening** — UFW or Firewalld, plus Fail2ban with SSH jail protection
 - **Gaming Mode** (optional) — Steam, Wine, GameMode, MangoHud, Goverlay, Heroic, LACT (AMD GPU control), and multilib setup
-- **Smart AMD P-State handling** with gaming-aware governor selection
-- **Wake-on-LAN configuration** for wired desktops
+- **AMD P-State detection** with kernel cmdline enablement where supported
+- **Wake-on-LAN configuration** for wired desktops (explicit opt-in)
 - **Zsh + Oh My Zsh + Starship prompt**, pre-configured
-- **Three bootloaders supported** — GRUB, systemd-boot, and Limine — each with tuned timeouts and kernel params
+- **Three bootloaders supported** — GRUB, systemd-boot, and Limine — each with configured timeouts and kernel params
 - **Resumable installs** — re-running after an interruption skips completed steps
 - **Dry-run mode** — preview every step with no changes made to your system
 
@@ -80,7 +80,7 @@ Want to see what would happen first, with zero changes to your system?
 
 | Mode         | Best for                              | What you get                                             |
 |--------------|----------------------------------------|-----------------------------------------------------------|
-| **Standard** | Intermediate users, daily-driver setups | Full package set, all recommended tools and optimizations |
+| **Standard** | Intermediate users, daily-driver setups | Full package set, all recommended tools and configuration |
 | **Minimal**  | New users, lightweight installs        | Essential tools only, smaller footprint                   |
 | **Server**   | Headless machines                       | SSH, Docker-ready, server utilities — no desktop packages, no Gaming Mode |
 
@@ -115,15 +115,15 @@ The installer runs 10 steps end to end, shown live in the dashboard. Steps marke
 
 | # | Step | Notes |
 |---|------|-------|
-| 1 | System Preparation *(ask)* | Mirrors, multilib repo, pacman tuning, locale generation |
+| 1 | System Preparation *(ask)* | Mirrors, multilib repo, pacman display settings, locale generation |
 | 2 | Shell Setup | Zsh, Oh My Zsh, Starship |
 | 3 | Yay Installation | AUR helper build |
 | 4 | Programs Installation | Mode- and DE-specific package set from `configs/programs.yaml` |
 | 5 | Gaming Mode *(optional)* | Skipped in Server mode; declining is not treated as a failure |
-| 6 | Bootloader & Kernel Configuration *(ask)* | GRUB / systemd-boot / Limine, kernel params, initramfs |
-| 7 | System Services | CPU/GPU/storage tuning, laptop optimizations, memory/zram tuning |
+| 6 | Bootloader & Kernel Configuration *(ask)* | GRUB / systemd-boot / Limine, kernel params, initramfs (GRUB: kernels, snapshots, second OS via os-prober) |
+| 7 | System Services | Hardware detection, laptop function-key/power handling, memory/storage reporting |
 | 8 | Fail2ban Setup | SSH jail protection |
-| 9 | Wake-on-LAN Configuration | Wired desktops only |
+| 9 | Wake-on-LAN Configuration | Wired desktops only, explicit opt-in (default: off) |
 | 10 | Maintenance | Cleanup, orphan removal, final system checks |
 
 ## Project structure

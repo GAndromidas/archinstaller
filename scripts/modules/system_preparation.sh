@@ -10,10 +10,11 @@ if [[ "${DRY_RUN:-false}" == true ]]; then
   exit 0
 fi
 
-# NOTE: Network-speed testing was removed. A single-stream curl test is a poor
-# proxy for pacman throughput (it often times out on slow links and adds
-# unnecessary install latency). ParallelDownloads is set to a fixed value (10)
-# in configure_pacman(), which is a sensible default for slow and fast links.
+# NOTE: Pacman behavior is left at distro defaults. Cosmetic/arbitrary
+# tweaks such as ILoveCandy or a forced ParallelDownloads value have been
+# removed — they change package-manager behavior for no functional reason.
+# Only display-neutral, non-behavioral settings (Color, VerbosePkgLists) and
+# the required multilib repository are managed here.
 
 check_prerequisites() {
   step "Checking system prerequisites"
@@ -40,24 +41,10 @@ check_prerequisites() {
 }
 
 configure_pacman() {
-  step "Configuring pacman optimizations"
+  step "Configuring pacman"
 
   # Ensure mirrorlist exists before any pacman operation
   generate_default_mirrorlist
-
-  # Fixed parallel download count — a good default for both slow and fast links.
-  local parallel_downloads=10
-
-  if grep -q "^#ParallelDownloads" /etc/pacman.conf; then
-    sudo sed -i "s/^#ParallelDownloads.*/ParallelDownloads = $parallel_downloads/" /etc/pacman.conf
-    log_success "Uncommented and set ParallelDownloads = $parallel_downloads"
-  elif grep -q "^ParallelDownloads" /etc/pacman.conf; then
-    sudo sed -i "s/^ParallelDownloads.*/ParallelDownloads = $parallel_downloads/" /etc/pacman.conf
-    log_success "Updated ParallelDownloads = $parallel_downloads"
-  else
-    sudo sed -i "/^\[options\]/a ParallelDownloads = $parallel_downloads" /etc/pacman.conf
-    log_success "Added ParallelDownloads = $parallel_downloads"
-  fi
 
   if grep -q "^#Color" /etc/pacman.conf; then
     sudo sed -i 's/^#Color/Color/' /etc/pacman.conf
@@ -67,11 +54,6 @@ configure_pacman() {
   if grep -q "^#VerbosePkgLists" /etc/pacman.conf; then
     sudo sed -i 's/^#VerbosePkgLists/VerbosePkgLists/' /etc/pacman.conf
     log_success "Uncommented VerbosePkgLists setting"
-  fi
-
-  if ! grep -q "^ILoveCandy" /etc/pacman.conf; then
-    sudo sed -i '/^Color/a ILoveCandy' /etc/pacman.conf
-    log_success "Added ILoveCandy setting"
   fi
 
   enable_multilib_repo
@@ -280,9 +262,9 @@ generate_locales() {
   fi
 }
 
-# Execute system preparation — optimized order:
+# Execute system preparation in dependency order:
 # 1. Prerequisites
-# 2. Configure pacman (ParallelDownloads=10, multilib, color)
+# 2. Configure pacman (Color, VerbosePkgLists, multilib — distro download defaults kept)
 # 3. Install the mirror ranking tool (rate-mirrors) so the ranking below works
 # 4. Update mirrors FIRST so all subsequent downloads are fast
 #    (update_system_mirrors syncs once with -Syy after ranking)

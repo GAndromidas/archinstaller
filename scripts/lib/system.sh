@@ -142,7 +142,7 @@ detect_bootloader() {
     # EFISTUB: kernels live directly on a FAT /boot with no bootloader
     # directory at all (official archinstall efistub layout).
     elif [[ "$(sudo findmnt -n -o FSTYPE /boot 2>/dev/null || findmnt -n -o FSTYPE /boot 2>/dev/null)" == "vfat" ]] && \
-         sudo ls /boot/vmlinuz-* >/dev/null 2>&1; then
+         sudo find /boot -maxdepth 1 -name 'vmlinuz-*' -print -quit 2>/dev/null | grep -q .; then
         bootloader="efistub"
     # Tier 2: Installed-package detection (may have false positives for inactive bootloaders)
     elif pacman -Q limine &>/dev/null 2>&1; then
@@ -179,11 +179,11 @@ is_uki_system() {
 
     # Method 1: UKI .efi files exist in the ESP (use sudo for /boot due to 700 perms with UKI).
     # archinstall writes them to <esp>/EFI/Linux/ — cover every ESP mountpoint.
-    if sudo test -d /boot/efi/EFI/Linux 2>/dev/null && sudo ls /boot/efi/EFI/Linux/*.efi >/dev/null 2>&1; then
+    if sudo find /boot/efi/EFI/Linux -maxdepth 1 -name '*.efi' -print -quit 2>/dev/null | grep -q .; then
         result="true"
-    elif sudo test -d /boot/EFI/Linux 2>/dev/null && sudo ls /boot/EFI/Linux/*.efi >/dev/null 2>&1; then
+    elif sudo find /boot/EFI/Linux -maxdepth 1 -name '*.efi' -print -quit 2>/dev/null | grep -q .; then
         result="true"
-    elif sudo test -d /efi/EFI/Linux 2>/dev/null && sudo ls /efi/EFI/Linux/*.efi >/dev/null 2>&1; then
+    elif sudo find /efi/EFI/Linux -maxdepth 1 -name '*.efi' -print -quit 2>/dev/null | grep -q .; then
         result="true"
     fi
 

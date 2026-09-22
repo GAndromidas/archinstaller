@@ -860,7 +860,13 @@ configure_grub() {
     set_grub_config "GRUB_SAVEDEFAULT" "true"
 
     set_grub_config "GRUB_DISABLE_SUBMENU" "notlinux"
-    set_grub_config "GRUB_GFXMODE" "auto"
+    # Native display resolution so the menu isn't rendered in a stretched
+    # low-res fallback (giant text on 2K/HiDPI panels); `,auto` keeps a
+    # fallback if the detected mode is ever unavailable.
+    local grub_res
+    grub_res=$(detect_display_resolution 2>/dev/null || echo "1920x1080")
+    [[ "$grub_res" =~ ^[0-9]+x[0-9]+$ ]] || grub_res="1920x1080"
+    set_grub_config "GRUB_GFXMODE" "$grub_res,auto"
     set_grub_config "GRUB_GFXPAYLOAD_LINUX" "keep"
 
     # Merge kernel parameters (quiet, splash, nvidia, etc.) with the existing
@@ -882,10 +888,22 @@ configure_grub() {
     configure_grub_menu_order
 
     local KERNELS=()
-    mapfile -t KERNELS < <(sudo ls /boot/vmlinuz-* 2>/dev/null | sed 's|/boot/vmlinuz-||g')
+    mapfile -t KERNELS < <(sudo find /boot -maxdepth 1 -name 'vmlinuz-*' 2>/dev/null | sed 's|.*/vmlinuz-||' | sort)
     if [[ ${#KERNELS[@]} -eq 0 ]]; then
-        log_error "No kernels found in /boot."
-        return 1
+        # kernel-install layout (/boot/<machine-id>/.../linux, no vmlinuz-*):
+        # stock 10_linux cannot see those kernels, but GRUB's blscfg parser
+        # reads the /boot/loader/entries/*.conf files kernel-install
+        # maintains. Same approach as the standalone Limine→GRUB migration.
+        local layout_count entry_count
+        layout_count=$(sudo find /boot -maxdepth 3 -type f -name linux 2>/dev/null | wc -l)
+        entry_count=$(sudo find /boot/loader/entries -maxdepth 1 -name '*.conf' 2>/dev/null | wc -l)
+        if [[ "$layout_count" -gt 0 && "$entry_count" -gt 0 ]]; then
+            set_grub_config "GRUB_ENABLE_BLSCFG" "true"
+            log_success "kernel-install layout detected — GRUB will boot via loader entries (blscfg)"
+        else
+            log_error "No kernels found in /boot."
+            return 1
+        fi
     fi
 
     local MAIN_KERNEL=""
@@ -1787,7 +1805,7 @@ configure_limine_snapper() {
     # them — same layout rule archinstall itself enforces.
     if [[ "$esp_mount" == "/boot" ]]; then
       local fresh_kernels=()
-      mapfile -t fresh_kernels < <(sudo ls /boot/vmlinuz-* 2>/dev/null | sed 's|/boot/vmlinuz-||g')
+      mapfile -t fresh_kernels < <(sudo find /boot -maxdepth 1 -name 'vmlinuz-*' 2>/dev/null | sed 's|.*/vmlinuz-||' | sort)
       if [[ ${#fresh_kernels[@]} -gt 0 ]]; then
         local full_params
         if ! full_params=$(get_kernel_params) || ! echo " $full_params " | grep -qE ' root=[^ ]+ '; then

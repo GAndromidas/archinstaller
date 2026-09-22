@@ -120,7 +120,7 @@ The installer runs 10 steps end to end, shown live in the dashboard. Steps marke
 | 3 | Yay Installation | AUR helper build |
 | 4 | Programs Installation | Mode- and DE-specific package set from `configs/programs.yaml` |
 | 5 | Gaming Mode *(optional)* | Skipped in Server mode; declining is not treated as a failure |
-| 6 | Bootloader & Kernel Configuration *(ask)* | GRUB / systemd-boot / Limine, kernel params, initramfs (GRUB: kernels, snapshots, second OS via os-prober) |
+| 6 | Bootloader & Kernel Configuration *(ask)* | GRUB / systemd-boot / Limine, kernel params, initramfs (GRUB: kernels, snapshots, second OS via os-prober, native resolution) |
 | 7 | System Services | Hardware detection, laptop function-key/power handling, memory/storage reporting |
 | 8 | Fail2ban Setup | SSH jail protection |
 | 9 | Wake-on-LAN Configuration | Wired desktops only, explicit opt-in (default: off) |

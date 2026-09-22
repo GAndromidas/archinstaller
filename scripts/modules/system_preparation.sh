@@ -138,7 +138,10 @@ install_all_packages() {
 }
 
 set_sudo_pwfeedback() {
-  if ! sudo grep -q '^Defaults.*pwfeedback' /etc/sudoers /etc/sudoers.d/* 2>/dev/null; then
+  # Globs must expand as root (sudo sh -c): /etc/sudoers.d is 750, so a
+  # user-expanded glob never matches and pwfeedback would be appended again
+  # on every run.
+  if ! sudo sh -c 'grep -q "^Defaults.*pwfeedback" /etc/sudoers /etc/sudoers.d/* 2>/dev/null'; then
     run_step "Enabling sudo password feedback" bash -c "echo 'Defaults env_reset,pwfeedback' | sudo EDITOR='tee -a' visudo"
   else
     log_warning "sudo pwfeedback already enabled. Skipping."

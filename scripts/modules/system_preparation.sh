@@ -10,10 +10,10 @@ if [[ "${DRY_RUN:-false}" == true ]]; then
   exit 0
 fi
 
-# NOTE: Pacman behavior is left at distro defaults. Cosmetic/arbitrary
-# tweaks such as ILoveCandy or a forced ParallelDownloads value have been
-# removed — they change package-manager behavior for no functional reason.
-# Only display-neutral, non-behavioral settings (Color, VerbosePkgLists) and
+# NOTE: Pacman behavior is left at distro defaults, except for the cosmetic
+# Color + ILoveCandy display options. A forced ParallelDownloads value has
+# been removed — it changes package-manager behavior for no functional
+# reason. Only display settings (Color, ILoveCandy, VerbosePkgLists) and
 # the required multilib repository are managed here.
 
 check_prerequisites() {
@@ -54,6 +54,19 @@ configure_pacman() {
   if grep -q "^#VerbosePkgLists" /etc/pacman.conf; then
     sudo sed -i 's/^#VerbosePkgLists/VerbosePkgLists/' /etc/pacman.conf
     log_success "Uncommented VerbosePkgLists setting"
+  fi
+
+  if grep -q "^ILoveCandy" /etc/pacman.conf; then
+    log_info "ILoveCandy already enabled — skipping"
+  elif grep -q "^#ILoveCandy" /etc/pacman.conf; then
+    sudo sed -i 's/^#ILoveCandy/ILoveCandy/' /etc/pacman.conf
+    log_success "Uncommented ILoveCandy setting"
+  elif grep -q "^Color" /etc/pacman.conf; then
+    sudo sed -i '/^Color/a ILoveCandy' /etc/pacman.conf
+    log_success "Added ILoveCandy setting"
+  else
+    sudo sed -i "/^\[options\]/a ILoveCandy" /etc/pacman.conf
+    log_success "Added ILoveCandy setting"
   fi
 
   enable_multilib_repo
@@ -267,7 +280,7 @@ generate_locales() {
 
 # Execute system preparation in dependency order:
 # 1. Prerequisites
-# 2. Configure pacman (Color, VerbosePkgLists, multilib — distro download defaults kept)
+# 2. Configure pacman (Color, ILoveCandy, VerbosePkgLists, multilib — distro download defaults kept)
 # 3. Install the mirror ranking tool (rate-mirrors) so the ranking below works
 # 4. Update mirrors FIRST so all subsequent downloads are fast
 #    (update_system_mirrors syncs once with -Syy after ranking)

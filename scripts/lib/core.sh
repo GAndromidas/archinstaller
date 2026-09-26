@@ -47,8 +47,11 @@ if [ -z "${GUM_PRIMARY:-}" ]; then
 fi
 
 # Global variables (/var/tmp survives reboots so resume works; /tmp does not)
-# NOTE: durations use monotonic $SECONDS (see install.sh/dashboard.sh) — never
-# wall-clock date math, which breaks across NTP/VM clock jumps.
+# NOTE: step/wall durations use mono_now() (dashboard.sh, install.sh) —
+# never bare $SECONDS. Bash $SECONDS tracks wall-clock time since shell
+# start, so an NTP/VM clock correction mid-install collapses every duration
+# to ~0 (observed: all steps + total "<1s" on a Boxes run whose work
+# demonstrably took minutes). /proc/uptime is monotonic and immune.
 export INSTALL_LOG="${INSTALL_LOG:-/var/tmp/archinstaller.log}"
 STATE_FILE="${STATE_FILE:-/var/tmp/archinstaller.state}"
 ERRORS=()
@@ -63,6 +66,20 @@ rotate_logs() {
         [ -f "${log}.$((i-1))" ] && mv -f "${log}.$((i-1))" "${log}.${i}" 2>/dev/null || true
     done
     [ -f "$log" ] && mv -f "$log" "${log}.1" 2>/dev/null || true
+}
+fi
+
+if ! declare -f mono_now >/dev/null 2>&1; then
+mono_now() {
+    # Integer monotonic seconds since boot; falls back to $SECONDS where
+    # /proc/uptime is unavailable.
+    local up
+    up=$(awk '{print int($1)}' /proc/uptime 2>/dev/null || echo "")
+    if [[ "$up" =~ ^[0-9]+$ ]]; then
+        echo "$up"
+    else
+        echo "$SECONDS"
+    fi
 }
 fi
 

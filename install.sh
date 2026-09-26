@@ -173,22 +173,27 @@ if [[ "$DRY_RUN" != true ]]; then
 fi
 
 init_core
-START_TIME_SEC=$SECONDS
+START_TIME_SEC=$(mono_now)
 export START_TIME_SEC
 
-# Silent gum bootstrap: always present before any interactive menu/prompt.
-# Dry-run never installs helpers. All output goes to the log, never to the
-# terminal. Tries fast path first (-S), then with a DB sync (-Sy) for fresh
-# archinstall systems with a stale/empty pacman DB.
-if [[ "$DRY_RUN" != true ]] && ! command -v gum >/dev/null 2>&1; then
-  log_to_file "Installing gum for enhanced UI experience..."
-  if sudo pacman -S --noconfirm --needed gum >>"$INSTALL_LOG" 2>&1; then
-    log_to_file "Gum installed successfully"
-  elif sudo pacman -Sy --noconfirm --needed gum >>"$INSTALL_LOG" 2>&1; then
-    log_to_file "Gum installed successfully (after DB sync)"
-  else
-    log_to_file "Failed to install gum, falling back to basic UI"
-  fi
+# Silent helper bootstrap: gum (UI) + yq (strict YAML parsing) are always
+# present before any interactive menu/prompt. Dry-run never installs
+# helpers. All output goes to the log, never to the terminal. Tries fast
+# path first (-S), then with a DB sync (-Sy) for fresh archinstall systems
+# with a stale/empty pacman DB.
+if [[ "$DRY_RUN" != true ]]; then
+  for __bootstrap_pkg in gum yq; do
+    command -v "$__bootstrap_pkg" >/dev/null 2>&1 && continue
+    log_to_file "Installing $__bootstrap_pkg..."
+    if sudo pacman -S --noconfirm --needed "$__bootstrap_pkg" >>"$INSTALL_LOG" 2>&1; then
+      log_to_file "$__bootstrap_pkg installed successfully"
+    elif sudo pacman -Sy --noconfirm --needed "$__bootstrap_pkg" >>"$INSTALL_LOG" 2>&1; then
+      log_to_file "$__bootstrap_pkg installed successfully (after DB sync)"
+    else
+      log_to_file "Failed to install $__bootstrap_pkg, continuing without it"
+    fi
+  done
+  unset __bootstrap_pkg
   # supports_gum() caches its first result — clear it so the menu and all
   # later prompts see the freshly installed binary.
   __supports_gum_cache=""
@@ -231,6 +236,8 @@ check_system_requirements() {
         *NVIDIA*)         log_to_file "  NVIDIA GPU: $gpu_info - proprietary drivers will be configured" ;;
         *"AMD"*|*Radeon*|*ATI*) log_to_file "  AMD GPU: $gpu_info - open-source drivers will be configured" ;;
         *Intel*)          log_to_file "  Intel GPU: $gpu_info - mesa drivers will be configured" ;;
+        *irtio*|*QXL*|*qxl*|*VMware*|*vmware*|*Bochs*|*bochs*|*Cirrus*|*cirrus*|*irtual*)
+          log_to_file "  Virtual GPU: $gpu_info - VM guest drivers will be configured" ;;
         *)                log_to_file "  Unknown GPU: $gpu_info - generic drivers will be used" ;;
       esac
     done <<< "$gpu_lines"
@@ -242,6 +249,8 @@ check_system_requirements() {
   if [ -n "$root_device" ]; then
     if echo "$root_device" | grep -q "nvme"; then
       log_to_file "NVMe storage detected (kernel default scheduler kept)"
+    elif [[ "$root_device" == vd* || "$root_device" == xvd* ]]; then
+      log_to_file "Virtual disk detected ($root_device, kernel default scheduler kept)"
     elif [ -b "/dev/$root_device" ] && [ "$(cat /sys/block/"${root_device}"/queue/rotational 2>/dev/null)" = "0" ]; then
       log_to_file "SSD storage detected (kernel default scheduler kept)"
     else
@@ -365,7 +374,7 @@ save_log_on_exit() {
       echo "Check the log above for details."
     else
       echo "Installation completed successfully!"
-      local elapsed=$(( SECONDS - START_TIME_SEC ))
+      local elapsed=$(( $(mono_now) - START_TIME_SEC ))
       (( elapsed < 0 )) && elapsed=0
       echo "Total installation time: $(format_time "$elapsed")"
     fi
@@ -478,7 +487,7 @@ else
   wol_exit=$?
   case "$wol_exit" in
     0) mark_step_complete_with_progress wakeonlan_config completed; dashboard_ok ;;
-    2) mark_step_complete_with_progress wakeonlan_config skipped; dashboard_warn "Skipped — no WoL-capable NIC" ;;
+    2) mark_step_complete_with_progress wakeonlan_config skipped; dashboard_skip "Skipped — no WoL-capable NIC" ;;
     *) mark_step_complete_with_progress wakeonlan_config failed; dashboard_fail; log_error "Wake-on-LAN configuration failed"; ui_warn "Wake-on-LAN configuration failed but continuing installation" ;;
   esac
 fi

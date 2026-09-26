@@ -50,6 +50,16 @@ if [[ -n "$cmdline" ]]; then
   if [[ "$cmdline" != *"root="* ]]; then
     warn "No root= in /proc/cmdline — unusual, worth a second look if boot felt slow/odd"
   fi
+  # Managed keys (quiet, splash, rootflags, loglevel) must appear exactly
+  # once — GRUB concatenates CMDLINE_LINUX + CMDLINE_LINUX_DEFAULT, so a key
+  # in both lands here twice. (Multi-value keys like rd.luks.uuid are
+  # legitimately repeated and deliberately not checked.)
+  for _dup_key in quiet splash rootflags loglevel; do
+    if [[ $(echo "$cmdline" | tr ' ' '\n' | grep -cE "^${_dup_key}(=|$)") -gt 1 ]]; then
+      warn "Duplicate '${_dup_key}' on kernel cmdline — check GRUB_CMDLINE_LINUX vs GRUB_CMDLINE_LINUX_DEFAULT"
+    fi
+  done
+  unset _dup_key
 else
   bad "Could not read /proc/cmdline"
 fi

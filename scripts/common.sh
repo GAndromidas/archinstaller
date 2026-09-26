@@ -75,7 +75,7 @@ elif [[ -f /etc/arch-release ]]; then
 fi
 
 # Dynamic helper utilities based on distribution
-BASE_HELPER_UTILS=(base-devel bc bluez-utils cronie curl eza fastfetch flatpak fzf git openssh pacman-contrib rate-mirrors rsync usbutils yq zoxide)
+BASE_HELPER_UTILS=(base-devel bc bluez-utils cronie curl ethtool eza fastfetch flatpak fzf git openssh pacman-contrib rate-mirrors rsync usbutils yq zoxide)
 FIREWALL_UTILS=(ufw)  # For Arch Linux
 
 # Build final HELPER_UTILS array
@@ -992,10 +992,13 @@ _summary_step_name() {
 
 # A short, de-duplicated list of anything from this run worth a second
 # look — surfaced here so it isn't buried in a multi-thousand-line log.
+# Anchored on our own timestamped log lines ([YYYY-MM-DD HH:MM:SS] ...),
+# so raw tool output tee'd into the log (yay's `==> WARNING: ...`,
+# pacman `warning: ...`) doesn't pollute the summary.
 # Best-effort only: a missing/unreadable log just means an empty section.
 _summary_warnings() {
   [[ -r "${INSTALL_LOG:-}" ]] || return 0
-  grep -E '(WARNING|ERROR):' "$INSTALL_LOG" 2>/dev/null \
+  grep -E '^\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\] (WARNING|ERROR):' "$INSTALL_LOG" 2>/dev/null \
     | sed -E 's/^\[[0-9: -]+\] //' \
     | sort -u \
     | head -8

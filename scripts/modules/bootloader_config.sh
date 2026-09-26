@@ -277,6 +277,41 @@ merge_kernel_params() {
   echo "${out[*]}"
 }
 
+# strip_managed_dupes <line> <reference> — drop tokens from <line> whose
+# managed key also appears in <reference>. GRUB boots with CMDLINE_LINUX +
+# CMDLINE_LINUX_DEFAULT concatenated, so a managed key (quiet, rootflags,
+# ...) present in both lands on /proc/cmdline twice. Unmanaged tokens
+# (cryptdevice, resume, ...) are always kept.
+strip_managed_dupes() {
+  local line="$1" reference="$2"
+  local ref_keys=() out=()
+  local tok key m managed seen
+  # shellcheck disable=SC2086
+  for m in $reference; do
+    [[ -z "$m" ]] && continue
+    ref_keys+=("$(_merge_param_key "$m")")
+  done
+  # shellcheck disable=SC2086
+  for tok in $line; do
+    [[ -z "$tok" ]] && continue
+    key=$(_merge_param_key "$tok")
+    managed=false
+    # shellcheck disable=SC2076
+    if [[ " $MANAGED_PARAM_KEYS " =~ " $key " ]]; then
+      managed=true
+    fi
+    if [[ "$managed" == true && " ${ref_keys[*]} " == *" $key "* ]]; then
+      continue
+    fi
+    seen=false
+    for m in ${out[@]+"${out[@]}"}; do
+      [[ "$m" == "$tok" ]] && seen=true && break
+    done
+    [[ "$seen" == false ]] && out+=("$tok")
+  done
+  echo "${out[*]}"
+}
+
 # detect_root_uuid — echo the live root filesystem UUID for root=UUID=.
 # Fallback chain: findmnt, then blkid on the backing device (covers odd
 # btrfs-subvolume and mapper layouts). Fails loudly when undetectable.
@@ -881,6 +916,22 @@ configure_grub() {
     # Quote: /etc/default/grub is shell-sourced, unquoted spaces break it.
     set_grub_config "GRUB_CMDLINE_LINUX_DEFAULT" "\"$grub_merged\""
     ui_info "Kernel parameters: $grub_merged"
+
+    # GRUB boots with CMDLINE_LINUX + CMDLINE_LINUX_DEFAULT concatenated —
+    # if archinstall left managed keys (quiet, rootflags, ...) in LINUX as
+    # well, they land on /proc/cmdline twice. Strip managed dupes from
+    # LINUX (unmanaged tokens like cryptdevice/resume are untouched).
+    local grub_linux=""
+    grub_linux=$(grep -E '^GRUB_CMDLINE_LINUX=' /etc/default/grub 2>/dev/null | cut -d= -f2- | tr -d '"' || echo "")
+    if [[ -n "$grub_linux" ]]; then
+      local grub_linux_cleaned
+      grub_linux_cleaned=$(strip_managed_dupes "$grub_linux" "$grub_merged")
+      grub_linux_cleaned=$(echo "$grub_linux_cleaned" | tr -s ' ' | sed 's/^ //; s/ $//')
+      if [[ "$grub_linux_cleaned" != "$grub_linux" ]]; then
+        set_grub_config "GRUB_CMDLINE_LINUX" "\"$grub_linux_cleaned\""
+        log_info "Removed duplicate managed params from GRUB_CMDLINE_LINUX (now: ${grub_linux_cleaned:-<empty>})"
+      fi
+    fi
 
     # Menu layout: kernels first, snapshots second, other OSes third, no
     # firmware entry. Runs before the kernel check so the layout persists

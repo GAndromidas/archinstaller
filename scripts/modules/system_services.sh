@@ -28,12 +28,15 @@ setup_firewall_and_services() {
   # splash params (step 6) are managed here.
 }
 
-# Safe SSH hardening via a drop-in (never edits sshd_config itself, so
+# Safe SSH hardening via a drop-in (settings live in sshd_config.d, so
 # distro updates and user edits can't conflict). Only settings with zero
 # lockout risk: root keeps key auth (prohibit-password), regular users and
 # password auth are untouched, fail2ban already handles brute force.
-# Every write is validated with `sshd -t` and rolled back on failure, and
-# the daemon is reloaded (not restarted) so active sessions survive.
+# If the main sshd_config lost its `Include sshd_config.d/*.conf` line the
+# drop-in is silently ignored — detected via `sshd -T`, repaired by
+# restoring that single Include line (backup + validation + rollback).
+# Every write is validated with `sshd -t`, and the daemon is reloaded
+# (not restarted) so active sessions survive.
 harden_sshd() {
   step "Applying safe SSH hardening"
 
@@ -74,7 +77,9 @@ harden_sshd() {
 
   # Arch's sshd_config ships `Include sshd_config.d/*.conf`; on a system
   # where it was removed the drop-in is silently ignored — detect that via
-  # the effective config and fall back to the main file if needed.
+  # the effective config and repair it by restoring the Include line itself
+  # (one line at the top, so drop-in values are first-obtained and win;
+  # existing directives are untouched). Backup + sshd -t + rollback.
   if ! sudo sshd -t 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
     log_warning "sshd config test failed after hardening — rolling back"
     if [[ "$created_by_us" == true ]]; then
@@ -84,7 +89,13 @@ harden_sshd() {
   fi
   effective=$(sudo sshd -T 2>/dev/null | awk '$1=="permitrootlogin" {print $2; exit}' || true)
   if [[ "${effective,,}" != "${want_permit,,}" ]]; then
-    log_warning "Drop-in ignored (no Include directive?) — leaving $dropin in place, no fallback applied to avoid touching sshd_config"
+    log_warning "Drop-in ignored (no Include directive?) — restoring Include in sshd_config"
+    if harden_sshd_restore_include; then
+      effective=$(sudo sshd -T 2>/dev/null | awk '$1=="permitrootlogin" {print $2; exit}' || true)
+    fi
+  fi
+  if [[ "${effective,,}" != "${want_permit,,}" ]]; then
+    log_warning "SSH hardening still not in effect — leaving $dropin in place (check Include in /etc/ssh/sshd_config)"
     return 0
   fi
 
@@ -93,6 +104,46 @@ harden_sshd() {
   else
     log_warning "Hardening written but sshd reload failed — takes effect on next restart"
   fi
+}
+
+# Restore the `Include sshd_config.d/*.conf` line at the top of the main
+# sshd_config when it is missing (drop-in silently ignored otherwise).
+# Idempotent: no-op when an active Include already exists. Backup +
+# `sshd -t` validation with rollback on failure. Returns 0 when an active
+# Include is in place afterwards, 1 otherwise.
+harden_sshd_restore_include() {
+  local main="/etc/ssh/sshd_config"
+  if sudo grep -qE '^[[:space:]]*Include[[:space:]].*sshd_config\.d' "$main" 2>/dev/null; then
+    log_info "Include for sshd_config.d already present in $main"
+    return 0
+  fi
+  sudo cp "$main" "${main}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || {
+    log_warning "Failed to back up $main — leaving sshd_config untouched"
+    return 1
+  }
+  local tmp
+  tmp=$(mktemp /tmp/sshd_config.XXXXXX) || return 1
+  {
+    echo "# Added by archinstaller — enables sshd_config.d drop-ins (managed)"
+    echo "Include /etc/ssh/sshd_config.d/*.conf"
+    echo ""
+    sudo cat "$main" 2>/dev/null
+  } > "$tmp" || { rm -f "$tmp"; return 1; }
+  if ! sudo cp "$tmp" "$main" 2>/dev/null; then
+    log_warning "Failed to write $main — leaving sshd_config untouched"
+    rm -f "$tmp"
+    return 1
+  fi
+  rm -f "$tmp"
+  if sudo sshd -t 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
+    log_success "Restored Include in $main — drop-in is now active"
+    return 0
+  fi
+  log_warning "sshd config test failed after Include restore — rolling back"
+  local latest_backup
+  latest_backup=$(ls -t "${main}.backup."* 2>/dev/null | head -1 || true)
+  [[ -n "$latest_backup" ]] && sudo cp "$latest_backup" "$main" 2>/dev/null || true
+  return 1
 }
 
 # Detect effective sshd port (sshd -T is authoritative, fallback to
@@ -715,10 +766,12 @@ ensure_nvidia_initramfs_modules() {
 verify_gpu_driver() {
   step "Verifying GPU driver installation"
 
-  # Check which driver is in use
-  if lspci -k | grep -A 3 -iE 'vga|3d|display' | grep -iq 'Kernel driver in use'; then
+  # Check which driver is in use (stderr suppressed: libkmodhelper errors
+  # like "Unable to load libkmod resources" are harmless in VMs/containers
+  # but clutter the log when lspci runs twice below)
+  if lspci -k 2>/dev/null | grep -A 3 -iE 'vga|3d|display' | grep -iq 'Kernel driver in use'; then
     log_info "GPU driver status:"
-    lspci -k | grep -A 3 -iE 'vga|3d|display' | grep -E 'VGA|3D|Display|Kernel driver'
+    lspci -k 2>/dev/null | grep -A 3 -iE 'vga|3d|display' | grep -E 'VGA|3D|Display|Kernel driver'
     log_success "GPU driver is loaded and in use"
   else
     log_warning "Could not verify GPU driver status"

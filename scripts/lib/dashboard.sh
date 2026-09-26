@@ -4,6 +4,20 @@ set -uo pipefail
 # Dashboard: full-screen wizard frame via pure bash + tput, in-place step
 # updates, no external deps.
 
+# Local mono_now fallback (core.sh defines the canonical one; this keeps
+# dashboard.sh functional if sourced standalone).
+if ! declare -f mono_now >/dev/null 2>&1; then
+mono_now() {
+    local up
+    up=$(awk '{print int($1)}' /proc/uptime 2>/dev/null || echo "")
+    if [[ "$up" =~ ^[0-9]+$ ]]; then
+        echo "$up"
+    else
+        echo "$SECONDS"
+    fi
+}
+fi
+
 DASHBOARD_START_SEC=-1
 DASHBOARD_STEP_TIMES=()
 DASHBOARD_STEP_NAMES=()
@@ -27,7 +41,7 @@ dashboard_init() {
     if dashboard_is_tty; then clear; fi
     if ! dashboard_is_tty; then
       DASHBOARD_PLAIN=true
-      DASHBOARD_START_SEC=$SECONDS
+      DASHBOARD_START_SEC=$(mono_now)
       echo "Arch Installer (plain output — non-interactive terminal)"
       return 0
     fi
@@ -103,7 +117,7 @@ dashboard_init() {
     DASHBOARD_FRAME_END=$row
 
     # Start timer AFTER frame is drawn so init overhead isn't counted
-    DASHBOARD_START_SEC=$SECONDS
+    DASHBOARD_START_SEC=$(mono_now)
 
     tput cup $((DASHBOARD_ROW_OFFSET + DASHBOARD_FRAME_END + 1)) 0
 }
@@ -113,7 +127,7 @@ dashboard_step() {
     if [[ "$DASHBOARD_PLAIN" == true ]]; then
       DASHBOARD_CURRENT_STEP=$num
       DASHBOARD_STEP_NAMES[$num]="$name"
-      DASHBOARD_STEP_SEC=$SECONDS
+      DASHBOARD_STEP_SEC=$(mono_now)
       DASHBOARD_STEP_STATUSES[$num]="running"
       echo "▶ Step $num: $name"
       return 0
@@ -125,7 +139,7 @@ dashboard_step() {
     DASHBOARD_STEP_NAMES[$num]="$name"
     DASHBOARD_STEP_TIMES[$num]=0
     DASHBOARD_STEP_STATUSES[$num]="running"
-    DASHBOARD_STEP_SEC=$SECONDS
+    DASHBOARD_STEP_SEC=$(mono_now)
 
     local pct=$(( (num - 1) * 100 / total ))
 
@@ -191,7 +205,7 @@ dashboard_run() {
 dashboard_ok() {
     local num=$DASHBOARD_CURRENT_STEP
     local elapsed=0
-    [ "$DASHBOARD_STEP_SEC" -ge 0 ] && elapsed=$((SECONDS - DASHBOARD_STEP_SEC))
+    [ "$DASHBOARD_STEP_SEC" -ge 0 ] && elapsed=$(( $(mono_now) - DASHBOARD_STEP_SEC ))
     (( elapsed < 0 )) && elapsed=0
     if [[ "$DASHBOARD_PLAIN" == true ]]; then
       DASHBOARD_STEP_STATUSES[$num]="ok"
@@ -224,7 +238,7 @@ dashboard_fail() {
       return 0
     fi
     local elapsed=0
-    [ "$DASHBOARD_STEP_SEC" -ge 0 ] && elapsed=$((SECONDS - DASHBOARD_STEP_SEC))
+    [ "$DASHBOARD_STEP_SEC" -ge 0 ] && elapsed=$(( $(mono_now) - DASHBOARD_STEP_SEC ))
     (( elapsed < 0 )) && elapsed=0
     local w=$DASHBOARD_INNER_W
     DASHBOARD_STEP_STATUSES[$num]="fail"
@@ -278,7 +292,7 @@ dashboard_warn() {
       return 0
     fi
     local elapsed=0
-    [ "$DASHBOARD_STEP_SEC" -ge 0 ] && elapsed=$((SECONDS - DASHBOARD_STEP_SEC))
+    [ "$DASHBOARD_STEP_SEC" -ge 0 ] && elapsed=$(( $(mono_now) - DASHBOARD_STEP_SEC ))
     (( elapsed < 0 )) && elapsed=0
     local num=$DASHBOARD_CURRENT_STEP
     local w=$DASHBOARD_INNER_W
@@ -316,7 +330,7 @@ dashboard_finish() {
 
     local wall_time=0
     if [[ "$DASHBOARD_START_SEC" -ge 0 ]]; then
-        wall_time=$(( SECONDS - DASHBOARD_START_SEC ))
+        wall_time=$(( $(mono_now) - DASHBOARD_START_SEC ))
     fi
     (( wall_time < 0 )) && wall_time=0
     local cols

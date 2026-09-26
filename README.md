@@ -42,7 +42,7 @@ re-run if something is interrupted.
 - **Desktop environment detection** — KDE Plasma 6+, GNOME 46+, Cosmic get DE-specific tweaks
 - **Laptop detection and configuration** — manufacturer/model-aware power and function-key handling
 - **Security hardening** — UFW or Firewalld, plus Fail2ban with SSH jail protection
-- **Gaming Mode** (optional) — Steam, Wine, GameMode, MangoHud, Goverlay, Heroic, LACT (AMD GPU control), and multilib setup
+- **Gaming Mode** (optional) — Steam, Wine, Ananicy-Cpp, MangoHud, Goverlay, Heroic, LACT (AMD GPU control), and multilib setup
 - **AMD P-State detection** with kernel cmdline enablement where supported
 - **Wake-on-LAN configuration** for wired desktops (explicit opt-in)
 - **Zsh + Oh My Zsh + Starship prompt**, pre-configured

@@ -5,10 +5,8 @@ pacman:
   packages:
     - name: discord
       description: "Voice and text chat for gamers"
-    - name: gamemode
-      description: "GameMode daemon for performance optimization"
-    - name: lib32-gamemode
-      description: "32-bit GameMode libraries"
+    - name: ananicy-cpp
+      description: "Auto NICe daemon for performance optimization"
     - name: goverlay
       description: "Gaming overlay for performance monitoring"
     - name: mangohud
@@ -21,6 +19,12 @@ pacman:
       description: "Digital distribution platform for games"
     - name: wine
       description: "Compatibility layer for running Windows applications"
+
+# AUR packages for gaming setup (installed with yay)
+aur:
+  packages:
+    - name: cachyos-ananicy-rules-git
+      description: "CachyOS Ananicy rules for performance optimization"
 
 # Flatpak applications for gaming
 flatpak:

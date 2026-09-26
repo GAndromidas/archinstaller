@@ -1132,7 +1132,7 @@ prompt_reboot() {
   echo -e "  ${THEME_TEXT}•${RESET} Reboot to apply kernel, bootloader, and driver changes."
   echo -e "  ${THEME_TEXT}•${RESET} Log out/in (or open a new terminal) to start using Zsh + Starship."
   if is_step_complete gaming_mode 2>/dev/null; then
-    echo -e "  ${THEME_TEXT}•${RESET} Gaming Mode is set up — Steam, Wine, and GameMode are in your app menu."
+    echo -e "  ${THEME_TEXT}•${RESET} Gaming Mode is set up — Steam, Wine, and Ananicy-Cpp are in your app menu."
   fi
   if [[ "$INSTALL_MODE" == "server" ]]; then
     echo -e "  ${THEME_TEXT}•${RESET} SSH is protected by fail2ban; connect as usual with your existing key/password."

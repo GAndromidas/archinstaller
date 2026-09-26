@@ -15,6 +15,7 @@ source "$SCRIPT_DIR/../common.sh"
 GAMING_ERRORS=()
 GAMING_INSTALLED=()
 pacman_gaming_programs=()
+aur_gaming_programs=()
 flatpak_gaming_programs=()
 
 # ===== Local Helper Functions =====
@@ -47,6 +48,7 @@ load_package_lists() {
 
 	# Using config.sh library functions for YAML parsing
 	read_yaml_packages_with_desc "$GAMING_YAML" ".pacman.packages" pacman_gaming_programs temp_descriptions
+	read_yaml_packages_with_desc "$GAMING_YAML" ".aur.packages" aur_gaming_programs temp_descriptions
 	read_yaml_packages_with_desc "$GAMING_YAML" ".flatpak.packages" flatpak_gaming_programs temp_descriptions
 	return 0
 }
@@ -82,6 +84,42 @@ install_pacman_packages() {
 
 	for pkg in "${pacman_gaming_programs[@]}"; do
 		if pacman_install_single "$pkg" true; then GAMING_INSTALLED+=("$pkg"); else GAMING_ERRORS+=("$pkg (pacman)"); fi
+	done
+}
+
+install_aur_packages() {
+	if [[ ${#aur_gaming_programs[@]} -eq 0 ]]; then
+		ui_info "No AUR packages for gaming mode to install."
+		return
+	fi
+	if ! command -v yay >/dev/null 2>&1; then
+		ui_warn "yay is not installed. Skipping gaming AUR packages: ${aur_gaming_programs[*]}"
+		local _mpkg
+		for _mpkg in "${aur_gaming_programs[@]}"; do GAMING_ERRORS+=("$_mpkg (AUR — yay missing)"); done
+		return
+	fi
+	ui_info "Installing ${#aur_gaming_programs[@]} AUR packages for gaming with yay..."
+
+	# Dry-run: preview the AUR packages without modifying the system
+	if [ "${DRY_RUN:-false}" = true ]; then
+		ui_info "Dry-run: would install these gaming packages via yay (AUR):"
+		printf '  %s\n' "${aur_gaming_programs[@]}"
+		GAMING_INSTALLED+=("${aur_gaming_programs[@]}")
+		return
+	fi
+
+	# Try batch install first
+	printf '%b' "${THEME_TEXT}Attempting batch AUR installation...${RESET}\n"
+	if yay -S --noconfirm --needed "${aur_gaming_programs[@]}" >>"$INSTALL_LOG" 2>&1; then
+		printf '%b' "${THEME_SUCCESS} ✓ Batch AUR installation successful${RESET}\n"
+		GAMING_INSTALLED+=("${aur_gaming_programs[@]}")
+		return
+	fi
+
+	printf '%b' "${THEME_WARN} ! Batch AUR installation failed. Falling back to individual installation...${RESET}\n"
+
+	for pkg in "${aur_gaming_programs[@]}"; do
+		if yay_install_single "$pkg" true; then GAMING_INSTALLED+=("$pkg"); else GAMING_ERRORS+=("$pkg (AUR)"); fi
 	done
 }
 
@@ -126,14 +164,18 @@ configure_mangohud() {
 	fi
 }
 
-enable_gamemode() {
-	step "Enabling GameMode service"
-	# GameMode is a user service
-	if systemctl --user daemon-reload &>/dev/null && systemctl --user enable --now gamemoded &>/dev/null; then
-		log_success "GameMode service enabled and started successfully."
-	else
-		log_warning "Failed to enable or start GameMode service. It may require manual configuration."
+enable_ananicy() {
+	if ! pacman -Q ananicy-cpp &>/dev/null 2>&1; then
+		log_info "ananicy-cpp not installed — skipping daemon setup."
+		return 0
 	fi
+	step "Enabling Ananicy-Cpp daemon (auto NICe)"
+	if sudo systemctl enable --now ananicy-cpp.service >>"$INSTALL_LOG" 2>&1; then
+		log_success "ananicy-cpp enabled — process priorities are now managed automatically (CachyOS rules)."
+	else
+		log_warning "Failed to enable ananicy-cpp.service. Enable manually with: sudo systemctl enable --now ananicy-cpp.service"
+	fi
+	return 0
 }
 
 # True when an AMD GPU is present (LACT only drives AMDGPU)
@@ -176,7 +218,7 @@ main() {
 	step "Gaming Mode Setup"
 	simple_banner "Gaming Mode"
 
-	local description="This includes popular tools like Discord, Steam, Wine, GameMode, MangoHud, Goverlay, LACT (AMD GPU control), Heroic Games Launcher, and more."
+	local description="This includes popular tools like Discord, Steam, Wine, Ananicy-Cpp, MangoHud, Goverlay, LACT (AMD GPU control), Heroic Games Launcher, and more."
 	
 	# Uses ui_confirm (lib/ui.sh), which handles both the gum and
 	# plain-text-fallback confirmation paths.
@@ -200,22 +242,23 @@ main() {
 	filter_gpu_specific_packages
 
 	install_pacman_packages
+	install_aur_packages
 	install_flatpak_packages
 	configure_mangohud
-	enable_gamemode
+	enable_ananicy
 	enable_lact
 	
 	# Check current kernel for optimizations
 	local kernel=$(uname -r)
 	
 	log_info "Current kernel: $kernel"
-	log_info "Gaming optimizations applied via GameMode and gaming tools"
+	log_info "Gaming optimizations applied via Ananicy-Cpp and gaming tools"
 
 	if [ ${#GAMING_ERRORS[@]} -gt 0 ]; then
 		ui_warn "Gaming Mode completed with ${#GAMING_ERRORS[@]} failure(s): ${GAMING_ERRORS[*]}"
 	else
 		ui_success "Gaming Mode installation complete!"
-		ui_info "Your system is now optimized for gaming with GameMode and gaming tools."
+		ui_info "Your system is now optimized for gaming with Ananicy-Cpp and gaming tools."
 	fi
 }
 

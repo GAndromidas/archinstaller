@@ -277,9 +277,13 @@ else
   warn "yay not found"
 fi
 
-if pacman -Q steam &>/dev/null || pacman -Q gamemode &>/dev/null; then
+if pacman -Q steam &>/dev/null || pacman -Q ananicy-cpp &>/dev/null; then
   section "Gaming"
-  if command -v gamemoded &>/dev/null; then ok "GameMode installed"; else warn "gamemode package present but gamemoded not found"; fi
+  if pacman -Q ananicy-cpp &>/dev/null; then
+    if systemctl is-enabled --quiet ananicy-cpp.service 2>/dev/null; then ok "Ananicy-Cpp enabled (ananicy-cpp.service)"; else warn "ananicy-cpp installed but ananicy-cpp.service is not enabled"; fi
+    systemctl is-active --quiet ananicy-cpp.service 2>/dev/null && ok "Ananicy-Cpp is running" || warn "ananicy-cpp.service is not running (may require reboot or 'sudo systemctl start ananicy-cpp.service')"
+    if [[ -d /etc/ananicy.d ]] && ls /etc/ananicy.d/*.rules /etc/ananicy.d/*/*.rules &>/dev/null; then ok "Ananicy rules present in /etc/ananicy.d"; else warn "no Ananicy rules found in /etc/ananicy.d — install cachyos-ananicy-rules-git"; fi
+  fi
   pacman -Q steam &>/dev/null && ok "Steam installed"
   pacman -Q lib32-vulkan-icd-loader &>/dev/null && ok "32-bit Vulkan loader present (multilib working)"
 fi

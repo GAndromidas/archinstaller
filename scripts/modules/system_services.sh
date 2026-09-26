@@ -487,6 +487,15 @@ enable_services() {
     log_info "lact is not installed. Skipping lactd.service."
   fi
 
+  # Conditionally add ananicy-cpp.service if installed (Gaming Mode only —
+  # never installed otherwise, so absence means Gaming Mode was declined).
+  if pacman -Qi ananicy-cpp &>/dev/null 2>&1; then
+    services+=(ananicy-cpp.service)
+    log_success "ananicy-cpp.service will be enabled."
+  else
+    log_info "ananicy-cpp is not installed. Skipping ananicy-cpp.service."
+  fi
+
   # Power management is decided by the single policy in
   # ensure_single_power_manager (called below) — never append a power
   # manager to the bulk-enable list, or two managers could end up active.

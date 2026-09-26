@@ -1003,13 +1003,107 @@ configure_grub() {
     fi
 }
 
+# Cheap second-OS evidence WITHOUT os-prober, so os-prober is only
+# installed when actually needed. Three independent signals:
+#   1. NVRAM entries for foreign OS loaders (Windows Boot Manager and other
+#      distros' shims — our own Arch entry deliberately never matches).
+#   2. Foreign bootloader files on any ESP (unmounted ESPs get a temporary
+#      read-only mount, always cleaned up; our own ESP's arch dir excluded).
+#   3. NTFS partitions (Windows in any boot mode, incl. legacy/BIOS).
+# Returns 0 when any signal fires. Best-effort: a miss just means os-prober
+# stays uninstalled this run — re-evaluated every run.
+detect_second_os_evidence() {
+    # 1. NVRAM entries for foreign OS loaders.
+    if command -v efibootmgr &>/dev/null; then
+        if sudo efibootmgr -v 2>/dev/null | grep -qiE 'File\(\\EFI\\(Microsoft|ubuntu|fedora|debian|opensuse|suse|gentoo|centos|manjaro|endeavouros|pop|linuxmint|zorin|kali)'; then
+            return 0
+        fi
+    fi
+    # 2. Foreign bootloader files on ESPs.
+    if _esp_has_foreign_loader; then
+        return 0
+    fi
+    # 3. NTFS partitions (Windows, any boot mode).
+    if lsblk -n -o FSTYPE 2>/dev/null | grep -qi '^ntfs$'; then
+        return 0
+    fi
+    return 1
+}
+
+# True when some ESP carries a foreign OS loader: Windows bootmgfw.efi
+# anywhere (shared ESP is the common dual-boot layout), a non-arch vendor
+# shim/grub, or an arch grub on an ESP that is NOT ours (second Arch install
+# on another disk). Never true for our own ESP alone.
+_esp_has_foreign_loader() {
+    local our_esp our_part
+    our_esp=$(detect_esp_mount 2>/dev/null || echo "")
+    our_part=""
+    if [[ -n "$our_esp" ]]; then
+        our_part=$(findmnt -n -o SOURCE "$our_esp" 2>/dev/null || echo "")
+        our_part=$(readlink -f "$our_part" 2>/dev/null || echo "$our_part")
+    fi
+    local vfat_parts=()
+    while IFS= read -r p; do
+        [[ -n "$p" ]] && vfat_parts+=("/dev/$p")
+    done < <(lsblk -n -o NAME,FSTYPE 2>/dev/null | awk '$2=="vfat" {print $1}')
+    local part mnt tmp cleanup vendor vname this_part is_ours found
+    for part in ${vfat_parts[@]+"${vfat_parts[@]}"}; do
+        mnt=$(findmnt -n -o TARGET "$part" 2>/dev/null || echo "")
+        tmp=""; cleanup=false
+        if [[ -z "$mnt" ]]; then
+            mnt=$(mktemp -d /tmp/esp_probe.XXXXXX 2>/dev/null || echo "")
+            [[ -z "$mnt" ]] && continue
+            if ! sudo mount -o ro "$part" "$mnt" 2>/dev/null; then
+                rmdir "$mnt" 2>/dev/null || true
+                continue
+            fi
+            cleanup=true
+        fi
+        found=false
+        if sudo test -f "$mnt/EFI/Microsoft/Boot/bootmgfw.efi" 2>/dev/null; then
+            found=true
+        else
+            this_part=$(readlink -f "$part" 2>/dev/null || echo "$part")
+            is_ours=false
+            { [[ -n "$our_part" && "$this_part" == "$our_part" ]]; } && is_ours=true
+            { [[ -n "$our_esp" && "$mnt" == "$our_esp" ]]; } && is_ours=true
+            for vendor in "$mnt"/EFI/*/; do
+                [[ -d "$vendor" ]] || continue
+                vname=$(basename "$vendor")
+                case "$vname" in
+                    BOOT) ;;
+                    arch)
+                        if [[ "$is_ours" == false ]]; then
+                            found=true; break
+                        fi
+                        ;;
+                    *)
+                        if sudo test -f "$vendor/grubx64.efi" 2>/dev/null \
+                            || sudo test -f "$vendor/shimx64.efi" 2>/dev/null \
+                            || sudo test -f "$vendor/BOOTX64.EFI" 2>/dev/null; then
+                            found=true; break
+                        fi
+                        ;;
+                esac
+            done
+        fi
+        if [[ "$cleanup" == true ]]; then
+            sudo umount "$mnt" 2>/dev/null || true
+            rmdir "$mnt" 2>/dev/null || true
+        fi
+        [[ "$found" == true ]] && return 0
+    done
+    return 1
+}
+
 # GRUB menu layout: kernels on top, snapshots second, second OS third, and
-# no "UEFI Firmware Settings" entry. Stock /etc/grub.d numbering runs
-# 10_linux, then 30_os-prober and 30_uefi-firmware, and only then the
-# grub-btrfs 41_snapshots-btrfs script — so without intervention the order is
-# kernels → other OSes → firmware → snapshots. Every change below is
-# idempotent and re-applied on each run (a grub/grub-btrfs package update can
-# restore stock script permissions).
+# no firmware/NVRAM utility entries. Stock /etc/grub.d numbering runs
+# 10_linux, then 30_os-prober, 30_uefi-firmware and (GRUB 2.16+)
+# 31_efi_bootnext, and only then the grub-btrfs 41_snapshots-btrfs script —
+# so without intervention the order is kernels → other OSes → firmware →
+# NVRAM utilities → snapshots. Every change below is idempotent and
+# re-applied on each run (a grub/grub-btrfs package update can restore stock
+# script permissions).
 configure_grub_menu_order() {
     step "Configuring GRUB menu order (kernels, snapshots, other OSes)"
 
@@ -1026,17 +1120,58 @@ configure_grub_menu_order() {
         log_info "UEFI Firmware Settings entry already disabled"
     fi
 
-    # 2. Second OS via os-prober. Upstream GRUB disables os-prober by default;
-    # it is explicitly enabled here (user opt-in) and only ever generates
-    # entries when another OS is actually detected.
-    if ! pacman -Q os-prober &>/dev/null 2>&1; then
-        log_info "Installing os-prober for second-OS detection..."
-        install_packages_quietly os-prober 2>>"$INSTALL_LOG" \
-            || log_warning "os-prober install failed — second-OS entries unavailable"
+    # 1b. Remove raw NVRAM Boot#### entries (GRUB 2.16+ 31_efi_bootnext).
+    # This script mirrors UEFI NVRAM boot options (BootManagerMenuApp, EFI
+    # Firmware Setup, misc devices, ...) into the menu independently of
+    # os-prober — `os-prober` output stays empty while these still appear,
+    # which is exactly the reported symptom. Same supported mechanism:
+    # non-executable scripts are skipped by grub-mkconfig. Real second-OS
+    # entries (30_os-prober) are unaffected.
+    if [[ ! -e /etc/grub.d/31_efi_bootnext ]]; then
+        log_info "No 31_efi_bootnext script (older GRUB) — nothing to disable"
+    elif [[ ! -x /etc/grub.d/31_efi_bootnext ]]; then
+        log_info "EFI BootNext NVRAM entries already disabled"
+    elif sudo chmod -x /etc/grub.d/31_efi_bootnext 2>/dev/null; then
+        log_success "Disabled EFI BootNext NVRAM menu entries"
+    else
+        log_warning "Could not disable 31_efi_bootnext"
     fi
-    if pacman -Q os-prober &>/dev/null 2>&1; then
-        set_grub_config "GRUB_DISABLE_OS_PROBER" "false"
-        log_success "os-prober enabled (entries appear only if a second OS is found)"
+
+    # 2. Second OS via os-prober — smart: os-prober is installed and enabled
+    # ONLY when another OS actually exists on some disk. Upstream default is
+    # disabled; with no second OS probing buys nothing and only slows
+    # grub-mkconfig. The toggle is re-evaluated every run, so adding Windows
+    # later just takes one more installer run to pick it up.
+    local second_os=false
+    if detect_second_os_evidence; then
+        second_os=true
+    elif pacman -Q os-prober &>/dev/null 2>&1; then
+        # Already installed (pre-installed by user?) — run it; it may see
+        # what the cheap checks missed.
+        if sudo os-prober 2>/dev/null | grep -q .; then
+            second_os=true
+        fi
+    fi
+    if [[ "$second_os" == true ]]; then
+        if ! pacman -Q os-prober &>/dev/null 2>&1; then
+            log_info "Second OS detected — installing os-prober..."
+            install_packages_quietly os-prober 2>>"$INSTALL_LOG" \
+                || log_warning "os-prober install failed — second-OS entries unavailable"
+        fi
+        if pacman -Q os-prober &>/dev/null 2>&1; then
+            if sudo os-prober 2>/dev/null | grep -q .; then
+                set_grub_config "GRUB_DISABLE_OS_PROBER" "false"
+                log_success "os-prober enabled (second OS found, entries will be generated)"
+            else
+                set_grub_config "GRUB_DISABLE_OS_PROBER" "true"
+                log_info "os-prober ran but found no bootable second OS — leaving it disabled"
+            fi
+        else
+            set_grub_config "GRUB_DISABLE_OS_PROBER" "true"
+        fi
+    else
+        set_grub_config "GRUB_DISABLE_OS_PROBER" "true"
+        log_info "No second OS detected — os-prober not installed/enabled"
     fi
 
     # 3. Snapshots between kernels and os-prober (btrfs + snapper/timeshift

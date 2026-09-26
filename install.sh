@@ -166,18 +166,7 @@ stop_sudo_keepalive() {
   fi
 }
 
-# Install gum only when we are actually going to modify the system. Dry-run is
-# guaranteed not to install helpers or alter the target machine.
-if [[ "$DRY_RUN" != true ]] && ! command -v gum >/dev/null 2>&1; then
-  log_to_file "Installing gum for enhanced UI experience..."
-  if sudo pacman -S --noconfirm --needed gum >>"$INSTALL_LOG" 2>&1; then
-    log_to_file "Gum installed successfully"
-  else
-    log_to_file "Failed to install gum, falling back to basic UI"
-  fi
-fi
-
-# Authenticate once up front so keep-alive can run non-interactively after.
+# Authenticate once up front so keep-alive and bootstrap installs run non-interactively after.
 if [[ "$DRY_RUN" != true ]]; then
   sudo -v || log_to_file "WARNING: sudo authentication failed; keep-alive disabled"
   start_sudo_keepalive || true
@@ -186,6 +175,24 @@ fi
 init_core
 START_TIME_SEC=$SECONDS
 export START_TIME_SEC
+
+# Silent gum bootstrap: always present before any interactive menu/prompt.
+# Dry-run never installs helpers. All output goes to the log, never to the
+# terminal. Tries fast path first (-S), then with a DB sync (-Sy) for fresh
+# archinstall systems with a stale/empty pacman DB.
+if [[ "$DRY_RUN" != true ]] && ! command -v gum >/dev/null 2>&1; then
+  log_to_file "Installing gum for enhanced UI experience..."
+  if sudo pacman -S --noconfirm --needed gum >>"$INSTALL_LOG" 2>&1; then
+    log_to_file "Gum installed successfully"
+  elif sudo pacman -Sy --noconfirm --needed gum >>"$INSTALL_LOG" 2>&1; then
+    log_to_file "Gum installed successfully (after DB sync)"
+  else
+    log_to_file "Failed to install gum, falling back to basic UI"
+  fi
+  # supports_gum() caches its first result — clear it so the menu and all
+  # later prompts see the freshly installed binary.
+  __supports_gum_cache=""
+fi
 
 # Clear the terminal only after options are parsed.
 if [[ -t 1 ]] && [[ "${TERM:-dumb}" != dumb ]]; then clear; fi

@@ -282,7 +282,17 @@ if pacman -Q steam &>/dev/null || pacman -Q ananicy-cpp &>/dev/null; then
   if pacman -Q ananicy-cpp &>/dev/null; then
     if systemctl is-enabled --quiet ananicy-cpp.service 2>/dev/null; then ok "Ananicy-Cpp enabled (ananicy-cpp.service)"; else warn "ananicy-cpp installed but ananicy-cpp.service is not enabled"; fi
     systemctl is-active --quiet ananicy-cpp.service 2>/dev/null && ok "Ananicy-Cpp is running" || warn "ananicy-cpp.service is not running (may require reboot or 'sudo systemctl start ananicy-cpp.service')"
-    if [[ -d /etc/ananicy.d ]] && find /etc/ananicy.d -name '*.rules' -print -quit 2>/dev/null | grep -q .; then ok "Ananicy rules present in /etc/ananicy.d"; else warn "no Ananicy rules found in /etc/ananicy.d — install cachyos-ananicy-rules-git"; fi
+    # CachyOS layout is /etc/ananicy.d/{ananicy.conf,*.types,*.cgroups,00-default/**/*.rules} —
+    # so accept any of those, not just top-level *.rules. Fall back to the
+    # pacman database (package installed but dir not yet populated).
+    _rules_count=$(find /etc/ananicy.d -type f \( -name '*.rules' -o -name '*.types' -o -name '*.cgroups' -o -name 'ananicy.conf' \) 2>/dev/null | wc -l)
+    if [[ "${_rules_count:-0}" -gt 0 ]]; then
+      ok "Ananicy rules present in /etc/ananicy.d (${_rules_count} files)"
+      info "rules files: $(find /etc/ananicy.d -type f \( -name '*.rules' -o -name '*.types' -o -name '*.cgroups' -o -name 'ananicy.conf' \) 2>/dev/null | head -5 | tr '\n' ' ')"
+    elif pacman -Q cachyos-ananicy-rules-git &>/dev/null || pacman -Q cachyos-ananicy-rules &>/dev/null || pacman -Q ananicy-rules-git &>/dev/null; then
+      ok "Ananicy rules package installed ($(pacman -Q cachyos-ananicy-rules-git cachyos-ananicy-rules ananicy-rules-git 2>/dev/null | tr '\n' ' '))"
+      info "/etc/ananicy.d holds no rule files yet — check 'pacman -Ql <pkg>' and 'ls -R /etc/ananicy.d'"
+    else warn "no Ananicy rules found in /etc/ananicy.d — install cachyos-ananicy-rules-git"; fi
   fi
   pacman -Q steam &>/dev/null && ok "Steam installed"
   pacman -Q lib32-vulkan-icd-loader &>/dev/null && ok "32-bit Vulkan loader present (multilib working)"

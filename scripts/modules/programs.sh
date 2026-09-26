@@ -390,9 +390,31 @@ main() {
 	handle_de_packages
 	handle_flatpak_packages
 	remove_pacman_packages
+	# Flatpak shares no lock with pacman/yay, so it runs in parallel with
+	# the pacman+AUR installs instead of waiting behind them. The background
+	# job can't touch parent arrays — its exit code travels via a file and
+	# counts are merged after wait. All output stays in the install log.
+	local _flatpak_rc_file="" _flatpak_pid=""
+	if command -v flatpak &>/dev/null && [[ ${#flatpak_programs[@]} -gt 0 ]]; then
+		_flatpak_rc_file=$(mktemp /tmp/archinstaller_flatpak.XXXXXX)
+		( flatpak_install_batch "${flatpak_programs[@]}" >>"$INSTALL_LOG" 2>&1; echo "$?" > "$_flatpak_rc_file" ) &
+		_flatpak_pid=$!
+	fi
 	install_pacman_packages
 	install_aur_packages
-	install_flatpak_packages
+	if [[ -n "$_flatpak_pid" ]]; then
+		wait "$_flatpak_pid"
+		local _flatpak_rc=1
+		_flatpak_rc=$(cat "$_flatpak_rc_file" 2>/dev/null || echo 1)
+		rm -f "$_flatpak_rc_file"
+		if [[ "$_flatpak_rc" -eq 0 ]]; then
+			PROGRAMS_INSTALLED+=("${flatpak_programs[@]}")
+		else
+			PROGRAMS_ERRORS+=("flatpak batch (see log for per-app results)")
+		fi
+	else
+		install_flatpak_packages
+	fi
 	configure_fastfetch
 
 	if [[ "$INSTALL_MODE" == "server" ]]; then

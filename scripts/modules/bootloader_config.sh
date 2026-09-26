@@ -884,6 +884,23 @@ configure_grub() {
     local kernel_params
     kernel_params=$(get_kernel_params --cmdline-only)
 
+    # GRUB's 10_linux prepends its OWN rootflags=subvol=<rootsubvol>
+    # (derived via make_system_path_relative_to_its_root, leading slash
+    # stripped, so `@` where findmnt reports `/@`) to every entry at
+    # mkconfig time. Shipping our own rootflags in DEFAULT duplicates it on
+    # /proc/cmdline — and no merge can fix that, since the extra copy is
+    # manufactured during generation. So on btrfs the GRUB merge owns every
+    # managed key EXCEPT rootflags (10_linux is authoritative there);
+    # stale stored copies are still stripped by the merge, and
+    # GRUB_CMDLINE_LINUX is still scrubbed below against the FULL param set
+    # (a stored copy there would be duplicated by 10_linux too).
+    # Non-GRUB bootloaders (systemd-boot entries, Limine, UKI cmdline) have
+    # no 10_linux and keep rootflags from get_kernel_params untouched.
+    local grub_managed="$kernel_params"
+    if is_btrfs_system 2>/dev/null; then
+        grub_managed=$(echo "$kernel_params" | tr ' ' '\n' | grep -vE '^rootflags=' | tr '\n' ' ' | tr -s ' ' | sed 's/^ //; s/ $//')
+    fi
+
     # Traditional system: configure GRUB
     set_grub_config "GRUB_TIMEOUT" "3"
     ui_info "Set GRUB timeout to 3 seconds"
@@ -912,20 +929,23 @@ configure_grub() {
     local grub_current=""
     grub_current=$(grep -E '^GRUB_CMDLINE_LINUX_DEFAULT=' /etc/default/grub 2>/dev/null | cut -d= -f2- | tr -d '"' || echo "")
     local grub_merged
-    grub_merged=$(merge_kernel_params "$grub_current" "$kernel_params")
+    grub_merged=$(merge_kernel_params "$grub_current" "$grub_managed")
     # Quote: /etc/default/grub is shell-sourced, unquoted spaces break it.
     set_grub_config "GRUB_CMDLINE_LINUX_DEFAULT" "\"$grub_merged\""
     ui_info "Kernel parameters: $grub_merged"
 
     # GRUB boots with CMDLINE_LINUX + CMDLINE_LINUX_DEFAULT concatenated —
     # if archinstall left managed keys (quiet, rootflags, ...) in LINUX as
-    # well, they land on /proc/cmdline twice. Strip managed dupes from
-    # LINUX (unmanaged tokens like cryptdevice/resume are untouched).
+    # well, they land on /proc/cmdline twice (10_linux ALSO prepends its own
+    # rootflags on btrfs). Strip managed dupes from LINUX, keeping unmanaged
+    # tokens (cryptdevice, resume, ...) untouched. Reference is the FULL
+    # param set on purpose: rootflags must be scrubbed here even though it
+    # is no longer shipped in DEFAULT (see above).
     local grub_linux=""
     grub_linux=$(grep -E '^GRUB_CMDLINE_LINUX=' /etc/default/grub 2>/dev/null | cut -d= -f2- | tr -d '"' || echo "")
     if [[ -n "$grub_linux" ]]; then
       local grub_linux_cleaned
-      grub_linux_cleaned=$(strip_managed_dupes "$grub_linux" "$grub_merged")
+      grub_linux_cleaned=$(strip_managed_dupes "$grub_linux" "$kernel_params")
       grub_linux_cleaned=$(echo "$grub_linux_cleaned" | tr -s ' ' | sed 's/^ //; s/ $//')
       if [[ "$grub_linux_cleaned" != "$grub_linux" ]]; then
         set_grub_config "GRUB_CMDLINE_LINUX" "\"$grub_linux_cleaned\""

@@ -95,6 +95,11 @@ harden_sshd() {
     fi
   fi
   if [[ "${effective,,}" != "${want_permit,,}" ]]; then
+    # Don't swallow the diagnosis: sshd -T stderr (hidden above) often names
+    # the real cause (unreadable host keys, bad perms, ...).
+    local _sshd_t_err
+    _sshd_t_err=$(sudo sshd -T 2>&1 >/dev/null || true)
+    [[ -n "$_sshd_t_err" ]] && log_to_file "sshd -T stderr: $_sshd_t_err"
     log_warning "SSH hardening still not in effect — leaving $dropin in place (check Include in /etc/ssh/sshd_config)"
     return 0
   fi
@@ -106,16 +111,33 @@ harden_sshd() {
   fi
 }
 
-# Restore the `Include sshd_config.d/*.conf` line at the top of the main
-# sshd_config when it is missing (drop-in silently ignored otherwise).
-# Idempotent: no-op when an active Include already exists. Backup +
-# `sshd -t` validation with rollback on failure. Returns 0 when an active
-# Include is in place afterwards, 1 otherwise.
+# Ensure the `Include sshd_config.d/*.conf` line exists AND is positioned
+# before any managed key in the main sshd_config. sshd uses the
+# first-obtained value per key, so an Include that is present but sits below
+# a `PermitRootLogin ...` line leaves the drop-in silently ignored — the
+# observed failure mode. Restores/moves that single line only (existing
+# directives untouched; top-Include is the stock Arch layout). Backup +
+# `sshd -t` validation with rollback on failure. Returns 0 when a correctly
+# positioned Include is in place afterwards, 1 otherwise.
 harden_sshd_restore_include() {
   local main="/etc/ssh/sshd_config"
-  if sudo grep -qE '^[[:space:]]*Include[[:space:]].*sshd_config\.d' "$main" 2>/dev/null; then
-    log_info "Include for sshd_config.d already present in $main"
-    return 0
+  local include_re='^[[:space:]]*Include[[:space:]].*sshd_config\.d'
+  local first_include
+  first_include=$(sudo grep -nE "$include_re" "$main" 2>/dev/null | head -1 | cut -d: -f1 || echo "")
+  if [[ -n "$first_include" ]]; then
+    # Include exists — but does a managed key precede it (and therefore win)?
+    if ! sudo awk -v n="$first_include" '
+      NR >= n { exit 0 }
+      /^[[:space:]]*#/ { next }
+      /^[[:space:]]*$/ { next }
+      { k = tolower($1); if (k ~ /^(permitrootlogin|maxauthtries|logingracetime|maxstartups|clientaliveinterval|clientalivecountmax)$/) exit 1 }
+    ' "$main" 2>/dev/null; then
+      log_info "Include for sshd_config.d already present and first in $main"
+      return 0
+    fi
+    log_warning "Managed SSH setting precedes Include in $main (first value wins) — moving Include to the top"
+  else
+    log_warning "No Include for sshd_config.d in $main — adding it at the top"
   fi
   sudo cp "$main" "${main}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || {
     log_warning "Failed to back up $main — leaving sshd_config untouched"
@@ -127,7 +149,10 @@ harden_sshd_restore_include() {
     echo "# Added by archinstaller — enables sshd_config.d drop-ins (managed)"
     echo "Include /etc/ssh/sshd_config.d/*.conf"
     echo ""
-    sudo cat "$main" 2>/dev/null
+    # Strip any pre-existing sshd_config.d Include lines (the canonical one
+    # above supersedes them); every other line — including other Includes —
+    # is preserved verbatim and in order.
+    sudo grep -vE "$include_re" "$main" 2>/dev/null
   } > "$tmp" || { rm -f "$tmp"; return 1; }
   if ! sudo cp "$tmp" "$main" 2>/dev/null; then
     log_warning "Failed to write $main — leaving sshd_config untouched"
@@ -136,10 +161,10 @@ harden_sshd_restore_include() {
   fi
   rm -f "$tmp"
   if sudo sshd -t 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
-    log_success "Restored Include in $main — drop-in is now active"
+    log_success "Include in $main fixed — drop-in should now be active"
     return 0
   fi
-  log_warning "sshd config test failed after Include restore — rolling back"
+  log_warning "sshd config test failed after Include fix — rolling back"
   local latest_backup
   latest_backup=$(ls -t "${main}.backup."* 2>/dev/null | head -1 || true)
   [[ -n "$latest_backup" ]] && sudo cp "$latest_backup" "$main" 2>/dev/null || true

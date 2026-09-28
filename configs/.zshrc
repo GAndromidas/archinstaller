@@ -74,28 +74,52 @@ export FZF_CTRL_R_OPTS="
 # -----------------------------------------------------------------------------
 # System Maintenance
 # -----------------------------------------------------------------------------
+
+# Clean System (Arch Linux + KDE Desktop)
+clean() {
+  echo "🧹 Starting Arch Linux Deep Clean..."
+
+  echo "→ Pruning pacman cache (keeping 3 versions)..."
+  sudo paccache -rk3 --quiet
+  sudo paccache -ruk0 --quiet
+
+  echo "→ Cleaning AUR/yay cache..."
+  # Double --noconfirm skips interactive repo removal prompts
+  yay -Sc --noconfirm --noconfirm >/dev/null 2>&1
+
+  echo "→ Removing unused Flatpaks..."
+  if command -v flatpak >/dev/null 2>&1; then
+    flatpak uninstall --unused -y >/dev/null 2>&1
+  fi
+
+  echo "→ Removing orphaned pacman packages..."
+  local orphans=($(pacman -Qtdq 2>/dev/null))
+  if (( ${#orphans[@]} > 0 )); then
+    sudo pacman -Rns "${orphans[@]}" --noconfirm
+  else
+    echo "  No orphaned packages found."
+  fi
+
+  echo "→ Vacuuming systemd journal (keep 3 days)..."
+  sudo journalctl --vacuum-time=3d --quiet
+
+  echo "→ Clearing KDE & browser caches..."
+  # (N) sets NULL_GLOB so empty matches pass without Zsh errors/prompts
+  rm -rf ~/.cache/thumbnails/*(N) 2>/dev/null
+  rm -rf ~/.cache/kioexec/krun/*(N) 2>/dev/null
+
+  # Firefox cache cleanup (if installed)
+  if [[ -d ~/.cache/mozilla/firefox ]]; then
+    find ~/.cache/mozilla/firefox -name "cache2" -type d -exec rm -rf {} + 2>/dev/null
+  fi
+
+  echo "✅ System clean complete!"
+}
+
 alias sync='sudo pacman -Syy'                                                      # Sync package databases
-alias update='yay -Syyu && flatpak update'                                    # Update all packages (Pacman, AUR, Flatpak)
+alias update='yay -Syyu && flatpak update'                                         # Update all packages (Pacman, AUR, Flatpak)
 # Smart mirror update alias - detects distribution automatically
-alias mirror='if [[ -f /etc/os-release ]] && grep -q '\''ID="endeavouros"'\'' /etc/os-release 2>/dev/null; then echo "Using EndeavourOS mirrors..." && sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist endeavour && sudo pacman -Syy; else echo "Using Arch Linux mirrors..." && sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist arch && sudo pacman -Syy; fi'  # Update mirror list and sync databases
-alias clean='echo "🧹 Starting Arch Linux Deep Clean..." && \
-  echo "→ Pruning pacman cache (keeping 3)..." && \
-  sudo paccache -rk3 && \
-  sudo paccache -ruk0 && \
-  echo "→ Cleaning AUR/yay cache..." && \
-  yay -Sc --noconfirm && \
-  echo "→ Removing unused Flatpaks..." && \
-  sudo flatpak uninstall --unused -y && \
-  echo "→ Removing orphaned packages..." && \
-  if [ -n "$(pacman -Qtdq 2>/dev/null)" ]; then sudo pacman -Rns $(pacman -Qtdq) --noconfirm; else echo "  (no orphans)"; fi && \
-  echo "→ Vacuuming systemd journal (keep 3 days)..." && \
-  sudo journalctl --vacuum-time=3d && \
-  echo "→ Wiping thumbnail & browser caches..." && \
-  rm -rf ~/.cache/thumbnails/* && \
-  find ~/.cache/mozilla/firefox -name "cache2" -type d -exec rm -rf {} + 2>/dev/null && \
-  echo "✅ System clean complete!"'
-alias microcode='grep . /sys/devices/system/cpu/vulnerabilities/*'                 # Check CPU vulnerabilities
-alias jctl='journalctl -p 3 -xb'                                                   # Show boot errors
+alias mirror='if [[ -f /etc/os-release ]] && grep -q '\''ID="endeavouros"'\'' /etc/os-release 2>/dev/null; then echo "Using EndeavourOS mirrors..." && sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist endeavour && sudo pacman -Syy; else echo "Using Arch Linux mirrors..." && sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist arch && sudo pacman -Syy; fi'         # Update mirror list and sync databases
 
 # -----------------------------------------------------------------------------
 # System Power

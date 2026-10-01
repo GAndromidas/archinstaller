@@ -8,20 +8,12 @@ export ZSH="$HOME/.oh-my-zsh"
 # Add local bin to PATH if it exists
 [ -d "$HOME/.local/bin" ] && export PATH="$HOME/.local/bin:$PATH"
 
-# Non-interactive shells (scripts, CI, scp) must not inherit aliases,
-# prompt init, or fastfetch output — they break argument parsing.
-# Everything below this guard is interactive-only.
-if [[ $- != *i* ]]; then
-  return
-fi
-
 # Themes
 ZSH_THEME="agnoster"
 DEFAULT_USER=$USER
 
 # Oh-My-ZSH Auto Update
 zstyle ':omz:update' mode auto      # Update automatically without asking
-
 # Plugins
 # git: Git integration with aliases and prompt info
 # fzf: Fuzzy finder for commands (Ctrl+R), files (Ctrl+T), and directories (Alt+C)
@@ -29,9 +21,9 @@ plugins=(git fzf)
 
 source $ZSH/oh-my-zsh.sh
 
-# Source plugins only when the files exist (fresh installs may lack them)
-[ -f /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh ] && source /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh
-[ -f /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ] && source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+# Manually source additional plugins
+source /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh
+source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 
 # =============================================================================
 # FZF Configuration - Compact list with colors
@@ -116,11 +108,10 @@ clean() {
   echo "✅ System clean complete!"
 }
 
-alias sync='sudo pacman -Syy'                                                      # Sync package databases
-alias update='yay -Syyu && flatpak update'                                         # Update all packages (Pacman, AUR, Flatpak)
-# Smart mirror update alias - detects distribution automatically
-alias mirror='if [[ -f /etc/os-release ]] && grep -q '\''ID="endeavouros"'\'' /etc/os-release 2>/dev/null; then echo "Using EndeavourOS mirrors..." && sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist endeavour && sudo pacman -Syy; else echo "Using Arch Linux mirrors..." && sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist arch && sudo pacman -Syy; fi'         # Update mirror list and sync databases
-alias jctl='journalctl -p 3 -xb'                                                   # Show boot errors
+alias sync='sudo pacman -Syy'                                                                           # Sync package databases
+alias update='yay -Syyu && flatpak update'                                                              # Update all packages (Pacman, AUR, Flatpak)
+alias mirror='sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist arch && sudo pacman -Syy'  # Update mirror list
+alias jctl='journalctl -p 3 -xb'                                                                        # Show boot errors
 
 # -----------------------------------------------------------------------------
 # System Power
@@ -128,6 +119,7 @@ alias jctl='journalctl -p 3 -xb'                                                
 alias sr='echo "Rebooting the system...\n" && sudo reboot'                          # Reboot system
 alias ss='echo "Shutting down the system...\n" && sudo poweroff'                    # Shutdown system
 alias bios='systemctl reboot --firmware-setup'                                      # Reboot to UEFI
+alias windows='sudo grub-reboot "Windows 11" && systemctl reboot'                   # Reboot to Windows Grub
 alias suspend='systemctl suspend'                                                   # Suspend system
 alias hibernate='systemctl hibernate'                                               # Hibernate system
 
@@ -224,19 +216,12 @@ alias aliases='cat ~/.zshrc | grep "^alias" | sed "s/alias //" | column -t -s="#
 # SSH Connections
 # -----------------------------------------------------------------------------
 
-# Examples:
-# alias server='ssh user@192.168.1.100'
-# alias vps='ssh root@example.com'
-# alias pi='ssh pi@raspberrypi.local'
-
 # -----------------------------------------------------------------------------
 # Package Management
 # -----------------------------------------------------------------------------
-# NOTE: no `unlock` alias — blindly deleting /var/lib/pacman/db.lck while
-# another pacman holds it corrupts the db. If locked, check
-# `ps aux | grep pacman` first, then remove only when no holder exists.
+alias unlock='sudo rm /var/lib/pacman/db.lck'                                     # Remove pacman lock
 alias rip='expac --timefmt="%d-%m-%Y %T" "%l\t%n %v" | sort | tail -200 | nl'     # Recently installed packages
-alias orphans='if [ -n "$(pacman -Qtdq 2>/dev/null)" ]; then sudo pacman -Rns $(pacman -Qtdq) --noconfirm; else echo "No orphaned packages"; fi'                      # Remove orphaned packages (safe on empty)
+alias orphans='sudo pacman -Rns $(pacman -Qtdq) 2>/dev/null'                      # Remove orphaned packages
 
 # -----------------------------------------------------------------------------
 # Utilities
@@ -250,21 +235,14 @@ alias ports-used='netstat -tulanp | grep ESTABLISHED'                           
 # =============================================================================
 
 # Zoxide - Smart cd replacement (use 'z dirname' to jump to frequently used directories)
-# NOTE: deliberately not aliasing cd=z — overriding cd breaks scripts and
-# muscle memory for `cd -`, `cd ..`. Use `z` explicitly.
-if command -v zoxide >/dev/null 2>&1; then
-  eval "$(zoxide init zsh)"
-fi
+eval "$(zoxide init zsh)"
+alias cd='z'  # Replace cd with zoxide for smart directory jumping
 
 # Starship - Modern prompt with git integration
-if command -v starship >/dev/null 2>&1; then
-  eval "$(starship init zsh)"
-fi
+eval "$(starship init zsh)"
 
-# Fastfetch - Display system information on interactive login shells only
-if command -v fastfetch >/dev/null 2>&1; then
-  fastfetch
-fi
+# Fastfetch - Display system information on shell start
+fastfetch
 
 # =============================================================================
 # Additional Functions

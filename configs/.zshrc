@@ -120,6 +120,7 @@ alias sync='sudo pacman -Syy'                                                   
 alias update='yay -Syyu && flatpak update'                                         # Update all packages (Pacman, AUR, Flatpak)
 # Smart mirror update alias - detects distribution automatically
 alias mirror='if [[ -f /etc/os-release ]] && grep -q '\''ID="endeavouros"'\'' /etc/os-release 2>/dev/null; then echo "Using EndeavourOS mirrors..." && sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist endeavour && sudo pacman -Syy; else echo "Using Arch Linux mirrors..." && sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist arch && sudo pacman -Syy; fi'         # Update mirror list and sync databases
+alias jctl='journalctl -p 3 -xb'                                                   # Show boot errors
 
 # -----------------------------------------------------------------------------
 # System Power

@@ -18,13 +18,13 @@ install_yay() {
   # Ensure base-devel, git, and go are installed (required for building yay)
   log_info "Ensuring base-devel, git, and go are installed..."
   if ! sudo -v; then
-    log_error "Failed to refresh sudo credentials. Cannot proceed with yay installation."
+    log_error "Failed to refresh sudo -n credentials. Cannot proceed with yay installation."
     return 1
   fi
   local pacman_retries=3
   local pacman_ok=0
   for ((attempt = 1; attempt <= pacman_retries; attempt++)); do
-    if sudo pacman -S --noconfirm --needed base-devel git go 2>&1 | tee -a "$INSTALL_LOG"; then
+    if sudo -n pacman -S --noconfirm --needed base-devel git go 2>&1 | tee -a "$INSTALL_LOG"; then
       pacman_ok=1
       break
     fi
@@ -68,7 +68,7 @@ install_yay() {
   # download size, no use for it without gdb work on yay itself). Building
   # separately lets us install only the real package below.
   ui_info "Building yay..."
-  echo -e "${THEME_TEXT}Please enter your sudo password to build and install yay:${RESET}"
+  echo -e "${THEME_TEXT}Please enter your sudo -n password to build and install yay:${RESET}"
   sudo -v
   if makepkg -s --noconfirm --needed 2>&1 | tee -a "$INSTALL_LOG"; then
     log_success "yay built successfully"
@@ -90,7 +90,7 @@ install_yay() {
     return 1
   fi
 
-  if sudo pacman -U --noconfirm --needed "${pkg_files[@]}" 2>&1 | tee -a "$INSTALL_LOG"; then
+  if sudo -n pacman -U --noconfirm --needed "${pkg_files[@]}" 2>&1 | tee -a "$INSTALL_LOG"; then
     log_success "yay installed successfully"
   else
     log_error "Failed to install yay package"

@@ -31,31 +31,31 @@ enable_trim_timer() {
   fi
   if systemctl is-enabled --quiet fstrim.timer 2>/dev/null; then
     log_info "fstrim.timer already enabled by archinstall — skipping re-enable"
-  elif sudo systemctl enable --now fstrim.timer >>"$INSTALL_LOG" 2>&1; then
+  elif sudo -n systemctl enable --now fstrim.timer >>"$INSTALL_LOG" 2>&1; then
     log_success "Enabled systemd fstrim.timer for periodic TRIM"
   else
     log_warning "Could not enable fstrim.timer; leaving existing TRIM configuration unchanged"
     return 1
   fi
-  sudo systemctl start fstrim.service >>"$INSTALL_LOG" 2>&1 || true
+  sudo -n systemctl start fstrim.service >>"$INSTALL_LOG" 2>&1 || true
   return 0
 }
 
 setup_maintenance() {
   step "Performing comprehensive system cleanup"
   # Use paccache instead of pacman -Sc (keeps last 3 versions, safer for resume)
-  run_step "Cleaning old pacman packages (keeping 3 versions)" sudo paccache -r
+  run_step "Cleaning old pacman packages (keeping 3 versions)" sudo -n paccache -r
   # Leftover partial-download temp files (pacman's in-progress download
   # names before a package is fully verified/renamed) can accumulate from
   # transient network blips during a long install and confuse later cache
   # cleaning ("could not open file ... Error reading fd 8"). Harmless to
   # remove — these are never valid packages.
-  sudo find /var/cache/pacman/pkg -maxdepth 1 -name 'download-*' -delete 2>/dev/null || true
+  sudo -n find /var/cache/pacman/pkg -maxdepth 1 -name 'download-*' -delete 2>/dev/null || true
   run_step "Cleaning yay cache" yay -Sc --noconfirm 2>/dev/null || true
 
   # Flatpak cleanup - single call removes both unused packages and runtimes
   if command -v flatpak >/dev/null 2>&1; then
-    run_step "Removing unused flatpak packages and runtimes" sudo flatpak uninstall --unused --noninteractive -y
+    run_step "Removing unused flatpak packages and runtimes" sudo -n flatpak uninstall --unused --noninteractive -y
     log_success "Flatpak cleanup completed"
   else
     log_info "Flatpak not installed, skipping flatpak cleanup"
@@ -69,7 +69,7 @@ setup_maintenance() {
     local orphan_packages=()
     mapfile -t orphan_packages <<< "$orphans"
     if [[ ${#orphan_packages[@]} -gt 0 ]]; then
-      run_step "Removing orphaned packages" sudo pacman -Rns --noconfirm "${orphan_packages[@]}"
+      run_step "Removing orphaned packages" sudo -n pacman -Rns --noconfirm "${orphan_packages[@]}"
     else
       log_info "No orphaned packages found"
     fi
@@ -82,7 +82,7 @@ setup_maintenance() {
   # package tarball. This check only matters for a system that had
   # yay-debug installed by an older version of the script.
   if pacman -Q yay-debug &>/dev/null; then
-    run_step "Removing yay-debug package" sudo pacman -Rns --noconfirm yay-debug
+    run_step "Removing yay-debug package" sudo -n pacman -Rns --noconfirm yay-debug
   fi
 }
 
@@ -97,7 +97,7 @@ cleanup_helpers() {
   # shellcheck disable=SC2016
   # single quotes intentional: expression runs in inner bash -c, not here
   run_step "Cleaning leftover yay build directories" bash -c \
-    'shopt -s nullglob; dirs=(/tmp/archinstaller-yay-build.*); [ ${#dirs[@]} -eq 0 ] || sudo rm -rf "${dirs[@]}"'
+    'shopt -s nullglob; dirs=(/tmp/archinstaller-yay-build.*); [ ${#dirs[@]} -eq 0 ] || sudo -n rm -rf "${dirs[@]}"'
 
 }
 
@@ -109,7 +109,7 @@ cleanup_snapper_snapshots() {
     return 0
   fi
   local snap_count
-  snap_count=$(sudo snapper -c root list 2>/dev/null | awk 'NR>2 && $1 ~ /^[0-9]+$/ {count++} END {print count+0}')
+  snap_count=$(sudo -n snapper -c root list 2>/dev/null | awk 'NR>2 && $1 ~ /^[0-9]+$/ {count++} END {print count+0}')
   log_info "Existing Snapper snapshots: $snap_count (preserved)"
   return 0
 }
@@ -130,7 +130,7 @@ cleanup_script_backups() {
     local count
     count=$(find /var/tmp/archinstaller_backups -type f -name "*.backup.*" 2>/dev/null | wc -l)
     if [ "$count" -gt 0 ]; then
-      sudo rm -rf /var/tmp/archinstaller_backups 2>/dev/null || rm -rf /var/tmp/archinstaller_backups 2>/dev/null || true
+      sudo -n rm -rf /var/tmp/archinstaller_backups 2>/dev/null || rm -rf /var/tmp/archinstaller_backups 2>/dev/null || true
       log_success "Removed $count backup(s) from /var/tmp/archinstaller_backups"
       removed=$((removed + count))
     fi
@@ -141,19 +141,19 @@ cleanup_script_backups() {
   for conf in /etc/kernel/cmdline.backup.* /etc/default/grub.backup.* /etc/kernel/cmdline.backup.* ; do
     for f in $conf; do
       [ -e "$f" ] || continue
-      sudo rm -f "$f" 2>/dev/null || rm -f "$f" 2>/dev/null || true
+      sudo -n rm -f "$f" 2>/dev/null || rm -f "$f" 2>/dev/null || true
       log_info "Removed backup $f"
       removed=$((removed + 1))
     done
   done
 
-  # Limine / loader backups under /boot (sudo for 700)
+  # Limine / loader backups under /boot (sudo -n for 700)
   local limine_baks
-  limine_baks=$(sudo find /boot -type f -name "*.backup.*" 2>/dev/null || true)
+  limine_baks=$(sudo -n find /boot -type f -name "*.backup.*" 2>/dev/null || true)
   if [ -n "$limine_baks" ]; then
     echo "$limine_baks" | while read -r f; do
       [ -n "$f" ] || continue
-      sudo rm -f "$f" 2>/dev/null || true
+      sudo -n rm -f "$f" 2>/dev/null || true
       log_info "Removed backup $f"
     done
     local cnt=$(echo "$limine_baks" | wc -l)
@@ -161,11 +161,11 @@ cleanup_script_backups() {
   fi
   # Also check /efi and /boot/efi if separate ESP
   for esp in /efi /boot/efi; do
-    if sudo test -d "$esp" 2>/dev/null; then
+    if sudo -n test -d "$esp" 2>/dev/null; then
       local ebaks
-      ebaks=$(sudo find "$esp" -type f -name "*.backup.*" 2>/dev/null || true)
+      ebaks=$(sudo -n find "$esp" -type f -name "*.backup.*" 2>/dev/null || true)
       if [ -n "$ebaks" ]; then
-        echo "$ebaks" | while read -r f; do sudo rm -f "$f" 2>/dev/null || true; log_info "Removed backup $f"; done
+        echo "$ebaks" | while read -r f; do sudo -n rm -f "$f" 2>/dev/null || true; log_info "Removed backup $f"; done
       fi
     fi
   done
@@ -175,7 +175,7 @@ cleanup_script_backups() {
     [ -d "$home" ] || continue
     for bak in "$home/.zshrc.backup."* "$home/.config/starship.toml.backup."* "$home/.zshrc.backup"*; do
       [ -e "$bak" ] || continue
-      rm -f "$bak" 2>/dev/null || sudo rm -f "$bak" 2>/dev/null || true
+      rm -f "$bak" 2>/dev/null || sudo -n rm -f "$bak" 2>/dev/null || true
       log_info "Removed backup $bak"
       removed=$((removed + 1))
     done

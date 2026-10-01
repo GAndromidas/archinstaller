@@ -52,16 +52,16 @@ harden_sshd() {
 
   local want_permit="prohibit-password"
   local effective=""
-  effective=$(sudo sshd -T 2>/dev/null | awk '$1=="permitrootlogin" {print $2; exit}' || true)
+  effective=$(sudo -n sshd -T 2>/dev/null | awk '$1=="permitrootlogin" {print $2; exit}' || true)
   if [[ "${effective,,}" == "${want_permit,,}" ]]; then
     log_info "SSH hardening already in effect (PermitRootLogin $effective) — nothing to do"
     return 0
   fi
 
-  sudo mkdir -p "$dropin_dir" 2>/dev/null || true
+  sudo -n mkdir -p "$dropin_dir" 2>/dev/null || true
   # Backup an existing drop-in we didn't create; ours is regenerated.
   if [[ "$created_by_us" == false ]]; then
-    sudo cp "$dropin" "${dropin}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
+    sudo -n cp "$dropin" "${dropin}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
   fi
   if ! printf '%s\n' \
     "# Managed by archinstaller — safe SSH hardening (drop-in, sshd_config untouched)" \
@@ -70,7 +70,7 @@ harden_sshd() {
     "LoginGraceTime 60" \
     "MaxStartups 10:30:60" \
     "ClientAliveInterval 300" \
-    "ClientAliveCountMax 2" | sudo tee "$dropin" >/dev/null; then
+    "ClientAliveCountMax 2" | sudo -n tee "$dropin" >/dev/null; then
     log_warning "Failed to write $dropin — skipping SSH hardening"
     return 0
   fi
@@ -80,31 +80,31 @@ harden_sshd() {
   # the effective config and repair it by restoring the Include line itself
   # (one line at the top, so drop-in values are first-obtained and win;
   # existing directives are untouched). Backup + sshd -t + rollback.
-  if ! sudo sshd -t 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
+  if ! sudo -n sshd -t 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
     log_warning "sshd config test failed after hardening — rolling back"
     if [[ "$created_by_us" == true ]]; then
-      sudo rm -f "$dropin" 2>/dev/null || true
+      sudo -n rm -f "$dropin" 2>/dev/null || true
     fi
     return 0
   fi
-  effective=$(sudo sshd -T 2>/dev/null | awk '$1=="permitrootlogin" {print $2; exit}' || true)
+  effective=$(sudo -n sshd -T 2>/dev/null | awk '$1=="permitrootlogin" {print $2; exit}' || true)
   if [[ "${effective,,}" != "${want_permit,,}" ]]; then
     log_warning "Drop-in ignored (no Include directive?) — restoring Include in sshd_config"
     if harden_sshd_restore_include; then
-      effective=$(sudo sshd -T 2>/dev/null | awk '$1=="permitrootlogin" {print $2; exit}' || true)
+      effective=$(sudo -n sshd -T 2>/dev/null | awk '$1=="permitrootlogin" {print $2; exit}' || true)
     fi
   fi
   if [[ "${effective,,}" != "${want_permit,,}" ]]; then
     # Don't swallow the diagnosis: sshd -T stderr (hidden above) often names
     # the real cause (unreadable host keys, bad perms, ...).
     local _sshd_t_err
-    _sshd_t_err=$(sudo sshd -T 2>&1 >/dev/null || true)
+    _sshd_t_err=$(sudo -n sshd -T 2>&1 >/dev/null || true)
     [[ -n "$_sshd_t_err" ]] && log_to_file "sshd -T stderr: $_sshd_t_err"
     log_warning "SSH hardening still not in effect — leaving $dropin in place (check Include in /etc/ssh/sshd_config)"
     return 0
   fi
 
-  if sudo systemctl reload sshd.service 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
+  if sudo -n systemctl reload sshd.service 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
     log_success "SSH hardening applied and reloaded (root password login off, key auth unaffected)"
   else
     log_warning "Hardening written but sshd reload failed — takes effect on next restart"
@@ -123,10 +123,10 @@ harden_sshd_restore_include() {
   local main="/etc/ssh/sshd_config"
   local include_re='^[[:space:]]*Include[[:space:]].*sshd_config\.d'
   local first_include
-  first_include=$(sudo grep -nE "$include_re" "$main" 2>/dev/null | head -1 | cut -d: -f1 || echo "")
+  first_include=$(sudo -n grep -nE "$include_re" "$main" 2>/dev/null | head -1 | cut -d: -f1 || echo "")
   if [[ -n "$first_include" ]]; then
     # Include exists — but does a managed key precede it (and therefore win)?
-    if ! sudo awk -v n="$first_include" '
+    if ! sudo -n awk -v n="$first_include" '
       NR >= n { exit 0 }
       /^[[:space:]]*#/ { next }
       /^[[:space:]]*$/ { next }
@@ -139,7 +139,7 @@ harden_sshd_restore_include() {
   else
     log_warning "No Include for sshd_config.d in $main — adding it at the top"
   fi
-  sudo cp "$main" "${main}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || {
+  sudo -n cp "$main" "${main}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || {
     log_warning "Failed to back up $main — leaving sshd_config untouched"
     return 1
   }
@@ -152,22 +152,22 @@ harden_sshd_restore_include() {
     # Strip any pre-existing sshd_config.d Include lines (the canonical one
     # above supersedes them); every other line — including other Includes —
     # is preserved verbatim and in order.
-    sudo grep -vE "$include_re" "$main" 2>/dev/null
+    sudo -n grep -vE "$include_re" "$main" 2>/dev/null
   } > "$tmp" || { rm -f "$tmp"; return 1; }
-  if ! sudo cp "$tmp" "$main" 2>/dev/null; then
+  if ! sudo -n cp "$tmp" "$main" 2>/dev/null; then
     log_warning "Failed to write $main — leaving sshd_config untouched"
     rm -f "$tmp"
     return 1
   fi
   rm -f "$tmp"
-  if sudo sshd -t 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
+  if sudo -n sshd -t 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
     log_success "Include in $main fixed — drop-in should now be active"
     return 0
   fi
   log_warning "sshd config test failed after Include fix — rolling back"
   local latest_backup
   latest_backup=$(ls -t "${main}.backup."* 2>/dev/null | head -1 || true)
-  [[ -n "$latest_backup" ]] && sudo cp "$latest_backup" "$main" 2>/dev/null || true
+  [[ -n "$latest_backup" ]] && sudo -n cp "$latest_backup" "$main" 2>/dev/null || true
   return 1
 }
 
@@ -176,10 +176,10 @@ harden_sshd_restore_include() {
 # remote sessions on a custom port.
 get_sshd_port() {  local port=""
   if command -v sshd &>/dev/null; then
-    port=$(sudo sshd -T 2>/dev/null | awk '$1=="port" {print $2; exit}')
+    port=$(sudo -n sshd -T 2>/dev/null | awk '$1=="port" {print $2; exit}')
   fi
   if [[ ! "$port" =~ ^[0-9]+$ ]]; then
-    port=$(sudo awk 'tolower($1)=="port" {print $2; exit}' /etc/ssh/sshd_config 2>/dev/null || true)
+    port=$(sudo -n awk 'tolower($1)=="port" {print $2; exit}' /etc/ssh/sshd_config 2>/dev/null || true)
   fi
   if [[ ! "$port" =~ ^[0-9]+$ ]]; then
     port=22
@@ -191,43 +191,43 @@ configure_firewalld() {
   local ssh_port
   ssh_port=$(get_sshd_port)
   # Start and enable firewalld
-  sudo systemctl start firewalld
-  sudo systemctl enable firewalld
+  sudo -n systemctl start firewalld
+  sudo -n systemctl enable firewalld
 
   # Allow SSH BEFORE setting default zone to drop — otherwise a remote
   # session is disconnected mid-install between the two commands.
-  if ! sudo firewall-cmd --list-all 2>/dev/null | grep -qE "${ssh_port}/tcp|service: ssh"; then
-    sudo firewall-cmd --add-service=ssh --permanent >>"$INSTALL_LOG" 2>&1 || true
+  if ! sudo -n firewall-cmd --list-all 2>/dev/null | grep -qE "${ssh_port}/tcp|service: ssh"; then
+    sudo -n firewall-cmd --add-service=ssh --permanent >>"$INSTALL_LOG" 2>&1 || true
     if [[ "$ssh_port" != "22" ]]; then
-      sudo firewall-cmd --add-port="${ssh_port}/tcp" --permanent >>"$INSTALL_LOG" 2>&1 || true
+      sudo -n firewall-cmd --add-port="${ssh_port}/tcp" --permanent >>"$INSTALL_LOG" 2>&1 || true
     fi
-    sudo firewall-cmd --reload >>"$INSTALL_LOG" 2>&1 || true
+    sudo -n firewall-cmd --reload >>"$INSTALL_LOG" 2>&1 || true
     log_success "SSH (port ${ssh_port}) allowed through Firewalld before lockdown."
   else
     log_warning "SSH is already allowed. Skipping SSH service configuration."
   fi
 
   # Set default zone to drop — deny incoming, allow outgoing, explicit allow for services
-  sudo firewall-cmd --set-default-zone=drop
+  sudo -n firewall-cmd --set-default-zone=drop
   log_success "Default zone set to drop (incoming denied, outgoing allowed)"
 
   # Check if KDE Connect is installed
   if pacman -Q kdeconnect &>/dev/null; then
     # Allow specific ports for KDE Connect
-    sudo firewall-cmd --add-port=1714-1764/udp --permanent
-    sudo firewall-cmd --add-port=1714-1764/tcp --permanent
-    sudo firewall-cmd --reload
+    sudo -n firewall-cmd --add-port=1714-1764/udp --permanent
+    sudo -n firewall-cmd --add-port=1714-1764/tcp --permanent
+    sudo -n firewall-cmd --reload
     log_success "KDE Connect ports allowed through Firewalld."
   else
     log_warning "KDE Connect is not installed. Skipping KDE Connect service configuration."
   fi
 
   # Portainer ports (8000,9443) - ensure open even if installed before firewall (programs.sh defers)
-  if sudo docker ps -a 2>/dev/null | grep -q portainer || pacman -Q portainer &>/dev/null || [[ -f /var/tmp/archinstaller_portainer_ports_pending ]] || sudo docker images 2>/dev/null | grep -q portainer; then
-    if ! sudo firewall-cmd --list-ports 2>/dev/null | grep -q "8000/tcp"; then
-      sudo firewall-cmd --add-port=8000/tcp --permanent >>"$INSTALL_LOG" 2>&1 || true
-      sudo firewall-cmd --add-port=9443/tcp --permanent >>"$INSTALL_LOG" 2>&1 || true
-      sudo firewall-cmd --reload >>"$INSTALL_LOG" 2>&1 || true
+  if sudo -n docker ps -a 2>/dev/null | grep -q portainer || pacman -Q portainer &>/dev/null || [[ -f /var/tmp/archinstaller_portainer_ports_pending ]] || sudo -n docker images 2>/dev/null | grep -q portainer; then
+    if ! sudo -n firewall-cmd --list-ports 2>/dev/null | grep -q "8000/tcp"; then
+      sudo -n firewall-cmd --add-port=8000/tcp --permanent >>"$INSTALL_LOG" 2>&1 || true
+      sudo -n firewall-cmd --add-port=9443/tcp --permanent >>"$INSTALL_LOG" 2>&1 || true
+      sudo -n firewall-cmd --reload >>"$INSTALL_LOG" 2>&1 || true
       log_success "Opened ports 8000,9443/tcp in firewalld for Portainer (deferred)."
     fi
     rm -f /var/tmp/archinstaller_portainer_ports_pending 2>/dev/null || true
@@ -249,32 +249,32 @@ configure_ufw() {
   # only exists where the distro ships it (e.g. Ubuntu) — Arch's ufw has no
   # /etc/ufw/applications.d entry for it, so probe first to avoid
   # "Could not find a profile matching 'OpenSSH'" noise in the log/summary.
-  sudo ufw allow "${ssh_port}/tcp" >>"$INSTALL_LOG" 2>&1 || true
-  if sudo ufw app list 2>/dev/null | grep -qi openssh; then
-    sudo ufw allow OpenSSH >>"$INSTALL_LOG" 2>&1 || true
+  sudo -n ufw allow "${ssh_port}/tcp" >>"$INSTALL_LOG" 2>&1 || true
+  if sudo -n ufw app list 2>/dev/null | grep -qi openssh; then
+    sudo -n ufw allow OpenSSH >>"$INSTALL_LOG" 2>&1 || true
   fi
 
   # Enable UFW ( --force avoids "Proceed with operation (y|n)?" hang under dashboard_run where stdout is to log)
-  sudo ufw --force enable
-  sudo systemctl enable --now ufw 2>/dev/null || true
+  sudo -n ufw --force enable
+  sudo -n systemctl enable --now ufw 2>/dev/null || true
 
   # Set default policies
-  sudo ufw default deny incoming
+  sudo -n ufw default deny incoming
   log_success "Default policy set to deny all incoming connections."
 
-  sudo ufw default allow outgoing
+  sudo -n ufw default allow outgoing
   log_success "Default policy set to allow all outgoing connections."
 
   # Verify and log (port-aware: custom sshd ports must verify, not just 22)
-  if sudo ufw status 2>/dev/null | grep -qE "${ssh_port}/tcp|${ssh_port}\s|OpenSSH"; then
+  if sudo -n ufw status 2>/dev/null | grep -qE "${ssh_port}/tcp|${ssh_port}\s|OpenSSH"; then
     log_success "SSH (port ${ssh_port}) allowed through UFW."
   else
     # Fallback try ssh alias
-    sudo ufw allow ssh >>"$INSTALL_LOG" 2>&1 || true
-    if sudo ufw status 2>/dev/null | grep -qE "22|ssh|OpenSSH|${ssh_port}"; then
+    sudo -n ufw allow ssh >>"$INSTALL_LOG" 2>&1 || true
+    if sudo -n ufw status 2>/dev/null | grep -qE "22|ssh|OpenSSH|${ssh_port}"; then
       log_success "SSH allowed through UFW."
     else
-      log_warning "UFW ssh rule may not be active - check sudo ufw status"
+      log_warning "UFW ssh rule may not be active - check sudo -n ufw status"
     fi
   fi
 
@@ -287,10 +287,10 @@ configure_ufw() {
     # may not apply live immediately. So the exit code alone isn't a
     # reliable success signal here; check the actual output text too.
     local kdeconnect_ok=true kdeconnect_out
-    kdeconnect_out=$(sudo ufw allow 1714:1764/udp 2>&1)
+    kdeconnect_out=$(sudo -n ufw allow 1714:1764/udp 2>&1)
     echo "$kdeconnect_out" >>"$INSTALL_LOG"
     echo "$kdeconnect_out" | grep -qiE 'invalid port|not supported' && kdeconnect_ok=false
-    kdeconnect_out=$(sudo ufw allow 1714:1764/tcp 2>&1)
+    kdeconnect_out=$(sudo -n ufw allow 1714:1764/tcp 2>&1)
     echo "$kdeconnect_out" >>"$INSTALL_LOG"
     echo "$kdeconnect_out" | grep -qiE 'invalid port|not supported' && kdeconnect_ok=false
     if [[ "$kdeconnect_ok" == true ]]; then
@@ -301,10 +301,10 @@ configure_ufw() {
   fi
 
   # Portainer ports (8000,9443) - ensure open even if installed before firewall (programs.sh defers)
-  if sudo docker ps -a 2>/dev/null | grep -q portainer || pacman -Q portainer &>/dev/null || [[ -f /var/tmp/archinstaller_portainer_ports_pending ]] || sudo docker images 2>/dev/null | grep -q portainer; then
-    if ! sudo ufw status 2>/dev/null | grep -q "8000/tcp"; then
-      sudo ufw allow 8000/tcp >>"$INSTALL_LOG" 2>&1 || true
-      sudo ufw allow 9443/tcp >>"$INSTALL_LOG" 2>&1 || true
+  if sudo -n docker ps -a 2>/dev/null | grep -q portainer || pacman -Q portainer &>/dev/null || [[ -f /var/tmp/archinstaller_portainer_ports_pending ]] || sudo -n docker images 2>/dev/null | grep -q portainer; then
+    if ! sudo -n ufw status 2>/dev/null | grep -q "8000/tcp"; then
+      sudo -n ufw allow 8000/tcp >>"$INSTALL_LOG" 2>&1 || true
+      sudo -n ufw allow 9443/tcp >>"$INSTALL_LOG" 2>&1 || true
       log_success "Opened ports 8000,9443/tcp in UFW for Portainer (deferred)."
     fi
     rm -f /var/tmp/archinstaller_portainer_ports_pending 2>/dev/null || true
@@ -321,7 +321,7 @@ configure_user_groups() {
   for group in "${groups[@]}"; do
     if getent group "$group" >/dev/null; then
       if ! groups "$USER" | grep -q "\b$group\b"; then
-        sudo usermod -aG "$group" "$USER"
+        sudo -n usermod -aG "$group" "$USER"
         log_success "Added $USER to $group group"
       fi
     fi
@@ -351,7 +351,7 @@ configure_snapper_schedule() {
   else
     log_warning "Failed to enable snapper-boot.timer, trying fallback custom service"
     # Fallback: keep custom boot service for compatibility if stock timer missing
-    sudo tee /etc/systemd/system/snapper-boot-snapshot.service >/dev/null <<'EOF'
+    sudo -n tee /etc/systemd/system/snapper-boot-snapshot.service >/dev/null <<'EOF'
 [Unit]
 Description=Snapper snapshot at boot
 After=multi-user.target
@@ -363,12 +363,12 @@ ExecStart=/usr/bin/snapper -c root create --description boot --cleanup-algorithm
 [Install]
 WantedBy=multi-user.target
 EOF
-    sudo systemctl daemon-reload 2>/dev/null || true
-    sudo systemctl enable --now snapper-boot-snapshot.service >>"$INSTALL_LOG" 2>&1 || log_warning "Fallback boot service failed"
+    sudo -n systemctl daemon-reload 2>/dev/null || true
+    sudo -n systemctl enable --now snapper-boot-snapshot.service >>"$INSTALL_LOG" 2>&1 || log_warning "Fallback boot service failed"
   fi
   # Clean up old custom daily timer if it exists (migrating to timeline)
   if [[ -f /etc/systemd/system/snapper-daily-snapshot.timer ]]; then
-    sudo systemctl disable --now snapper-daily-snapshot.timer 2>/dev/null || true
+    sudo -n systemctl disable --now snapper-daily-snapshot.timer 2>/dev/null || true
     log_info "Migrated from custom snapper-daily-snapshot.timer to snapper-timeline.timer"
   fi
   # Monthly scrub for bit-rot detection — snapper stack only, never with timeshift
@@ -400,7 +400,7 @@ ensure_network_manager() {
       return 0
     fi
   fi
-  if sudo systemctl enable --now NetworkManager.service 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
+  if sudo -n systemctl enable --now NetworkManager.service 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
     log_success "NetworkManager enabled"
   else
     log_warning "Failed to enable NetworkManager"
@@ -434,13 +434,13 @@ ensure_single_power_manager() {
     if [[ -n "$winner" && "$svc" == "$winner" ]]; then
       if systemctl is-enabled --quiet "$svc" 2>/dev/null; then
         log_info "$svc already enabled (policy winner) — nothing to do"
-      elif sudo systemctl enable --now "$svc" 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
+      elif sudo -n systemctl enable --now "$svc" 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
         log_success "$svc enabled (policy winner)"
       else
         log_warning "Failed to enable $svc"
       fi
     elif systemctl is-enabled --quiet "$svc" 2>/dev/null; then
-      if sudo systemctl disable --now "$svc" 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
+      if sudo -n systemctl disable --now "$svc" 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
         log_info "$svc disabled (conflicts with ${winner:-kernel defaults})"
       fi
     fi
@@ -454,7 +454,7 @@ enable_services() {
   # Ensure openssh is installed before trying to enable sshd
   if ! pacman -Q openssh &>/dev/null; then
     log_info "openssh not found — installing..."
-    sudo pacman -S --noconfirm --needed openssh >>"$INSTALL_LOG" 2>&1 || log_warning "Failed to install openssh"
+    sudo -n pacman -S --noconfirm --needed openssh >>"$INSTALL_LOG" 2>&1 || log_warning "Failed to install openssh"
   fi
 
   # Server mode enables a minimal set of services, desktop mode adds extras.
@@ -485,7 +485,7 @@ enable_services() {
     # Enable each service individually to prevent one failure from blocking all others
     local server_failed=()
     for svc in "${services[@]}"; do
-      if sudo systemctl enable --now "$svc" >>"$INSTALL_LOG" 2>&1; then
+      if sudo -n systemctl enable --now "$svc" >>"$INSTALL_LOG" 2>&1; then
         log_success "$svc enabled successfully"
       else
         log_warning "Failed to enable $svc"
@@ -532,14 +532,14 @@ enable_services() {
     # Add user to libvirt group and enable service
     if groups "$USER" | grep -qE '\blibvirt\b'; then
       log_info "User already in libvirt group"
-    elif sudo usermod -aG libvirt "$USER" 2>/dev/null; then
+    elif sudo -n usermod -aG libvirt "$USER" 2>/dev/null; then
       log_success "Added user to libvirt group"
     else
       log_warning "Failed to add user to libvirt group"
     fi
     if systemctl is-enabled libvirtd &>/dev/null 2>&1; then
       log_info "libvirtd service already enabled"
-    elif sudo systemctl enable --now libvirtd 2>/dev/null; then
+    elif sudo -n systemctl enable --now libvirtd 2>/dev/null; then
       log_success "libvirtd service enabled"
     else
       log_warning "Failed to enable libvirtd service"
@@ -594,7 +594,7 @@ enable_services() {
   # Enable each service individually to prevent one failure from blocking all others
   local failed_services=()
   for svc in "${services[@]}"; do
-    if sudo systemctl enable --now "$svc" >>"$INSTALL_LOG" 2>&1; then
+    if sudo -n systemctl enable --now "$svc" >>"$INSTALL_LOG" 2>&1; then
       log_success "$svc enabled successfully"
     else
       log_warning "Failed to enable $svc"
@@ -779,7 +779,7 @@ ensure_nvidia_initramfs_modules() {
   new_mods=$(echo "$current" | sed -E 's/^MODULES=\((.*)\)/\1/' | xargs)
   new_mods="$new_mods ${missing[*]}"
   new_mods=$(echo "$new_mods" | tr -s ' ')
-  if sudo sed -i -E "s|^MODULES=.*|MODULES=($new_mods)|" "$mkconf" \
+  if sudo -n sed -i -E "s|^MODULES=.*|MODULES=($new_mods)|" "$mkconf" \
     && grep -E '^MODULES=' "$mkconf" | grep -qw "nvidia_drm"; then
     log_success "Added NVIDIA modules to mkinitcpio MODULES: ${missing[*]} (applies on next initramfs rebuild)"
   else
@@ -811,7 +811,7 @@ verify_gpu_driver() {
       log_warning "Vulkan may not be properly configured"
     fi
   else
-    log_info "Install vulkan-tools to verify Vulkan support: sudo pacman -S vulkan-tools"
+    log_info "Install vulkan-tools to verify Vulkan support: sudo -n pacman -S vulkan-tools"
   fi
 }
 
@@ -899,13 +899,13 @@ ensure_sb_signing() {
     log_warning "Secure Boot is active but sbctl is not installed — kernel updates may stop booting until you install sbctl and enroll keys"
     return 0
   fi
-  if ! sudo sbctl status 2>/dev/null | grep -qiE 'installed:\s*(yes|✓|true)'; then
-    log_warning "sbctl present but keys are not enrolled — signing would do nothing; enroll manually with: sudo sbctl enroll-keys -m"
+  if ! sudo -n sbctl status 2>/dev/null | grep -qiE 'installed:\s*(yes|✓|true)'; then
+    log_warning "sbctl present but keys are not enrolled — signing would do nothing; enroll manually with: sudo -n sbctl enroll-keys -m"
     return 0
   fi
 
   local verify_out=""
-  if verify_out=$(sudo sbctl verify 2>&1); then
+  if verify_out=$(sudo -n sbctl verify 2>&1); then
     log_success "Secure Boot: all files signed"
     return 0
   fi
@@ -914,13 +914,13 @@ ensure_sb_signing() {
   local unsigned=""
   unsigned=$(echo "$verify_out" | grep -oE '✗ [^ ]+ is not signed' | awk '{print $2}' || true)
   if [[ -z "$unsigned" ]]; then
-    log_warning "sbctl verify reported issues but no unsigned files could be parsed — run 'sudo sbctl verify' manually"
+    log_warning "sbctl verify reported issues but no unsigned files could be parsed — run 'sudo -n sbctl verify' manually"
     return 0
   fi
   local f failed=0
   # shellcheck disable=SC2086
   for f in $unsigned; do
-    if sudo sbctl sign --save "$f" 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
+    if sudo -n sbctl sign --save "$f" 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
       log_success "Signed $f"
     else
       log_warning "Failed to sign $f"
@@ -937,20 +937,20 @@ ensure_sb_signing() {
 # file (snapshot entries belong to limine-snapper-sync and are skipped —
 # it regenerates them from the base entries). Idempotent per line.
 _hibernate_limine_file() {
-  local conf="$1" param="$2"
+  local conf="${1:-}" param="${2:-}"
   local lns
-  lns=$(sudo grep -nE '^[[:space:]]*(kernel_)?cmdline:' "$conf" 2>/dev/null | cut -d: -f1 || true)
+  lns=$(sudo -n grep -nE '^[[:space:]]*(kernel_)?cmdline:' "$conf" 2>/dev/null | cut -d: -f1 || true)
   [[ -z "$lns" ]] && return 0
-  sudo cp "$conf" "${conf}.backup.$(date +%Y%m%d_%H%M%S)"
+  sudo -n cp "$conf" "${conf}.backup.$(date +%Y%m%d_%H%M%S)"
   local ln line patched=0
   for ln in $lns; do
-    line=$(sudo sed -n "${ln}p" "$conf" 2>/dev/null || true)
+    line=$(sudo -n sed -n "${ln}p" "$conf" 2>/dev/null || true)
     echo "$line" | grep -q '/\.snapshots' && continue
     echo "$line" | grep -qF "$param" && continue
     # sed -i rewrites the whole file in one go (small torn-write window on
     # FAT32); the limine mutex lives in bootloader_config.sh and is not
     # available here, so snapshot entries are left for the watcher.
-    sudo sed -i "${ln}s|$| $param|" "$conf" && patched=$((patched + 1))
+    sudo -n sed -i "${ln}s|$| $param|" "$conf" && patched=$((patched + 1))
   done
   log_to_file "Limine $conf: appended resume param to $patched line(s)"
 }
@@ -969,7 +969,7 @@ setup_hibernation() {
   fi
 
   local swapdev
-  swapdev=$(sudo blkid -t TYPE=swap -o device 2>/dev/null | head -1 || true)
+  swapdev=$(sudo -n blkid -t TYPE=swap -o device 2>/dev/null | head -1 || true)
   if [[ -z "$swapdev" ]]; then
     log_info "No swap partition found (zram-only?) — hibernation needs a swap partition, skipping"
     return 0
@@ -980,7 +980,7 @@ setup_hibernation() {
     return 0
   fi
   local swap_uuid
-  swap_uuid=$(sudo blkid -s UUID -o value "$swapdev" 2>/dev/null || true)
+  swap_uuid=$(sudo -n blkid -s UUID -o value "$swapdev" 2>/dev/null || true)
   if [[ -z "$swap_uuid" ]]; then
     log_warning "Cannot determine UUID of $swapdev — skipping hibernation"
     return 0
@@ -988,7 +988,7 @@ setup_hibernation() {
 
   local ram_kb swap_kb
   ram_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-  swap_kb=$(sudo blockdev --getsize64 "$swapdev" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
+  swap_kb=$(sudo -n blockdev --getsize64 "$swapdev" 2>/dev/null | awk '{print int($1/1024)}' || echo 0)
   if [[ "$swap_kb" -gt 0 && "$swap_kb" -lt "$ram_kb" ]]; then
     log_warning "Swap is smaller than RAM — hibernation may fail when memory is full"
   fi
@@ -1011,11 +1011,11 @@ setup_hibernation() {
   else
     validate_config_file "$mkconf" >/dev/null 2>&1 || true
     if grep -qE '^HOOKS=.*\bblock\b' "$mkconf"; then
-      sudo sed -i -E 's/^(HOOKS=.*\bblock\b)/\1 resume/' "$mkconf"
+      sudo -n sed -i -E 's/^(HOOKS=.*\bblock\b)/\1 resume/' "$mkconf"
     elif grep -qE '^HOOKS=.*\bfilesystems\b' "$mkconf"; then
-      sudo sed -i -E 's/^(HOOKS=.*)\bfilesystems\b/\1resume filesystems/' "$mkconf"
+      sudo -n sed -i -E 's/^(HOOKS=.*)\bfilesystems\b/\1resume filesystems/' "$mkconf"
     else
-      sudo sed -i -E 's/^(HOOKS=\(.*)\)/\1 resume)/' "$mkconf"
+      sudo -n sed -i -E 's/^(HOOKS=\(.*)\)/\1 resume)/' "$mkconf"
     fi
     if grep -qE '^HOOKS=.*\bresume\b' "$mkconf"; then
       log_success "Added resume hook to mkinitcpio"
@@ -1030,7 +1030,7 @@ setup_hibernation() {
 
   # 3. Rebuild once so hook + params apply.
   log_info "Rebuilding initramfs with resume support (slow, one-time)..."
-  if sudo mkinitcpio -P 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
+  if sudo -n mkinitcpio -P 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
     log_success "Initramfs rebuilt — hibernation ready (test with: systemctl hibernate)"
   else
     log_warning "Initramfs rebuild failed — hibernation not active; re-run mkinitcpio -P manually"
@@ -1041,7 +1041,7 @@ setup_hibernation() {
 # Append one kernel param to the active bootloader's config (and regenerate
 # where required). Never removes or replaces anything archinstall wrote.
 _hibernate_add_boot_param() {
-  local param="$1"
+  local param="${1:-}"
   local bl
   bl=$(detect_bootloader)
 
@@ -1049,14 +1049,14 @@ _hibernate_add_boot_param() {
   if is_uki_system 2>/dev/null; then
     local cmdline_file="/etc/kernel/cmdline"
     local current=""
-    if sudo test -f "$cmdline_file" 2>/dev/null; then
-      current=$(sudo cat "$cmdline_file" 2>/dev/null || true)
+    if sudo -n test -f "$cmdline_file" 2>/dev/null; then
+      current=$(sudo -n cat "$cmdline_file" 2>/dev/null || true)
     fi
     if echo " $current " | grep -qF " $param "; then
       log_info "resume param already in $cmdline_file"
     else
-      [[ -n "$current" ]] && sudo cp "$cmdline_file" "${cmdline_file}.backup.$(date +%Y%m%d_%H%M%S)"
-      if echo "${current:+$current }$param" | sudo tee "$cmdline_file" >/dev/null; then
+      [[ -n "$current" ]] && sudo -n cp "$cmdline_file" "${cmdline_file}.backup.$(date +%Y%m%d_%H%M%S)"
+      if echo "${current:+$current }$param" | sudo -n tee "$cmdline_file" >/dev/null; then
         log_success "Added $param to $cmdline_file"
       else
         log_warning "Failed to update $cmdline_file"
@@ -1076,14 +1076,14 @@ _hibernate_add_boot_param() {
       fi
       local entry updated=0
       while IFS= read -r -d '' entry; do
-        if sudo grep -q "^options " "$entry" 2>/dev/null; then
-          sudo grep "^options " "$entry" 2>/dev/null | grep -qF "$param" && continue
+        if sudo -n grep -q "^options " "$entry" 2>/dev/null; then
+          sudo -n grep "^options " "$entry" 2>/dev/null | grep -qF "$param" && continue
           # shellcheck disable=SC2086
-          if sudo sed -i "s|^options \(.*\)|options \1 $param|" "$entry"; then
+          if sudo -n sed -i "s|^options \(.*\)|options \1 $param|" "$entry"; then
             updated=$((updated + 1))
           fi
         fi
-      done < <(sudo find "$entries_dir" -maxdepth 1 -name "*.conf" ! -name "*fallback*" -print0 2>/dev/null)
+      done < <(sudo -n find "$entries_dir" -maxdepth 1 -name "*.conf" ! -name "*fallback*" -print0 2>/dev/null)
       log_success "Added resume param to $updated systemd-boot entries"
       ;;
     grub)
@@ -1093,13 +1093,13 @@ _hibernate_add_boot_param() {
       if echo " $current " | grep -qF " $param "; then
         log_info "resume param already in GRUB_CMDLINE_LINUX_DEFAULT"
       else
-        sudo cp "$grub_config" "${grub_config}.backup.$(date +%Y%m%d_%H%M%S)"
+        sudo -n cp "$grub_config" "${grub_config}.backup.$(date +%Y%m%d_%H%M%S)"
         local merged
         merged=$(echo "$current $param" | tr -s ' ' | sed 's/^ //; s/ $//')
         if grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=' "$grub_config" 2>/dev/null; then
-          sudo sed -i "s|^GRUB_CMDLINE_LINUX_DEFAULT=.*|GRUB_CMDLINE_LINUX_DEFAULT=\"$merged\"|" "$grub_config"
+          sudo -n sed -i "s|^GRUB_CMDLINE_LINUX_DEFAULT=.*|GRUB_CMDLINE_LINUX_DEFAULT=\"$merged\"|" "$grub_config"
         else
-          echo "GRUB_CMDLINE_LINUX_DEFAULT=\"$merged\"" | sudo tee -a "$grub_config" >/dev/null
+          echo "GRUB_CMDLINE_LINUX_DEFAULT=\"$merged\"" | sudo -n tee -a "$grub_config" >/dev/null
         fi
         if grep -qF "$param" "$grub_config" 2>/dev/null; then
           log_success "Added resume param to GRUB defaults"
@@ -1108,8 +1108,8 @@ _hibernate_add_boot_param() {
           return 1
         fi
       fi
-      if sudo test -f /boot/grub/grub.cfg 2>/dev/null; then
-        if sudo grub-mkconfig -o /boot/grub/grub.cfg 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
+      if sudo -n test -f /boot/grub/grub.cfg 2>/dev/null; then
+        if sudo -n grub-mkconfig -o /boot/grub/grub.cfg 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
           log_success "GRUB configuration regenerated with resume param"
         else
           log_warning "grub-mkconfig failed — resume param saved but not yet active"
@@ -1124,7 +1124,7 @@ _hibernate_add_boot_param() {
         [[ -z "$conf" ]] && continue
         found_any=true
         _hibernate_limine_file "$conf" "$param"
-      done < <(sudo find /boot /efi /boot/efi -maxdepth 4 -name limine.conf 2>/dev/null || true)
+      done < <(sudo -n find /boot /efi /boot/efi -maxdepth 4 -name limine.conf 2>/dev/null || true)
       if [[ "$found_any" == true ]]; then
         log_success "Limine cmdlines updated with resume param"
       else
@@ -1153,13 +1153,13 @@ install_smart_acpi() {
       log_info "Installing minimal ACPI support for legacy hardware"
       install_packages_quietly acpi
       # Only enable acpid service, don't start it automatically on legacy systems
-      sudo systemctl enable acpid.service 2>/dev/null || true
+      sudo -n systemctl enable acpid.service 2>/dev/null || true
       ;;
     "false")
       log_info "Installing full ACPI support for modern hardware"
       install_packages_quietly acpi acpid
-      sudo systemctl enable acpid.service 2>/dev/null
-      sudo systemctl start acpid.service 2>/dev/null
+      sudo -n systemctl enable acpid.service 2>/dev/null
+      sudo -n systemctl start acpid.service 2>/dev/null
       ;;
     *)
       log_info "Skipping ACPI tools due to compatibility issues"
@@ -1284,7 +1284,7 @@ detect_laptop_manufacturer() {
 
 # Function to detect if this is a gaming laptop
 detect_gaming_laptop() {
-  local manufacturer="$1"
+  local manufacturer="${1:-}"
   local is_gaming=false
   
   if [ -f /sys/class/dmi/id/product_name ]; then
@@ -1338,7 +1338,7 @@ should_auto_optimize() {
 
 # Function to get manufacturer-specific optimizations
 get_manufacturer_optimizations() {
-  local manufacturer="$1"
+  local manufacturer="${1:-}"
   local is_gaming=$(detect_gaming_laptop "$manufacturer")
   local optimizations=()
   
@@ -1476,7 +1476,7 @@ detect_filesystem_type() {
       # Set reserved blocks to 1% (default is 5%)
       local root_device=$(findmnt -no SOURCE /)
       if [ -n "$root_device" ]; then
-        sudo tune2fs -m 1 "$root_device" 2>/dev/null && log_success "Reduced ext4 reserved blocks to 1%"
+        sudo -n tune2fs -m 1 "$root_device" 2>/dev/null && log_success "Reduced ext4 reserved blocks to 1%"
       fi
       ;;
     xfs)
@@ -1653,19 +1653,19 @@ check_battery_status() {
 # function keys, enable acpid. Thin table-driven helper so the six vendor
 # functions below don't each carry a copy of the same 10 lines.
 setup_wmi_vendor() {
-  local label="$1" module="$2"
+  local label="${1:-}" module="${2:-}"
   log_info "Installing ${label}-specific tools..."
   install_smart_acpi
   if [[ -n "$module" ]]; then
-    sudo modprobe "$module" 2>/dev/null || true
+    sudo -n modprobe "$module" 2>/dev/null || true
     if lsmod | grep -q "${module//-/_}"; then
       log_success "${label} WMI module loaded for function key support"
     else
       log_warning "${label} WMI module not available - function keys may not work properly"
     fi
   fi
-  sudo systemctl enable acpid.service 2>/dev/null || true
-  sudo systemctl start acpid.service 2>/dev/null || true
+  sudo -n systemctl enable acpid.service 2>/dev/null || true
+  sudo -n systemctl start acpid.service 2>/dev/null || true
 }
 
 # Function to setup Intel-specific laptop optimizations
@@ -1677,8 +1677,8 @@ setup_intel_laptop_optimizations() {
   install_packages_quietly thermald
 
   # Enable and start thermald
-  sudo systemctl enable thermald.service 2>/dev/null
-  sudo systemctl start thermald.service 2>/dev/null
+  sudo -n systemctl enable thermald.service 2>/dev/null
+  sudo -n systemctl start thermald.service 2>/dev/null
 
   if systemctl is-active --quiet thermald.service; then
     log_success "thermald is active for thermal management"
@@ -1725,13 +1725,13 @@ setup_lenovo_optimizations() {
   # Configure Lenovo function keys
   log_info "Configuring Lenovo function keys..."
   if [ -f /sys/devices/platform/thinkpad_acpi/hotkey_all_mask ]; then
-    sudo modprobe thinkpad_acpi 2>/dev/null
+    sudo -n modprobe thinkpad_acpi 2>/dev/null
     log_success "ThinkPad ACPI driver loaded"
   fi
 
   # Enable services
-  sudo systemctl enable acpid.service 2>/dev/null
-  sudo systemctl start acpid.service 2>/dev/null
+  sudo -n systemctl enable acpid.service 2>/dev/null
+  sudo -n systemctl start acpid.service 2>/dev/null
 
   log_success "Lenovo optimizations completed"
 }
@@ -2026,7 +2026,7 @@ show_laptop_summary() {
   echo ""
   echo -e "${THEME_WARN}Tips:${RESET}"
   if [ "$cpu_vendor" = "intel" ]; then
-    echo -e "  • Thermal status: ${THEME_SECONDARY}sudo systemctl status thermald${RESET}"
+    echo -e "  • Thermal status: ${THEME_SECONDARY}sudo -n systemctl status thermald${RESET}"
   fi
   echo ""
 }

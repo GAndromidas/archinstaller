@@ -219,11 +219,11 @@ pick_best_interface() {
 # WoL capability / state
 # ---------------------------------------------------------------------------
 supports_wol() {
-    local iface="$1"
+    local iface="${1:-}"
     command -v ethtool &>/dev/null || return 1
 
     local ethtool_out
-    ethtool_out=$(sudo ethtool "$iface" 2>/dev/null) || return 1
+    ethtool_out=$(sudo -n ethtool "$iface" 2>/dev/null) || return 1
 
     # 'g' (magic packet) must be in the SUPPORTED modes, e.g.:
     #   Supports Wake-on: pumbg   /   Supports Wake-on: d
@@ -235,8 +235,8 @@ supports_wol() {
 }
 
 current_wol() {
-    local iface="$1"
-    sudo ethtool "$iface" 2>/dev/null | sed -n 's/^[[:space:]]*Wake-on:[[:space:]]*//p' | tr -d '[:space:]'
+    local iface="${1:-}"
+    sudo -n ethtool "$iface" 2>/dev/null | sed -n 's/^[[:space:]]*Wake-on:[[:space:]]*//p' | tr -d '[:space:]'
 }
 
 # ---------------------------------------------------------------------------
@@ -256,14 +256,14 @@ wol_ethtool_path() {
 # network-pre.target, no bogus Before=shutdown/ExecStop which never fire
 # usefully for oneshot+RemainAfterExit units).
 create_wol_service() {
-    local iface="$1"
+    local iface="${1:-}"
     local service_file="/etc/systemd/system/wol-${iface}.service"
     local ethtool_path
     ethtool_path=$(wol_ethtool_path)
 
     log_info "Creating systemd service for WoL on $iface"
 
-    sudo tee "$service_file" >/dev/null <<EOF
+    sudo -n tee "$service_file" >/dev/null <<EOF
 [Unit]
 Description=Enable Wake-on-LAN (magic packet) for $iface
 After=network-pre.target
@@ -279,14 +279,14 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 EOF
 
-    if [ ! -f "$service_file" ] && ! sudo test -f "$service_file" 2>/dev/null; then
+    if [ ! -f "$service_file" ] && ! sudo -n test -f "$service_file" 2>/dev/null; then
         log_error "Failed to create service file: $service_file"
         ui_error "Failed to create WoL service file for $iface"
         return 1
     fi
 
-    sudo systemctl daemon-reload 2>>"$INSTALL_LOG" || true
-    if sudo systemctl enable "wol-${iface}.service" >>"$INSTALL_LOG" 2>&1; then
+    sudo -n systemctl daemon-reload 2>>"$INSTALL_LOG" || true
+    if sudo -n systemctl enable "wol-${iface}.service" >>"$INSTALL_LOG" 2>&1; then
         log_success "Systemd service enabled for WoL on $iface"
     else
         log_error "Failed to enable systemd service for WoL on $iface"
@@ -308,22 +308,22 @@ EOF
 # This is the fix for "works once, resets after reboot" — NetworkManager and
 # the kernel reset Wake-on on link events without it.
 create_wol_udev_rule() {
-    local iface="$1"
+    local iface="${1:-}"
     local rule_file="/etc/udev/rules.d/81-wol-${iface}.rules"
     local ethtool_path
     ethtool_path=$(wol_ethtool_path)
 
     log_info "Creating udev rule for WoL on $iface"
-    sudo tee "$rule_file" >/dev/null <<EOF
+    sudo -n tee "$rule_file" >/dev/null <<EOF
 # Wake-on-LAN (magic packet) persistence for $iface — managed by archinstaller
 ACTION=="add", SUBSYSTEM=="net", NAME=="$iface", RUN+="$ethtool_path -s $iface wol g"
 EOF
 
-    if ! sudo test -f "$rule_file" 2>/dev/null; then
+    if ! sudo -n test -f "$rule_file" 2>/dev/null; then
         log_error "Failed to create udev rule: $rule_file"
         return 1
     fi
-    sudo udevadm control --reload-rules 2>>"$INSTALL_LOG" || true
+    sudo -n udevadm control --reload-rules 2>>"$INSTALL_LOG" || true
     log_success "udev rule installed for WoL on $iface"
     return 0
 }
@@ -331,7 +331,7 @@ EOF
 # NetworkManager: stops NM from clearing Wake-on on connection activation.
 # Best effort — succeeds silently, never fails the install.
 apply_nm_wol() {
-    local iface="$1"
+    local iface="${1:-}"
     command -v nmcli &>/dev/null || return 0
 
     local conn
@@ -341,8 +341,8 @@ apply_nm_wol() {
 
     # NM 1.x uses 802-3-ethernet.wake-on-lan; newer docs alias ethernet.*.
     # Try both property paths; ignore failures (older NM).
-    sudo nmcli connection modify "$conn" 802-3-ethernet.wake-on-lan magic >>"$INSTALL_LOG" 2>&1 || \
-    sudo nmcli connection modify "$conn" ethernet.wake-on-lan magic >>"$INSTALL_LOG" 2>&1 || true
+    sudo -n nmcli connection modify "$conn" 802-3-ethernet.wake-on-lan magic >>"$INSTALL_LOG" 2>&1 || \
+    sudo -n nmcli connection modify "$conn" ethernet.wake-on-lan magic >>"$INSTALL_LOG" 2>&1 || true
     log_info "NetworkManager WoL set to magic for connection '$conn' ($iface)"
     return 0
 }
@@ -351,11 +351,11 @@ apply_nm_wol() {
 # Enable WoL on one interface (ethtool now + all persistence backends)
 # ---------------------------------------------------------------------------
 enable_wol_interface() {
-    local iface="$1"
+    local iface="${1:-}"
 
     log_info "Enabling Wake-on-LAN on interface: $iface"
 
-    if ! sudo ethtool -s "$iface" wol g >>"$INSTALL_LOG" 2>&1; then
+    if ! sudo -n ethtool -s "$iface" wol g >>"$INSTALL_LOG" 2>&1; then
         log_error "Failed to enable Wake-on-LAN on $iface via ethtool"
         ui_error "Failed to enable Wake-on-LAN on $iface"
         return 1
@@ -365,8 +365,8 @@ enable_wol_interface() {
     # PCI PME wakeup (best effort — path varies by platform)
     local pci_dev=""
     pci_dev=$(readlink -f "/sys/class/net/$iface/device" 2>/dev/null | xargs basename 2>/dev/null || true)
-    if [ -n "$pci_dev" ] && sudo test -f "/sys/bus/pci/devices/$pci_dev/power/wakeup" 2>/dev/null; then
-        echo "enabled" | sudo tee "/sys/bus/pci/devices/$pci_dev/power/wakeup" >/dev/null 2>&1 || true
+    if [ -n "$pci_dev" ] && sudo -n test -f "/sys/bus/pci/devices/$pci_dev/power/wakeup" 2>/dev/null; then
+        echo "enabled" | sudo -n tee "/sys/bus/pci/devices/$pci_dev/power/wakeup" >/dev/null 2>&1 || true
         log_info "PCI PME wakeup enabled for $pci_dev"
     fi
 
@@ -393,7 +393,7 @@ enable_wol_interface() {
 # Misc helpers
 # ---------------------------------------------------------------------------
 get_interface_mac() {
-    local iface="$1"
+    local iface="${1:-}"
     local mac=""
     mac=$(cat "/sys/class/net/$iface/address" 2>/dev/null || true)
     if [[ -z "$mac" ]]; then
@@ -577,7 +577,7 @@ configure_wakeonlan() {
                 return 1
             fi
         else
-            if sudo pacman -S --noconfirm --needed ethtool >>"$INSTALL_LOG" 2>&1; then
+            if sudo -n pacman -S --noconfirm --needed ethtool >>"$INSTALL_LOG" 2>&1; then
                 ui_success "ethtool installed successfully"
                 log_info "ethtool installed for WoL support"
             else
@@ -729,7 +729,7 @@ disable_wakeonlan() {
 
     local iface service_file rule_file
     for iface in "${interfaces[@]}"; do
-        if sudo ethtool -s "$iface" wol d 2>/dev/null; then
+        if sudo -n ethtool -s "$iface" wol d 2>/dev/null; then
             ui_info "Wake-on-LAN disabled on $iface"
         fi
 
@@ -738,26 +738,26 @@ disable_wakeonlan() {
             local conn=""
             conn=$(nmcli -t -f NAME,DEVICE connection show 2>/dev/null | awk -F: -v dev="$iface" '$2==dev {print $1; exit}')
             if [[ -n "$conn" ]]; then
-                sudo nmcli connection modify "$conn" 802-3-ethernet.wake-on-lan ignore >>"$INSTALL_LOG" 2>&1 || true
+                sudo -n nmcli connection modify "$conn" 802-3-ethernet.wake-on-lan ignore >>"$INSTALL_LOG" 2>&1 || true
             fi
         fi
 
         service_file="/etc/systemd/system/wol-${iface}.service"
-        if sudo test -f "$service_file" 2>/dev/null; then
-            sudo systemctl disable "wol-${iface}.service" 2>/dev/null || true
-            sudo rm -f "$service_file"
+        if sudo -n test -f "$service_file" 2>/dev/null; then
+            sudo -n systemctl disable "wol-${iface}.service" 2>/dev/null || true
+            sudo -n rm -f "$service_file"
             ui_info "Removed WoL service for $iface"
         fi
 
         rule_file="/etc/udev/rules.d/81-wol-${iface}.rules"
-        if sudo test -f "$rule_file" 2>/dev/null; then
-            sudo rm -f "$rule_file"
+        if sudo -n test -f "$rule_file" 2>/dev/null; then
+            sudo -n rm -f "$rule_file"
             ui_info "Removed WoL udev rule for $iface"
         fi
     done
 
-    sudo systemctl daemon-reload 2>/dev/null || true
-    sudo udevadm control --reload-rules 2>/dev/null || true
+    sudo -n systemctl daemon-reload 2>/dev/null || true
+    sudo -n udevadm control --reload-rules 2>/dev/null || true
     ui_success "Wake-on-LAN disabled on all interfaces"
 }
 

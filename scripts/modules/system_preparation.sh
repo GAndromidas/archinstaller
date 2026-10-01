@@ -19,7 +19,7 @@ fi
 check_prerequisites() {
   step "Checking system prerequisites"
   if [[ $EUID -eq 0 ]]; then
-    log_error "Do not run this script as root. Please run as a regular user with sudo privileges."
+    log_error "Do not run this script as root. Please run as a regular user with sudo -n privileges."
     return 1
   fi
   
@@ -47,25 +47,25 @@ configure_pacman() {
   generate_default_mirrorlist
 
   if grep -q "^#Color" /etc/pacman.conf; then
-    sudo sed -i 's/^#Color/Color/' /etc/pacman.conf
+    sudo -n sed -i 's/^#Color/Color/' /etc/pacman.conf
     log_success "Uncommented Color setting"
   fi
 
   if grep -q "^#VerbosePkgLists" /etc/pacman.conf; then
-    sudo sed -i 's/^#VerbosePkgLists/VerbosePkgLists/' /etc/pacman.conf
+    sudo -n sed -i 's/^#VerbosePkgLists/VerbosePkgLists/' /etc/pacman.conf
     log_success "Uncommented VerbosePkgLists setting"
   fi
 
   if grep -q "^ILoveCandy" /etc/pacman.conf; then
     log_info "ILoveCandy already enabled — skipping"
   elif grep -q "^#ILoveCandy" /etc/pacman.conf; then
-    sudo sed -i 's/^#ILoveCandy/ILoveCandy/' /etc/pacman.conf
+    sudo -n sed -i 's/^#ILoveCandy/ILoveCandy/' /etc/pacman.conf
     log_success "Uncommented ILoveCandy setting"
   elif grep -q "^Color" /etc/pacman.conf; then
-    sudo sed -i '/^Color/a ILoveCandy' /etc/pacman.conf
+    sudo -n sed -i '/^Color/a ILoveCandy' /etc/pacman.conf
     log_success "Added ILoveCandy setting"
   else
-    sudo sed -i "/^\[options\]/a ILoveCandy" /etc/pacman.conf
+    sudo -n sed -i "/^\[options\]/a ILoveCandy" /etc/pacman.conf
     log_success "Added ILoveCandy setting"
   fi
 
@@ -105,7 +105,7 @@ install_all_packages() {
   fi
 
   printf '%b' "${THEME_TEXT}Attempting batch installation...${RESET}\n"
-  if sudo pacman -S --noconfirm --needed "${all_packages[@]}" >>"$INSTALL_LOG" 2>&1; then
+  if sudo -n pacman -S --noconfirm --needed "${all_packages[@]}" >>"$INSTALL_LOG" 2>&1; then
     printf '%b' "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
     INSTALLED_PACKAGES+=("${all_packages[@]}")
     return 0
@@ -129,7 +129,7 @@ install_all_packages() {
       continue
     fi
 
-    if sudo pacman -S --noconfirm --needed "$pkg" >>"$INSTALL_LOG" 2>&1; then
+    if sudo -n pacman -S --noconfirm --needed "$pkg" >>"$INSTALL_LOG" 2>&1; then
       log_success "$pkg installed successfully"
       INSTALLED_PACKAGES+=("$pkg")
     else
@@ -151,13 +151,13 @@ install_all_packages() {
 }
 
 set_sudo_pwfeedback() {
-  # Globs must expand as root (sudo sh -c): /etc/sudoers.d is 750, so a
+  # Globs must expand as root (sudo -n sh -c): /etc/sudoers.d is 750, so a
   # user-expanded glob never matches and pwfeedback would be appended again
   # on every run.
-  if ! sudo sh -c 'grep -q "^Defaults.*pwfeedback" /etc/sudoers /etc/sudoers.d/* 2>/dev/null'; then
-    run_step "Enabling sudo password feedback" bash -c "echo 'Defaults env_reset,pwfeedback' | sudo EDITOR='tee -a' visudo"
+  if ! sudo -n sh -c 'grep -q "^Defaults.*pwfeedback" /etc/sudoers /etc/sudoers.d/* 2>/dev/null'; then
+    run_step "Enabling sudo -n password feedback" bash -c "echo 'Defaults env_reset,pwfeedback' | sudo -n EDITOR='tee -a' visudo"
   else
-    log_warning "sudo pwfeedback already enabled. Skipping."
+    log_warning "sudo -n pwfeedback already enabled. Skipping."
   fi
 }
 
@@ -187,7 +187,7 @@ install_cpu_microcode() {
     if pacman -Q "$pkg" &>/dev/null; then
       log_info "$pkg already installed (provided by archinstall) — nothing to do"
     else
-      if sudo pacman -S --noconfirm --needed "$pkg" >>"$INSTALL_LOG" 2>&1; then
+      if sudo -n pacman -S --noconfirm --needed "$pkg" >>"$INSTALL_LOG" 2>&1; then
         log_success "$pkg installed successfully"
         INSTALLED_PACKAGES+=("$pkg")
       else
@@ -219,7 +219,7 @@ install_kernel_headers_for_all() {
 
   # Try batch install first
   printf '%b' "${THEME_TEXT}Attempting batch installation for headers...${RESET}\n"
-  if sudo pacman -S --noconfirm --needed "${header_packages[@]}" >>"$INSTALL_LOG" 2>&1; then
+  if sudo -n pacman -S --noconfirm --needed "${header_packages[@]}" >>"$INSTALL_LOG" 2>&1; then
     printf '%b' "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
     INSTALLED_PACKAGES+=("${header_packages[@]}")
     return 0
@@ -233,7 +233,7 @@ install_kernel_headers_for_all() {
     if pacman -Q "$headers_package" &>/dev/null; then
       log_to_file "$headers_package already installed"
     else
-      if sudo pacman -S --noconfirm --needed "$headers_package" >>"$INSTALL_LOG" 2>&1; then
+      if sudo -n pacman -S --noconfirm --needed "$headers_package" >>"$INSTALL_LOG" 2>&1; then
         log_success "$headers_package installed successfully"
         INSTALLED_PACKAGES+=("$headers_package")
       else
@@ -261,7 +261,7 @@ generate_locales() {
   local locale
   for locale in "en_US.UTF-8" "el_GR.UTF-8"; do
     if grep -q "^#${locale} UTF-8" /etc/locale.gen; then
-      sudo sed -i "s/^#${locale} UTF-8/${locale} UTF-8/" /etc/locale.gen
+      sudo -n sed -i "s/^#${locale} UTF-8/${locale} UTF-8/" /etc/locale.gen
       log_success "Enabled locale: $locale"
       changed=true
     elif grep -q "^${locale} UTF-8" /etc/locale.gen; then
@@ -272,7 +272,7 @@ generate_locales() {
   done
 
   if [[ "$changed" == true ]]; then
-    run_step "Regenerating locales" sudo locale-gen
+    run_step "Regenerating locales" sudo -n locale-gen
   else
     log_info "Locales already configured — skipping locale-gen (no changes)"
   fi
@@ -292,13 +292,13 @@ configure_pacman
 # Install the mirror ranking tool (rate-mirrors) so ranking below works. It is
 # also part of HELPER_UTILS, so this just ensures it exists before ranking.
 if [ "${DRY_RUN:-false}" != true ]; then
-  run_step "Installing mirror ranking tool" sudo pacman -S --noconfirm --needed rate-mirrors
+  run_step "Installing mirror ranking tool" sudo -n pacman -S --noconfirm --needed rate-mirrors
 fi
 update_system_mirrors
 # Pre-upgrade snapshot: on btrfs+snapper, checkpoint before the full -Syu
 # so a bad upgrade is one rollback away. Best-effort, never fatal.
 if command -v snapper &>/dev/null && findmnt -n -o FSTYPE / 2>/dev/null | grep -q btrfs; then
-  if sudo snapper -c root create --description "pre-archinstaller-system-update" >>"$INSTALL_LOG" 2>&1; then
+  if sudo -n snapper -c root create --description "pre-archinstaller-system-update" >>"$INSTALL_LOG" 2>&1; then
     log_success "Pre-update snapper snapshot created"
   else
     log_debug "Pre-update snapper snapshot skipped (no config or btrfs layout)"
@@ -314,9 +314,9 @@ install_kernel_headers_for_all
 
 # Add Flathub remote once upfront (used by programs.sh and gaming_mode.sh later)
 if command -v flatpak >/dev/null 2>&1; then
-  if ! sudo flatpak remote-list --system 2>/dev/null | grep -q flathub; then
+  if ! sudo -n flatpak remote-list --system 2>/dev/null | grep -q flathub; then
     step "Adding Flathub remote"
-    sudo flatpak remote-add --if-not-exists --system flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+    sudo -n flatpak remote-add --if-not-exists --system flathub https://dl.flathub.org/repo/flathub.flatpakrepo
     log_success "Flathub remote added"
   fi
 fi

@@ -38,7 +38,7 @@ mark_step_complete_with_progress() {
     log_debug "Dry-run: not writing state for step ${1:-unknown}"
     return 0
   fi
-  local step_name="$1"
+  local step_name="${1:-}"
   local status="${2:-completed}"
   [[ -n "$step_name" ]] || { log_error "Cannot update empty step name"; return 1; }
   case "$status" in

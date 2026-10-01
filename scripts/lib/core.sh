@@ -177,7 +177,7 @@ fi
 if ! declare -f run_step >/dev/null 2>&1; then
 run_step() {
     [[ $# -ge 2 ]] || { log_error "run_step: usage: run_step <description> <cmd> [args...]"; return 1; }
-    local description="$1"
+    local description="${1:-}"
     shift
 
     step "$description"

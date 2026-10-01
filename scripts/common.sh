@@ -16,7 +16,7 @@ enable_multilib_repo() {
         return 0
     fi
 
-    echo -e "\n[multilib]\nInclude = /etc/pacman.d/mirrorlist" | sudo tee -a "$pacman_conf" >/dev/null
+    echo -e "\n[multilib]\nInclude = /etc/pacman.d/mirrorlist" | sudo -n tee -a "$pacman_conf" >/dev/null
     log_success "Enabled multilib repository"
 }
 fi
@@ -109,11 +109,11 @@ unset __lib_module
 
 # Validate configuration file before modification
 validate_config_file() {
-    local config_file="$1"
+    local config_file="${1:-}"
     local backup_dir="${2:-/var/tmp/archinstaller_backups}"
     
     # Create backup directory if it doesn't exist
-    sudo mkdir -p "$backup_dir" 2>/dev/null || true
+    sudo -n mkdir -p "$backup_dir" 2>/dev/null || true
     
     if [ -f "$config_file" ]; then
         # Check if file is readable and not empty
@@ -124,7 +124,7 @@ validate_config_file() {
         
         # Create backup with timestamp
         local backup_file="$backup_dir/$(basename "$config_file").backup.$(date +%Y%m%d_%H%M%S)"
-        sudo cp "$config_file" "$backup_file" 2>/dev/null || {
+        sudo -n cp "$config_file" "$backup_file" 2>/dev/null || {
             log_warning "Failed to backup $config_file"
             return 1
         }
@@ -160,8 +160,8 @@ check_system_compatibility() {
     fi
     
     # Check bootloader compatibility - bare [ -d /boot ] succeeds on 700 (exists, just not readable)
-    # Only use sudo as fallback after bare fails, avoids prompting before sudo -v in install.sh
-    if [ ! -d /boot ] && ! sudo test -d "/boot" 2>/dev/null; then
+    # Only use sudo -n as fallback after bare fails, avoids prompting before sudo -v in install.sh
+    if [ ! -d /boot ] && ! sudo -n test -d "/boot" 2>/dev/null; then
         issues+=("Boot directory not found")
     fi
 
@@ -246,9 +246,9 @@ atomic_write() {
 
 # SECTION 3b: PRIVILEGED /BOOT HANDLING (archinstall 700)
 # archinstall sets /boot to 700 (root-only) for UKI protection. Bare
-# [ -f /boot/... ] and > /boot/... fail for the user, but sudo succeeds.
+# [ -f /boot/... ] and > /boot/... fail for the user, but sudo -n succeeds.
 # This helper provides a delicate, robust way: never chmod 755, just use
-# sudo for all /boot I/O and do atomic writes via /tmp so we never
+# sudo -n for all /boot I/O and do atomic writes via /tmp so we never
 # need to revert permissions and never break boot on failure.
 
 is_boot_privileged() {
@@ -288,13 +288,13 @@ privileged_write() {
 # Fails gracefully (logs, returns 1) instead of breaking boot
 with_privileged_boot() {
     [[ $# -ge 1 ]] || { log_error "with_privileged_boot: missing command"; return 1; }
-    # Verify sudo can actually access /boot before attempting
+    # Verify sudo -n can actually access /boot before attempting
     if is_boot_privileged; then
         if ! sudo -n test -d /boot 2>/dev/null; then
-            log_warning "/boot is privileged (700) but sudo cannot access it — skipping $* (run with passwordless sudo or as root)"
+            log_warning "/boot is privileged (700) but sudo -n cannot access it — skipping $* (run with passwordless sudo -n or as root)"
             return 1
         fi
-        log_info "/boot is root-only (700) — using sudo for privileged access (no chmod, no revert needed)"
+        log_info "/boot is root-only (700) — using sudo -n for privileged access (no chmod, no revert needed)"
     fi
     "$@"
 }
@@ -315,21 +315,21 @@ snapper_ensure_config_with_workaround() {
     return 1
   fi
   log_info "No snapper config for / — creating one..."
-  if sudo snapper -c root create-config / >>"$INSTALL_LOG" 2>&1; then
+  if sudo -n snapper -c root create-config / >>"$INSTALL_LOG" 2>&1; then
     return 0
   fi
   log_warning "Initial create-config failed, trying ArchWiki @.snapshots workaround..."
-  if mountpoint -q /.snapshots 2>/dev/null; then sudo umount /.snapshots 2>/dev/null || true; fi
-  sudo rm -rf /.snapshots 2>/dev/null || true
-  if sudo snapper -c root create-config / >>"$INSTALL_LOG" 2>&1; then
+  if mountpoint -q /.snapshots 2>/dev/null; then sudo -n umount /.snapshots 2>/dev/null || true; fi
+  sudo -n rm -rf /.snapshots 2>/dev/null || true
+  if sudo -n snapper -c root create-config / >>"$INSTALL_LOG" 2>&1; then
     log_success "Snapper config created after workaround"
-    sudo btrfs subvolume delete /.snapshots 2>/dev/null || true
-    sudo mkdir -p /.snapshots 2>/dev/null || true
+    sudo -n btrfs subvolume delete /.snapshots 2>/dev/null || true
+    sudo -n mkdir -p /.snapshots 2>/dev/null || true
     local root_dev=$(findmnt -n -o SOURCE / 2>/dev/null | cut -d'[' -f1)
-    if sudo btrfs subvolume list / 2>/dev/null | grep -q "path @snapshots"; then
-      sudo mount -o subvol=@snapshots "$root_dev" /.snapshots 2>/dev/null || sudo mount -a 2>/dev/null || true
+    if sudo -n btrfs subvolume list / 2>/dev/null | grep -q "path @snapshots"; then
+      sudo -n mount -o subvol=@snapshots "$root_dev" /.snapshots 2>/dev/null || sudo -n mount -a 2>/dev/null || true
     else
-      sudo mount -a 2>/dev/null || true
+      sudo -n mount -a 2>/dev/null || true
     fi
     return 0
   fi
@@ -352,22 +352,22 @@ snapper_ensure_home_config() {
   if [[ "$(findmnt -n -o FSTYPE /home 2>/dev/null || echo "")" != "btrfs" ]]; then
     return 1
   fi
-  if ! sudo btrfs subvolume show /home &>/dev/null; then
+  if ! sudo -n btrfs subvolume show /home &>/dev/null; then
     log_info "/home is not a separate btrfs subvolume — skipping home snapper config."
     return 1
   fi
   log_info "No snapper config for /home — creating one..."
-  if sudo snapper -c home create-config /home >>"$INSTALL_LOG" 2>&1; then
+  if sudo -n snapper -c home create-config /home >>"$INSTALL_LOG" 2>&1; then
     return 0
   fi
   log_warning "Initial home create-config failed, trying workaround..."
-  if mountpoint -q /home/.snapshots 2>/dev/null; then sudo umount /home/.snapshots 2>/dev/null || true; fi
-  sudo rm -rf /home/.snapshots 2>/dev/null || true
-  if sudo snapper -c home create-config /home >>"$INSTALL_LOG" 2>&1; then
+  if mountpoint -q /home/.snapshots 2>/dev/null; then sudo -n umount /home/.snapshots 2>/dev/null || true; fi
+  sudo -n rm -rf /home/.snapshots 2>/dev/null || true
+  if sudo -n snapper -c home create-config /home >>"$INSTALL_LOG" 2>&1; then
     log_success "Snapper home config created after workaround"
-    sudo btrfs subvolume delete /home/.snapshots 2>/dev/null || true
-    sudo mkdir -p /home/.snapshots 2>/dev/null || true
-    sudo mount -a 2>/dev/null || true
+    sudo -n btrfs subvolume delete /home/.snapshots 2>/dev/null || true
+    sudo -n mkdir -p /home/.snapshots 2>/dev/null || true
+    sudo -n mount -a 2>/dev/null || true
     return 0
   fi
   log_warning "Could not create snapper config for /home"
@@ -377,20 +377,20 @@ snapper_ensure_home_config() {
 _snapper_apply_profile_to_conf() {
   # Idempotent per-file setter (handles #KEY, missing, different quotes).
   # Per-file fast guard: matching files are skipped so re-runs stay cheap.
-  local conf="$1"
-  if sudo grep -qE '^NUMBER_LIMIT="8"' "$conf" 2>/dev/null \
-    && sudo grep -qE '^TIMELINE_LIMIT_DAILY="1"' "$conf" 2>/dev/null \
-    && sudo grep -qE '^TIMELINE_CREATE="yes"' "$conf" 2>/dev/null; then
+  local conf="${1:-}"
+  if sudo -n grep -qE '^NUMBER_LIMIT="8"' "$conf" 2>/dev/null \
+    && sudo -n grep -qE '^TIMELINE_LIMIT_DAILY="1"' "$conf" 2>/dev/null \
+    && sudo -n grep -qE '^TIMELINE_CREATE="yes"' "$conf" 2>/dev/null; then
     log_info "Snapper profile already applied to $(basename "$conf")"
     return 0
   fi
   local key val
   for kv in 'TIMELINE_MIN_AGE:1800' 'TIMELINE_LIMIT_HOURLY:0' 'TIMELINE_LIMIT_DAILY:1' 'TIMELINE_LIMIT_WEEKLY:0' 'TIMELINE_LIMIT_MONTHLY:0' 'TIMELINE_LIMIT_QUARTERLY:0' 'TIMELINE_LIMIT_YEARLY:0' 'NUMBER_MIN_AGE:1800' 'NUMBER_LIMIT:8' 'NUMBER_LIMIT_IMPORTANT:8' 'TIMELINE_CREATE:yes' 'TIMELINE_CLEANUP:yes' 'NUMBER_CLEANUP:yes' 'EMPTY_PRE_POST_CLEANUP:yes' 'BACKGROUND_COMPARISON:yes'; do
     key=${kv%%:*}; val=${kv#*:}
-    if sudo grep -qE "^#*${key}=" "$conf" 2>/dev/null; then
-      sudo sed -i -E "s|^#*${key}=.*|${key}=\"${val}\"|" "$conf"
+    if sudo -n grep -qE "^#*${key}=" "$conf" 2>/dev/null; then
+      sudo -n sed -i -E "s|^#*${key}=.*|${key}=\"${val}\"|" "$conf"
     else
-      echo "${key}=\"${val}\"" | sudo tee -a "$conf" >/dev/null
+      echo "${key}=\"${val}\"" | sudo -n tee -a "$conf" >/dev/null
     fi
   done
 }
@@ -467,7 +467,7 @@ timeshift_ensure_autosnap() {
   else
     log_info "timeshift-autosnap already installed"
   fi
-  sudo systemctl daemon-reload 2>/dev/null || true
+  sudo -n systemctl daemon-reload 2>/dev/null || true
   # Upstream ships a hook, not necessarily a timer unit — only report it
   # when the unit actually exists.
   if systemctl list-unit-files "timeshift-autosnap.timer" 2>/dev/null | grep -q "timeshift-autosnap.timer"; then
@@ -489,18 +489,18 @@ snapper_enable_timers() {
     return 0
   fi
   snapper_apply_btrfs_assistant_profile
-  sudo systemctl daemon-reload 2>/dev/null || true
-  if sudo systemctl enable --now snapper-timeline.timer >>"$INSTALL_LOG" 2>&1; then
+  sudo -n systemctl daemon-reload 2>/dev/null || true
+  if sudo -n systemctl enable --now snapper-timeline.timer >>"$INSTALL_LOG" 2>&1; then
     log_success "Timeline snapshots enabled (snapper-timeline.timer hourly)"
   else
     log_warning "Failed to enable snapper-timeline.timer"
   fi
-  if sudo systemctl enable --now snapper-cleanup.timer >>"$INSTALL_LOG" 2>&1; then
+  if sudo -n systemctl enable --now snapper-cleanup.timer >>"$INSTALL_LOG" 2>&1; then
     log_success "Cleanup enabled (snapper-cleanup.timer daily) - enforces NUMBER_LIMIT 8"
   else
     log_warning "Failed to enable snapper-cleanup.timer"
   fi
-  if sudo systemctl enable --now snapper-boot.timer >>"$INSTALL_LOG" 2>&1; then
+  if sudo -n systemctl enable --now snapper-boot.timer >>"$INSTALL_LOG" 2>&1; then
     log_success "Boot snapshot enabled (snapper-boot.timer - ArchWiki single type, Number 8)"
   else
     log_warning "Failed to enable snapper-boot.timer"
@@ -576,7 +576,7 @@ enable_btrfs_scrub_timer() {
     log_info "btrfs-scrub@.timer template not found (btrfs-progs missing?) — skipping scrub timer."
     return 0
   fi
-  if sudo systemctl enable --now "btrfs-scrub@-.timer" >>"$INSTALL_LOG" 2>&1; then
+  if sudo -n systemctl enable --now "btrfs-scrub@-.timer" >>"$INSTALL_LOG" 2>&1; then
     log_success "Enabled monthly btrfs scrub (btrfs-scrub@-.timer)"
   else
     log_warning "Failed to enable btrfs-scrub@-.timer"
@@ -608,9 +608,9 @@ format_time() {
 # Timing functions for progress estimation
 # Unified styling functions for consistent UI across all scripts
 print_unified_step_header() {
-  local step_num="$1"
-  local total="$2"
-  local title="$3"
+  local step_num="${1:-}"
+  local total="${2:-}"
+  local title="${3:-}"
   local content="Step $step_num of $total: $title"
 
   if supports_gum; then
@@ -631,7 +631,7 @@ print_unified_step_header() {
 
 # SECTION 5: UI STYLING FUNCTIONS (gum-based)
 print_header() {
-  local title="$1"; shift
+  local title="${1:-}"; shift || true
   if supports_gum; then
     gum style --border double --margin "1 2" --padding "1 4" --foreground "$GUM_HEADER" --border-foreground "$GUM_BORDER" "$title"
     while (( "$#" )); do
@@ -676,13 +676,13 @@ generate_default_mirrorlist() {
   log_info "Mirrorlist empty or missing. Generating default..."
 
   if command -v reflector >/dev/null 2>&1; then
-    sudo reflector --latest 10 --protocol https --sort rate --save /etc/pacman.d/mirrorlist >>"$INSTALL_LOG" 2>&1 && {
+    sudo -n reflector --latest 10 --protocol https --sort rate --save /etc/pacman.d/mirrorlist >>"$INSTALL_LOG" 2>&1 && {
       log_success "Default mirrorlist generated with reflector."
       return 0
     }
   fi
 
-  sudo tee /etc/pacman.d/mirrorlist >/dev/null <<'EOF'
+  sudo -n tee /etc/pacman.d/mirrorlist >/dev/null <<'EOF'
 ## Default Arch Linux mirrorlist
 Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch
 EOF
@@ -721,8 +721,8 @@ update_system_mirrors() {
   fi
   
   # Run mirror update synchronously to avoid race condition with subsequent pacman operations
-  if sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist "$mirror_repo" >>"$INSTALL_LOG" 2>&1; then
-    sudo pacman -Syy >>"$INSTALL_LOG" 2>&1
+  if sudo -n rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist "$mirror_repo" >>"$INSTALL_LOG" 2>&1; then
+    sudo -n pacman -Syy >>"$INSTALL_LOG" 2>&1
     ui_success "Mirrors updated successfully"
     # Record the ranking so resume/re-runs skip it for 7 days. Never
     # written in dry-run (preview runs must not mutate resume state).
@@ -822,7 +822,7 @@ show_menu() {
 
 # Function to validate INSTALL_MODE
 validate_install_mode() {
-  local mode="$1"
+  local mode="${1:-}"
 
   case "$mode" in
     "default"|"minimal"|"server")
@@ -1082,9 +1082,9 @@ prompt_reboot() {
   echo -e "${THEME_HEADER}── Security ──${RESET}"
   echo ""
 
-  if command -v ufw &>/dev/null && sudo ufw status 2>/dev/null | grep -q "active"; then
+  if command -v ufw &>/dev/null && sudo -n ufw status 2>/dev/null | grep -q "active"; then
     echo -e "  ${THEME_TEXT}Firewall:${RESET}        ${THEME_SUCCESS}UFW (active)${RESET}"
-  elif command -v firewall-cmd &>/dev/null && sudo firewall-cmd --state 2>/dev/null | grep -q "running"; then
+  elif command -v firewall-cmd &>/dev/null && sudo -n firewall-cmd --state 2>/dev/null | grep -q "running"; then
     echo -e "  ${THEME_TEXT}Firewall:${RESET}        ${THEME_SUCCESS}Firewalld (active)${RESET}"
   else
     echo -e "  ${THEME_TEXT}Firewall:${RESET}        ${THEME_MUTED}not configured${RESET}"
@@ -1092,7 +1092,7 @@ prompt_reboot() {
 
   if systemctl is-active --quiet fail2ban 2>/dev/null; then
     local jail_list
-    jail_list=$(sudo fail2ban-client status 2>/dev/null | grep "Jail list" | sed 's/.*://;s/,/ /g; s/^[[:space:]]*//')
+    jail_list=$(sudo -n fail2ban-client status 2>/dev/null | grep "Jail list" | sed 's/.*://;s/,/ /g; s/^[[:space:]]*//')
     if [[ -n "$jail_list" ]]; then
       echo -e "  ${THEME_TEXT}Fail2ban:${RESET}        ${THEME_SUCCESS}active (jails: ${jail_list})${RESET}"
     else
@@ -1164,23 +1164,23 @@ prompt_reboot() {
   # Reboot confirmation
   if command -v gum >/dev/null 2>&1; then
     if gum confirm --default=true --prompt.foreground "$GUM_PRIMARY" --selected.background "$GUM_PRIMARY" "Reboot now?"; then
-      sudo reboot
+      sudo -n reboot
       exit 0
     else
       echo ""
       echo -e "${THEME_TEXT}Reboot skipped. You can reboot manually with:${RESET}"
-      echo -e "${THEME_SECONDARY}  sudo reboot${RESET}"
+      echo -e "${THEME_SECONDARY}  sudo -n reboot${RESET}"
     fi
   else
     read -r -p "$(echo -e "${THEME_WARN}Reboot now? [Y/n]: ${RESET}")" reboot_ans
     reboot_ans=${reboot_ans,,}
     if [[ "$reboot_ans" =~ ^(y|yes|"")$ ]]; then
-      sudo reboot
+      sudo -n reboot
       exit 0
     else
       echo ""
       echo -e "${THEME_TEXT}Reboot skipped. You can reboot manually with:${RESET}"
-      echo -e "${THEME_SECONDARY}  sudo reboot${RESET}"
+      echo -e "${THEME_SECONDARY}  sudo -n reboot${RESET}"
     fi
   fi
 }
@@ -1209,7 +1209,7 @@ install_aur_quietly() {
 # Returns: 0 on success, 1 on failure
 install_flatpak_quietly() {
   if ! command -v flatpak &>/dev/null; then
-    log_error "Flatpak not found. Cannot install Flatpak packages." "Install flatpak first with: sudo pacman -S flatpak"
+    log_error "Flatpak not found. Cannot install Flatpak packages." "Install flatpak first with: sudo -n pacman -S flatpak"
     return 1
   fi
   install_package_generic "flatpak" "$@"

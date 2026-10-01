@@ -36,9 +36,9 @@ cosmic_install_programs=(); cosmic_remove_programs=()
 # Using centralized functions from common.sh to avoid duplication
 
 pacman_remove() {
-	local pkg="$1"
+	local pkg="${1:-}"
 	printf '%b' "${THEME_WARN}Removing Pacman package:${RESET} %-30s" "$pkg"
-	if sudo pacman -Rns --noconfirm "$pkg" >>"$INSTALL_LOG" 2>&1; then
+	if sudo -n pacman -Rns --noconfirm "$pkg" >>"$INSTALL_LOG" 2>&1; then
 		printf '%b' "${THEME_SUCCESS} ✓ Success${RESET}\n"
 		return 0
 	else
@@ -198,7 +198,7 @@ configure_server_applications() {
 	# Configure Docker
 	if command -v docker >/dev/null; then
 		step "Configuring Docker"
-		if sudo systemctl enable --now docker >>"$INSTALL_LOG" 2>&1; then
+		if sudo -n systemctl enable --now docker >>"$INSTALL_LOG" 2>&1; then
 			log_success "Docker service enabled and started."
 		else
 			log_error "Failed to enable or start Docker service."
@@ -206,7 +206,7 @@ configure_server_applications() {
 		fi
 
 		step "Adding user to the docker group"
-		if sudo usermod -aG docker "$USER"; then
+		if sudo -n usermod -aG docker "$USER"; then
 			log_success "User '$USER' added to the docker group. Please log out and back in to apply changes."
 		else
 			log_error "Failed to add user to the docker group."
@@ -218,7 +218,7 @@ configure_server_applications() {
 	if command -v docker >/dev/null; then
 		if ui_confirm "Install Portainer for Docker management?"; then
 			step "Installing Portainer"
-			if sudo docker volume create portainer_data >>"$INSTALL_LOG" 2>&1; then
+			if sudo -n docker volume create portainer_data >>"$INSTALL_LOG" 2>&1; then
 				log_success "Created Docker volume for Portainer data."
 			else
 				log_warning "Could not create Portainer Docker volume (it might already exist)."
@@ -226,21 +226,21 @@ configure_server_applications() {
 
 			step "Pulling Portainer image and starting container"
 			# Stop and remove existing container to ensure a clean start
-			sudo docker stop portainer >>"$INSTALL_LOG" 2>&1 || true
-			sudo docker rm portainer >>"$INSTALL_LOG" 2>&1 || true
+			sudo -n docker stop portainer >>"$INSTALL_LOG" 2>&1 || true
+			sudo -n docker rm portainer >>"$INSTALL_LOG" 2>&1 || true
 
-			if sudo docker run -d -p 8000:8000 -p 9443:9443 --name=portainer --restart=always -v /var/run/docker.sock:/var/run/docker.sock -v portainer_data:/data portainer/portainer-ce:latest >>"$INSTALL_LOG" 2>&1; then
+			if sudo -n docker run -d -p 8000:8000 -p 9443:9443 --name=portainer --restart=always -v /var/run/docker.sock:/var/run/docker.sock -v portainer_data:/data portainer/portainer-ce:latest >>"$INSTALL_LOG" 2>&1; then
 				log_success "Portainer container is running."
 				# The installer sets deny-incoming firewall policy, so open
 				# Portainer's ports or the UI is unreachable.
 				# Robust: firewall may not be active yet (step 4 vs 7) - defer to system_services if needed
 				if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld 2>/dev/null; then
-					sudo firewall-cmd --add-port=8000/tcp --add-port=9443/tcp --permanent >>"$INSTALL_LOG" 2>&1 || true
-					sudo firewall-cmd --reload >>"$INSTALL_LOG" 2>&1 || true
+					sudo -n firewall-cmd --add-port=8000/tcp --add-port=9443/tcp --permanent >>"$INSTALL_LOG" 2>&1 || true
+					sudo -n firewall-cmd --reload >>"$INSTALL_LOG" 2>&1 || true
 					log_success "Opened ports 8000,9443/tcp in firewalld for Portainer."
-				elif command -v ufw >/dev/null 2>&1 && sudo ufw status 2>/dev/null | grep -q "Status: active"; then
-					sudo ufw allow 8000/tcp >>"$INSTALL_LOG" 2>&1 || true
-					sudo ufw allow 9443/tcp >>"$INSTALL_LOG" 2>&1 || true
+				elif command -v ufw >/dev/null 2>&1 && sudo -n ufw status 2>/dev/null | grep -q "Status: active"; then
+					sudo -n ufw allow 8000/tcp >>"$INSTALL_LOG" 2>&1 || true
+					sudo -n ufw allow 9443/tcp >>"$INSTALL_LOG" 2>&1 || true
 					log_success "Opened ports 8000,9443/tcp in UFW for Portainer."
 				else
 					log_info "Firewall not active yet - Portainer ports 8000,9443 will be opened when firewall is configured (system_services)"
@@ -261,10 +261,10 @@ configure_server_applications() {
 		if ui_confirm "Install Watchtower for automatic container updates?"; then
 			step "Installing Watchtower"
 			# Stop and remove existing container to ensure a clean start
-			sudo docker stop watchtower >>"$INSTALL_LOG" 2>&1 || true
-			sudo docker rm watchtower >>"$INSTALL_LOG" 2>&1 || true
+			sudo -n docker stop watchtower >>"$INSTALL_LOG" 2>&1 || true
+			sudo -n docker rm watchtower >>"$INSTALL_LOG" 2>&1 || true
 
-			if sudo docker run -d --name=watchtower --restart=always -v /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower >>"$INSTALL_LOG" 2>&1; then
+			if sudo -n docker run -d --name=watchtower --restart=always -v /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower >>"$INSTALL_LOG" 2>&1; then
 				log_success "Watchtower container is running."
 				ui_info "Watchtower will now monitor your running containers and update them automatically."
 			else
@@ -296,7 +296,7 @@ install_pacman_packages() {
 
 	# Try batch install first for speed
 	printf '%b' "${THEME_TEXT}Attempting batch installation...${RESET}\n"
-	if sudo pacman -S --noconfirm --needed "${essential_programs[@]}" >>"$INSTALL_LOG" 2>&1; then
+	if sudo -n pacman -S --noconfirm --needed "${essential_programs[@]}" >>"$INSTALL_LOG" 2>&1; then
 		printf '%b' "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
 		PROGRAMS_INSTALLED+=("${essential_programs[@]}")
 		return

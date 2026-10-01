@@ -239,7 +239,7 @@ get_kernel_params() {
 MANAGED_PARAM_KEYS="quiet loglevel nowatchdog splash vt.global_cursor_default nvidia_drm.modeset nvidia_drm.fbdev NVreg_DynamicPowerManagement NVreg_PreserveVideoMemoryAllocations NVreg_TemporaryFilePath radeon.si_support amdgpu.si_support radeon.cik_support amdgpu.cik_support amd_pstate i915.enable_guc rootflags video"
 
 _merge_param_key() {
-  local tok="$1"
+  local tok="${1:-}"
   if [[ "$tok" == *=* ]]; then
     echo "${tok%%=*}"
   else
@@ -250,7 +250,7 @@ _merge_param_key() {
 # merge_kernel_params <existing> <managed> — echo merged cmdline.
 # Tokens are space-separated (kernel cmdline convention).
 merge_kernel_params() {
-  local existing="$1" managed="$2"
+  local existing="${1:-}" managed="${2:-}"
   local out=()
   local tok key seen m
   # shellcheck disable=SC2086
@@ -283,7 +283,7 @@ merge_kernel_params() {
 # ...) present in both lands on /proc/cmdline twice. Unmanaged tokens
 # (cryptdevice, resume, ...) are always kept.
 strip_managed_dupes() {
-  local line="$1" reference="$2"
+  local line="${1:-}" reference="${2:-}"
   local ref_keys=() out=()
   local tok key m managed seen
   # shellcheck disable=SC2086
@@ -324,7 +324,7 @@ detect_root_uuid() {
   fi
   src=$(findmnt -n -o SOURCE / 2>/dev/null | cut -d'[' -f1 || true)
   if [[ -n "$src" ]]; then
-    uuid=$(sudo blkid -s UUID -o value "$src" 2>/dev/null || true)
+    uuid=$(sudo -n blkid -s UUID -o value "$src" 2>/dev/null || true)
     if [[ -n "$uuid" ]]; then
       echo "$uuid"
       return 0
@@ -339,7 +339,7 @@ detect_root_uuid() {
 # writing a rootless entry cmdline boots into "Failed to mount '' on real
 # root", so callers must skip the write instead.
 ensure_root_rw() {
-  local merged="$1"
+  local merged="${1:-}"
   if ! echo " $merged " | grep -qE ' root=[^ ]+ '; then
     local root_uuid
     if root_uuid=$(detect_root_uuid); then
@@ -381,7 +381,7 @@ is_secureboot_active() {
 # only, so re-runs are idempotent and never duplicate root=. Fails (no
 # output) when no root can be established — callers must skip the write.
 build_file_cmdline() {
-  local current="$1"
+  local current="${1:-}"
   local full managed_part
   full=$(get_kernel_params) || return 1
   managed_part="$full"
@@ -407,7 +407,7 @@ configure_uki_cmdline() {
 
   local current_params=""
   if [[ -f "$cmdline_file" ]]; then
-    current_params=$(sudo cat "$cmdline_file" 2>/dev/null || echo "")
+    current_params=$(sudo -n cat "$cmdline_file" 2>/dev/null || echo "")
   fi
   local merged
   if ! merged=$(build_file_cmdline "$current_params"); then
@@ -418,9 +418,9 @@ configure_uki_cmdline() {
   if [[ "$current_params" == "$merged" ]]; then
     log_info "UKI cmdline already configured"
   else
-    [[ -f "$cmdline_file" ]] && sudo cp "$cmdline_file" "${cmdline_file}.backup.$(date +%Y%m%d_%H%M%S)"
+    [[ -f "$cmdline_file" ]] && sudo -n cp "$cmdline_file" "${cmdline_file}.backup.$(date +%Y%m%d_%H%M%S)"
     log_info "Backed up existing UKI cmdline"
-    echo "$merged" | sudo tee "$cmdline_file" >/dev/null
+    echo "$merged" | sudo -n tee "$cmdline_file" >/dev/null
     log_success "UKI cmdline written: $merged"
   fi
   log_to_file "UKI cmdline value: $merged"
@@ -432,7 +432,7 @@ configure_uki_cmdline() {
   esp_mount=$(findmnt -n -o TARGET /boot/efi 2>/dev/null || findmnt -n -o TARGET /boot 2>/dev/null || echo "/boot")
   local uki_dir="${esp_mount}/EFI/Linux"
   if [[ ! -d "$uki_dir" ]]; then
-    if sudo mkdir -p "$uki_dir" 2>/dev/null; then
+    if sudo -n mkdir -p "$uki_dir" 2>/dev/null; then
       log_info "Created UKI output directory: $uki_dir"
     else
       log_warning "Failed to create $uki_dir"
@@ -448,8 +448,8 @@ configure_uki_cmdline() {
 configure_uki_cmdline_note_only() {
   local cmdline_file="/etc/kernel/cmdline"
   local current=""
-  if sudo test -f "$cmdline_file" 2>/dev/null; then
-    current=$(sudo cat "$cmdline_file" 2>/dev/null || echo "")
+  if sudo -n test -f "$cmdline_file" 2>/dev/null; then
+    current=$(sudo -n cat "$cmdline_file" 2>/dev/null || echo "")
   fi
   local merged
   if ! merged=$(build_file_cmdline "$current"); then
@@ -457,8 +457,8 @@ configure_uki_cmdline_note_only() {
     return 1
   fi
   if [[ "$current" != "$merged" ]]; then
-    [[ -n "$current" ]] && sudo cp "$cmdline_file" "${cmdline_file}.backup.$(date +%Y%m%d_%H%M%S)"
-    echo "$merged" | sudo tee "$cmdline_file" >/dev/null
+    [[ -n "$current" ]] && sudo -n cp "$cmdline_file" "${cmdline_file}.backup.$(date +%Y%m%d_%H%M%S)"
+    echo "$merged" | sudo -n tee "$cmdline_file" >/dev/null
     log_success "Synced $cmdline_file (firmware entries still authoritative)"
   else
     log_info "$cmdline_file already up to date"
@@ -498,7 +498,7 @@ configure_boot() {
 
   run_step "Renaming dated kernel entries to simple format" rename_dated_kernel_entries
 
-  if [ -n "$loader_conf" ] && sudo test -f "$loader_conf" 2>/dev/null; then
+  if [ -n "$loader_conf" ] && sudo -n test -f "$loader_conf" 2>/dev/null; then
     set_loader_config "timeout" "3"
     set_loader_config "console-mode" "max"
     ui_info "Set timeout to 3s and console-mode to max"
@@ -528,7 +528,7 @@ configure_boot() {
 
 # Update kernel options in systemd-boot entries - smart for archinstall dated entries
 update_systemd_boot_options() {
-  local new_params="$1"
+  local new_params="${1:-}"
   local entries_dir
   entries_dir=$(find_systemd_boot_entries_dir)
 
@@ -538,11 +538,11 @@ update_systemd_boot_options() {
 
   # Smart find: archinstall creates dated entries like 2026-09-04_10-49-12_linux.conf
   # Regular entries are simple like linux.conf, linux-lts.conf
-  # Use sudo find for 700 /boot, handle both patterns
+  # Use sudo -n find for 700 /boot, handle both patterns
   local entries=()
   while IFS= read -r -d '' entry; do
     entries+=("$entry")
-  done < <(sudo find "$entries_dir" -maxdepth 1 -name "*.conf" ! -name "*fallback*" -print0 2>/dev/null)
+  done < <(sudo -n find "$entries_dir" -maxdepth 1 -name "*.conf" ! -name "*fallback*" -print0 2>/dev/null)
 
   if [[ ${#entries[@]} -eq 0 ]]; then
     log_warning "No systemd-boot entries found in $entries_dir"
@@ -566,8 +566,8 @@ update_systemd_boot_options() {
     # root= (PARTUUID c9862f4f-c053-4124-a6a3-55be71016782), zswap.enabled=0, rw, rootfstype etc.
     # Only managed keys (quiet, amd_pstate, etc.) are replaced - example file keeps PARTUUID
     local existing=""
-    if sudo grep -q "^options " "$entry" 2>/dev/null; then
-      existing=$(sudo grep "^options " "$entry" 2>/dev/null | sed 's/^options //')
+    if sudo -n grep -q "^options " "$entry" 2>/dev/null; then
+      existing=$(sudo -n grep "^options " "$entry" 2>/dev/null | sed 's/^options //')
     fi
 
     # Build new options line (refuse rootless: a missing root= boots into
@@ -581,14 +581,14 @@ update_systemd_boot_options() {
     log_to_file "Entry $(basename "$entry") options: $new_options"
 
     # Update or add options line - handles files with header comments (# Created by archinstall)
-    if sudo grep -q "^options " "$entry" 2>/dev/null; then
-      sudo sed -i "s|^options .*|options $new_options|" "$entry"
+    if sudo -n grep -q "^options " "$entry" 2>/dev/null; then
+      sudo -n sed -i "s|^options .*|options $new_options|" "$entry"
       log_info "Patched $entry_name options (added managed params like amd_pstate=active if needed)"
     else
-      echo "options $new_options" | sudo tee -a "$entry" >/dev/null
+      echo "options $new_options" | sudo -n tee -a "$entry" >/dev/null
       log_info "Added options to $entry_name"
     fi
-    ((updated++))
+    updated=$((updated + 1))
   done
 
   [[ $updated -gt 0 ]] && log_success "Updated kernel options in $updated systemd-boot entries (dated + simple handled)"
@@ -608,7 +608,7 @@ check_kernel_options_consistency() {
   local kernel_entries=()
   while IFS= read -r -d $'\0' entry; do
     kernel_entries+=("$entry")
-  done < <(sudo find "$entries_dir" -name "*.conf" ! -name "*fallback*" -print0 2>/dev/null)
+  done < <(sudo -n find "$entries_dir" -name "*.conf" ! -name "*fallback*" -print0 2>/dev/null)
 
   if [[ ${#kernel_entries[@]} -eq 0 ]]; then
     log_warning "No kernel entries found to check"
@@ -625,7 +625,7 @@ check_kernel_options_consistency() {
 
   for entry in "${kernel_entries[@]}"; do
     local entry_name=$(basename "$entry")
-    local current_options=$(sudo grep "^options " "$entry" 2>/dev/null | sed 's/^options //' || echo "")
+    local current_options=$(sudo -n grep "^options " "$entry" 2>/dev/null | sed 's/^options //' || echo "")
     options_list+=("$current_options")
     entry_names+=("$entry_name")
   done
@@ -672,7 +672,7 @@ sync_all_kernel_options() {
   local kernel_entries=()
   while IFS= read -r -d $'\0' entry; do
     kernel_entries+=("$entry")
-  done < <(sudo find "$entries_dir" -name "*.conf" ! -name "*fallback*" -print0 2>/dev/null)
+  done < <(sudo -n find "$entries_dir" -name "*.conf" ! -name "*fallback*" -print0 2>/dev/null)
 
   if [[ ${#kernel_entries[@]} -eq 0 ]]; then
     log_warning "No kernel entries found to sync"
@@ -680,7 +680,7 @@ sync_all_kernel_options() {
   fi
 
   local standard_entry="${kernel_entries[0]}"
-  local standard_options=$(sudo grep "^options " "$standard_entry" 2>/dev/null | sed 's/^options //' || echo "")
+  local standard_options=$(sudo -n grep "^options " "$standard_entry" 2>/dev/null | sed 's/^options //' || echo "")
 
   if [[ -z "$standard_options" ]]; then
     log_warning "No options found in standard entry: $(basename "$standard_entry")"
@@ -699,16 +699,16 @@ sync_all_kernel_options() {
       continue
     fi
 
-    local current_options=$(sudo grep "^options " "$entry" 2>/dev/null | sed 's/^options //' || echo "")
+    local current_options=$(sudo -n grep "^options " "$entry" 2>/dev/null | sed 's/^options //' || echo "")
 
     if [[ "$current_options" != "$standard_options" ]]; then
       local temp_file=$(mktemp)
       trap 'rm -f "$temp_file"' RETURN
-      sudo grep -v "^options " "$entry" 2>/dev/null > "$temp_file" || grep -v "^options " "$entry" 2>/dev/null > "$temp_file" || true
+      sudo -n grep -v "^options " "$entry" 2>/dev/null > "$temp_file" || grep -v "^options " "$entry" 2>/dev/null > "$temp_file" || true
       echo "options $standard_options" >> "$temp_file"
-      sudo mv "$temp_file" "$entry"
+      sudo -n mv "$temp_file" "$entry"
       log_success "Synced options in $entry_name"
-      ((updated_count++))
+      updated_count=$((updated_count + 1))
     else
       log_info "Options already consistent in $entry_name"
     fi
@@ -739,7 +739,7 @@ rename_dated_kernel_entries() {
   local dated_entries=()
   while IFS= read -r -d '' entry; do
     dated_entries+=("$entry")
-  done < <(sudo find "$entries_dir" -name "*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]_[0-9][0-9]-[0-9][0-9]-[0-9][0-9]_*.conf" ! -name "*fallback*" -print0 2>/dev/null)
+  done < <(sudo -n find "$entries_dir" -name "*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]_[0-9][0-9]-[0-9][0-9]-[0-9][0-9]_*.conf" ! -name "*fallback*" -print0 2>/dev/null)
 
   log_info "Boot entries directory: $entries_dir"
   log_info "Found ${#dated_entries[@]} dated kernel entries"
@@ -748,7 +748,7 @@ rename_dated_kernel_entries() {
     log_info "No dated kernel entries found — entries already in simple format"
     # List all .conf files for debugging
     log_info "All entries in directory:"
-    sudo find "$entries_dir" -name "*.conf" -exec basename {} \; 2>/dev/null | while read -r f; do
+    sudo -n find "$entries_dir" -name "*.conf" -exec basename {} \; 2>/dev/null | while read -r f; do
       log_info "  - $f"
     done
     return 0
@@ -766,7 +766,7 @@ rename_dated_kernel_entries() {
       local simple_path="$entries_dir/$simple_name"
       log_info "Regex matched - kernel type: $kernel_type, simple name: $simple_name"
 
-      if sudo test -f "$simple_path" 2>/dev/null; then
+      if sudo -n test -f "$simple_path" 2>/dev/null; then
         log_warning "Simple entry $simple_name already exists, skipping rename of $entry_name"
         continue
       fi
@@ -777,9 +777,9 @@ rename_dated_kernel_entries() {
       fi
 
       log_info "Attempting to rename: $dated_entry -> $simple_path"
-      if sudo mv "$dated_entry" "$simple_path"; then
+      if sudo -n mv "$dated_entry" "$simple_path"; then
         log_success "Renamed $entry_name to $simple_name"
-        ((renamed_count++))
+        renamed_count=$((renamed_count + 1))
         update_loader_conf_references "$entry_name" "$simple_name"
       else
         log_error "Failed to rename $entry_name to $simple_name"
@@ -811,7 +811,7 @@ check_renaming_conflicts() {
       local simple_name="${kernel_type}.conf"
       local simple_path="$entries_dir/$simple_name"
 
-      if sudo test -f "$simple_path" 2>/dev/null; then
+      if sudo -n test -f "$simple_path" 2>/dev/null; then
         log_warning "Conflict: Both $entry_name and $simple_name exist"
         conflicts_found=true
       fi
@@ -824,23 +824,23 @@ check_renaming_conflicts() {
 }
 
 validate_kernel_entry() {
-  local entry="$1"
+  local entry="${1:-}"
 
   # Title field is optional (archinstall entries don't have it)
   # Only check for essential fields: linux and initrd.
   # sudo: entries live under /boot, which archinstall may lock to 700 —
   # bare grep would fail and wrongly reject every entry.
-  if ! sudo grep -q "^linux " "$entry" 2>/dev/null; then
+  if ! sudo -n grep -q "^linux " "$entry" 2>/dev/null; then
     log_warning "Entry $(basename "$entry") missing linux field"
     return 1
   fi
 
-  if ! sudo grep -q "^initrd " "$entry" 2>/dev/null; then
+  if ! sudo -n grep -q "^initrd " "$entry" 2>/dev/null; then
     log_warning "Entry $(basename "$entry") missing initrd field"
     return 1
   fi
 
-  if ! sudo grep -q "^options " "$entry" 2>/dev/null; then
+  if ! sudo -n grep -q "^options " "$entry" 2>/dev/null; then
     log_warning "Entry $(basename "$entry") missing options field"
     return 1
   fi
@@ -849,11 +849,11 @@ validate_kernel_entry() {
 }
 
 update_loader_conf_references() {
-  local old_name="$1"
-  local new_name="$2"
+  local old_name="${1:-}"
+  local new_name="${2:-}"
   local loader_config=""
   for f in "/boot/loader/loader.conf" "/efi/loader/loader.conf" "/boot/efi/loader/loader.conf"; do
-    if sudo test -f "$f" 2>/dev/null; then
+    if sudo -n test -f "$f" 2>/dev/null; then
       loader_config="$f"
       break
     fi
@@ -863,8 +863,8 @@ update_loader_conf_references() {
     return 0
   fi
 
-  if sudo grep -q "^default $old_name$" "$loader_config" 2>/dev/null; then
-    sudo sed -i "s|^default $old_name$|default $new_name|" "$loader_config"
+  if sudo -n grep -q "^default $old_name$" "$loader_config" 2>/dev/null; then
+    sudo -n sed -i "s|^default $old_name$|default $new_name|" "$loader_config"
     log_success "Updated loader.conf reference: $old_name -> $new_name"
   fi
 }
@@ -959,15 +959,15 @@ configure_grub() {
     configure_grub_menu_order
 
     local KERNELS=()
-    mapfile -t KERNELS < <(sudo find /boot -maxdepth 1 -name 'vmlinuz-*' 2>/dev/null | sed 's|.*/vmlinuz-||' | sort)
+    mapfile -t KERNELS < <(sudo -n find /boot -maxdepth 1 -name 'vmlinuz-*' 2>/dev/null | sed 's|.*/vmlinuz-||' | sort)
     if [[ ${#KERNELS[@]} -eq 0 ]]; then
         # kernel-install layout (/boot/<machine-id>/.../linux, no vmlinuz-*):
         # stock 10_linux cannot see those kernels, but GRUB's blscfg parser
         # reads the /boot/loader/entries/*.conf files kernel-install
         # maintains. Same approach as the standalone Limine→GRUB migration.
         local layout_count entry_count
-        layout_count=$(sudo find /boot -maxdepth 3 -type f -name linux 2>/dev/null | wc -l)
-        entry_count=$(sudo find /boot/loader/entries -maxdepth 1 -name '*.conf' 2>/dev/null | wc -l)
+        layout_count=$(sudo -n find /boot -maxdepth 3 -type f -name linux 2>/dev/null | wc -l)
+        entry_count=$(sudo -n find /boot/loader/entries -maxdepth 1 -name '*.conf' 2>/dev/null | wc -l)
         if [[ "$layout_count" -gt 0 && "$entry_count" -gt 0 ]]; then
             set_grub_config "GRUB_ENABLE_BLSCFG" "true"
             log_success "kernel-install layout detected — GRUB will boot via loader entries (blscfg)"
@@ -989,18 +989,18 @@ configure_grub() {
     local grub_cfg="/boot/grub/grub.cfg"
     local backup_grub_config="${grub_config}.backup.$(date +%Y%m%d_%H%M%S)"
 
-    if sudo test -f "$grub_config" 2>/dev/null; then
-        sudo cp "$grub_config" "$backup_grub_config" || true
+    if sudo -n test -f "$grub_config" 2>/dev/null; then
+        sudo -n cp "$grub_config" "$backup_grub_config" || true
     fi
 
     if [ -f "$grub_config" ]; then
         ui_info "Regenerating GRUB configuration..."
-        if sudo grub-mkconfig -o "$grub_cfg" 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
+        if sudo -n grub-mkconfig -o "$grub_cfg" 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
             log_success "GRUB configuration regenerated successfully"
         else
             log_error "grub-mkconfig failed"
             if [ -f "$backup_grub_config" ]; then
-                sudo mv "$backup_grub_config" "$grub_config" || true
+                sudo -n mv "$backup_grub_config" "$grub_config" || true
             fi
             return 1
         fi
@@ -1035,7 +1035,7 @@ configure_grub() {
 detect_second_os_evidence() {
     # 1. NVRAM entries for foreign OS loaders.
     if command -v efibootmgr &>/dev/null; then
-        if sudo efibootmgr -v 2>/dev/null | grep -qiE 'File\(\\EFI\\(Microsoft|ubuntu|fedora|debian|opensuse|suse|gentoo|centos|manjaro|endeavouros|pop|linuxmint|zorin|kali)'; then
+        if sudo -n efibootmgr -v 2>/dev/null | grep -qiE 'File\(\\EFI\\(Microsoft|ubuntu|fedora|debian|opensuse|suse|gentoo|centos|manjaro|endeavouros|pop|linuxmint|zorin|kali)'; then
             return 0
         fi
     fi
@@ -1073,14 +1073,14 @@ _esp_has_foreign_loader() {
         if [[ -z "$mnt" ]]; then
             mnt=$(mktemp -d /tmp/esp_probe.XXXXXX 2>/dev/null || echo "")
             [[ -z "$mnt" ]] && continue
-            if ! sudo mount -o ro "$part" "$mnt" 2>/dev/null; then
+            if ! sudo -n mount -o ro "$part" "$mnt" 2>/dev/null; then
                 rmdir "$mnt" 2>/dev/null || true
                 continue
             fi
             cleanup=true
         fi
         found=false
-        if sudo test -f "$mnt/EFI/Microsoft/Boot/bootmgfw.efi" 2>/dev/null; then
+        if sudo -n test -f "$mnt/EFI/Microsoft/Boot/bootmgfw.efi" 2>/dev/null; then
             found=true
         else
             this_part=$(readlink -f "$part" 2>/dev/null || echo "$part")
@@ -1098,9 +1098,9 @@ _esp_has_foreign_loader() {
                         fi
                         ;;
                     *)
-                        if sudo test -f "$vendor/grubx64.efi" 2>/dev/null \
-                            || sudo test -f "$vendor/shimx64.efi" 2>/dev/null \
-                            || sudo test -f "$vendor/BOOTX64.EFI" 2>/dev/null; then
+                        if sudo -n test -f "$vendor/grubx64.efi" 2>/dev/null \
+                            || sudo -n test -f "$vendor/shimx64.efi" 2>/dev/null \
+                            || sudo -n test -f "$vendor/BOOTX64.EFI" 2>/dev/null; then
                             found=true; break
                         fi
                         ;;
@@ -1108,7 +1108,7 @@ _esp_has_foreign_loader() {
             done
         fi
         if [[ "$cleanup" == true ]]; then
-            sudo umount "$mnt" 2>/dev/null || true
+            sudo -n umount "$mnt" 2>/dev/null || true
             rmdir "$mnt" 2>/dev/null || true
         fi
         [[ "$found" == true ]] && return 0
@@ -1131,7 +1131,7 @@ configure_grub_menu_order() {
     # provides no GRUB_* knob for it — the supported mechanism is making
     # 30_uefi-firmware non-executable so grub-mkconfig skips it.
     if [[ -x /etc/grub.d/30_uefi-firmware ]]; then
-        if sudo chmod -x /etc/grub.d/30_uefi-firmware 2>/dev/null; then
+        if sudo -n chmod -x /etc/grub.d/30_uefi-firmware 2>/dev/null; then
             log_success "Disabled UEFI Firmware Settings menu entry"
         else
             log_warning "Could not disable 30_uefi-firmware"
@@ -1151,7 +1151,7 @@ configure_grub_menu_order() {
         log_info "No 31_efi_bootnext script (older GRUB) — nothing to disable"
     elif [[ ! -x /etc/grub.d/31_efi_bootnext ]]; then
         log_info "EFI BootNext NVRAM entries already disabled"
-    elif sudo chmod -x /etc/grub.d/31_efi_bootnext 2>/dev/null; then
+    elif sudo -n chmod -x /etc/grub.d/31_efi_bootnext 2>/dev/null; then
         log_success "Disabled EFI BootNext NVRAM menu entries"
     else
         log_warning "Could not disable 31_efi_bootnext"
@@ -1168,7 +1168,7 @@ configure_grub_menu_order() {
     elif pacman -Q os-prober &>/dev/null 2>&1; then
         # Already installed (pre-installed by user?) — run it; it may see
         # what the cheap checks missed.
-        if sudo os-prober 2>/dev/null | grep -q .; then
+        if sudo -n os-prober 2>/dev/null | grep -q .; then
             second_os=true
         fi
     fi
@@ -1179,7 +1179,7 @@ configure_grub_menu_order() {
                 || log_warning "os-prober install failed — second-OS entries unavailable"
         fi
         if pacman -Q os-prober &>/dev/null 2>&1; then
-            if sudo os-prober 2>/dev/null | grep -q .; then
+            if sudo -n os-prober 2>/dev/null | grep -q .; then
                 set_grub_config "GRUB_DISABLE_OS_PROBER" "false"
                 log_success "os-prober enabled (second OS found, entries will be generated)"
             else
@@ -1212,16 +1212,16 @@ configure_grub_menu_order() {
         log_info "Installing grub-btrfs for snapshot boot entries..."
         if ! install_packages_quietly grub-btrfs 2>>"$INSTALL_LOG"; then
             log_warning "grub-btrfs install failed — skipping snapshot menu entries"
-            [[ -f "$snap_dst" ]] && sudo grep -q "Managed by archinstaller" "$snap_dst" 2>/dev/null \
-                && sudo rm -f "$snap_dst" 2>/dev/null || true
+            [[ -f "$snap_dst" ]] && sudo -n grep -q "Managed by archinstaller" "$snap_dst" 2>/dev/null \
+                && sudo -n rm -f "$snap_dst" 2>/dev/null || true
             return 0
         fi
     fi
     if [[ -f "$snap_src" ]]; then
         if [[ ! -f "$snap_dst" ]] || [[ "$snap_src" -nt "$snap_dst" ]]; then
-            if sudo cp "$snap_src" "$snap_dst" 2>/dev/null \
+            if sudo -n cp "$snap_src" "$snap_dst" 2>/dev/null \
                 && echo "# Managed by archinstaller — runs snapshot entries ahead of os-prober" \
-                    | sudo tee -a "$snap_dst" >/dev/null; then
+                    | sudo -n tee -a "$snap_dst" >/dev/null; then
                 log_success "Snapshot menu entries placed ahead of os-prober (15_snapshots-btrfs)"
             else
                 log_warning "Could not install 15_snapshots-btrfs"
@@ -1230,13 +1230,13 @@ configure_grub_menu_order() {
         else
             log_info "Snapshot menu order already in place (15_snapshots-btrfs)"
         fi
-        sudo chmod +x "$snap_dst" 2>/dev/null || true
-        sudo chmod -x "$snap_src" 2>/dev/null || true
+        sudo -n chmod +x "$snap_dst" 2>/dev/null || true
+        sudo -n chmod -x "$snap_src" 2>/dev/null || true
     else
         log_warning "grub-btrfs installed but $snap_src missing — snapshot entries unavailable"
         return 0
     fi
-    if sudo systemctl enable --now grub-btrfsd.service >>"$INSTALL_LOG" 2>&1; then
+    if sudo -n systemctl enable --now grub-btrfsd.service >>"$INSTALL_LOG" 2>&1; then
         log_success "grub-btrfsd enabled (snapshot menu refreshes automatically)"
     else
         log_warning "Could not enable grub-btrfsd — snapshot entries still generate at grub-mkconfig time"
@@ -1246,8 +1246,8 @@ configure_grub_menu_order() {
 # PART 3: HELPER FUNCTIONS
 
 set_grub_config() {
-    local key="$1"
-    local value="$2"
+    local key="${1:-}"
+    local value="${2:-}"
     local grub_config="/etc/default/grub"
 
     if grep -q "^${key}=" "$grub_config" 2>/dev/null; then
@@ -1258,18 +1258,18 @@ set_grub_config() {
         local escaped_value="${value//\\/\\\\}"
         escaped_value="${escaped_value//\//\\/}"
         escaped_value="${escaped_value//&/\\&}"
-        sudo sed -i "s/^${key}=.*/${key}=${escaped_value}/" "$grub_config"
+        sudo -n sed -i "s/^${key}=.*/${key}=${escaped_value}/" "$grub_config"
     else
-        echo "${key}=${value}" | sudo tee -a "$grub_config" >/dev/null
+        echo "${key}=${value}" | sudo -n tee -a "$grub_config" >/dev/null
     fi
 }
 
 set_loader_config() {
-    local key="$1"
-    local value="$2"
+    local key="${1:-}"
+    local value="${2:-}"
     local loader_config=""
     for f in "/boot/loader/loader.conf" "/efi/loader/loader.conf" "/boot/efi/loader/loader.conf"; do
-      if sudo test -f "$f" 2>/dev/null; then # Use sudo test for file existence
+      if sudo -n test -f "$f" 2>/dev/null; then # Use sudo -n test for file existence
         loader_config="$f"
         break
       fi
@@ -1285,7 +1285,7 @@ set_loader_config() {
         fi
         if [ -n "$entries_dir_derived" ]; then
           local derived_conf="$(dirname "$entries_dir_derived")/loader.conf"
-          if sudo test -f "$derived_conf" 2>/dev/null; then
+          if sudo -n test -f "$derived_conf" 2>/dev/null; then
             loader_config="$derived_conf"
           else
             loader_config="$derived_conf"
@@ -1300,9 +1300,9 @@ set_loader_config() {
     fi
 
     local current_content cat_status=0
-    current_content=$(sudo cat "$loader_config" 2>/dev/null) || cat_status=$?
+    current_content=$(sudo -n cat "$loader_config" 2>/dev/null) || cat_status=$?
     if [ $cat_status -ne 0 ]; then
-        if sudo test -f "$loader_config" 2>/dev/null; then
+        if sudo -n test -f "$loader_config" 2>/dev/null; then
             log_error "Failed to read $loader_config for key '$key' (cat exit $cat_status)"
             return 1
         else
@@ -1332,15 +1332,15 @@ ${key} ${value}"
 
     # Ensure directory exists (needs sudo: /boot is 700)
     local target_dir=$(dirname "$loader_config")
-    if ! sudo test -d "$target_dir" 2>/dev/null; then
-        sudo mkdir -p "$target_dir" 2>/dev/null || {
+    if ! sudo -n test -d "$target_dir" 2>/dev/null; then
+        sudo -n mkdir -p "$target_dir" 2>/dev/null || {
             log_error "Failed to create directory $target_dir"
             return 1
         }
     fi
 
     # Robust atomic write: uses /tmp for privileged /boot (700) so bare > never fails,
-    # then sudo mv — never chmods /boot, so no revert needed and boot never breaks
+    # then sudo -n mv — never chmods /boot, so no revert needed and boot never breaks
     if is_boot_privileged 2>/dev/null; then
         log_info "Writing $loader_config via privileged atomic write (preserving 700)"
     fi
@@ -1361,7 +1361,7 @@ detect_esp_mount() {
   if [[ -z "$esp" ]]; then
     local p
     for p in /boot /boot/efi /efi /limine; do
-      if sudo test -d "$p" 2>/dev/null && findmnt -n -o FSTYPE "$p" 2>/dev/null | grep -q vfat; then
+      if sudo -n test -d "$p" 2>/dev/null && findmnt -n -o FSTYPE "$p" 2>/dev/null | grep -q vfat; then
         esp="$p"
         break
       fi
@@ -1390,10 +1390,10 @@ with_limine_lock() {
     # real install log, not something the mocked test environment could
     # have caught (no real /run/lock permission semantics there).
     sudo -v 2>/dev/null || true
-    sudo bash -c 'source /usr/lib/limine/limine-mutex && mutex_lock "archinstaller"' 2>/dev/null || true
+    sudo -n bash -c 'source /usr/lib/limine/limine-mutex && mutex_lock "archinstaller"' 2>/dev/null || true
     "$@"
     local rc=$?
-    sudo bash -c 'source /usr/lib/limine/limine-mutex && mutex_unlock' 2>/dev/null || true
+    sudo -n bash -c 'source /usr/lib/limine/limine-mutex && mutex_unlock' 2>/dev/null || true
     return $rc
   else
     "$@"
@@ -1403,17 +1403,17 @@ with_limine_lock() {
 # Helpers executed under with_limine_lock (must be plain functions, same shell)
 # Kernel cmdline tokens never contain | or & — pipe delimiter is safe below.
 _limine_replace_line() {
-  local conf="$1" ln="$2" content="$3"
-  sudo sed -i "${ln}s|^.*|$content|" "$conf"
+  local conf="${1:-}" ln="${2:-}" content="${3:-}"
+  sudo -n sed -i "${ln}s|^.*|$content|" "$conf"
 }
 
 _limine_append_snapshots_marker() {
-  printf '\n  //Snapshots\n' | sudo tee -a "$1" >/dev/null
+  printf '\n  //Snapshots\n' | sudo -n tee -a "$1" >/dev/null
 }
 
 # Remove helper executed under with_limine_lock (plain function, same shell).
 _limine_remove_file() {
-  sudo rm -f "$1"
+  sudo -n rm -f "$1"
 }
 
 # Delete the top-level EFI-fallback entry block entirely (through the next
@@ -1423,11 +1423,11 @@ _limine_remove_file() {
 # how the entry survived pruning before). Returns 0 when removed,
 # 2 when absent, 1 on error — so callers can log accurately.
 limine_remove_efi_fallback() {
-  local conf="$1"
-  sudo grep -qiE "^/efi fallback[[:space:]]*$" "$conf" 2>/dev/null || return 2
+  local conf="${1:-}"
+  sudo -n grep -qiE "^/efi fallback[[:space:]]*$" "$conf" 2>/dev/null || return 2
   local tmp
   tmp=$(mktemp /tmp/limine_rm_entry.XXXXXX) || return 1
-  if sudo cat "$conf" 2>/dev/null | awk '
+  if sudo -n cat "$conf" 2>/dev/null | awk '
       /^\/\// { in_target = 0; print; next }
       /^\// { cur = substr($0, 2); sub(/[ \t\r]+$/, "", cur); in_target = (tolower(cur) == "efi fallback") }
       !in_target { print }
@@ -1451,34 +1451,34 @@ limine_remove_efi_fallback() {
 # rootless entry boots into "Failed to mount '' on real root", so blanking
 # is never an option.
 patch_limine_cmdlines() {
-  local conf="$1" unified="$2"
+  local conf="${1:-}" unified="${2:-}"
   # Both cmdline key spellings: archinstall writes `cmdline:`, entry-tool
   # writes `kernel_cmdline:`. Values merge identically either way.
   local entry_lns=()
-  mapfile -t entry_lns < <(sudo grep -nE '^[[:space:]]*(kernel_)?cmdline:' "$conf" 2>/dev/null | cut -d: -f1)
+  mapfile -t entry_lns < <(sudo -n grep -nE '^[[:space:]]*(kernel_)?cmdline:' "$conf" 2>/dev/null | cut -d: -f1)
   if [ ${#entry_lns[@]} -eq 0 ]; then
     return 0
   fi
-  sudo cp "$conf" "${conf}.backup.$(date +%Y%m%d_%H%M%S)"
+  sudo -n cp "$conf" "${conf}.backup.$(date +%Y%m%d_%H%M%S)"
   local patched=0 skipped=0 snap_skipped=0
   local ln existing merged indent
   for ln in "${entry_lns[@]}"; do
-    existing=$(sudo sed -n "${ln}p" "$conf" 2>/dev/null | sed -E 's/^[[:space:]]*(kernel_)?cmdline:[[:space:]]*//')
+    existing=$(sudo -n sed -n "${ln}p" "$conf" 2>/dev/null | sed -E 's/^[[:space:]]*(kernel_)?cmdline:[[:space:]]*//')
     if echo "$existing" | grep -q '/\.snapshots'; then
       log_to_file "Limine $conf line $ln is a snapshot entry — left for limine-snapper-sync."
-      ((snap_skipped++))
+      snap_skipped=$((snap_skipped + 1))
       continue
     fi
     merged=$(merge_kernel_params "$existing" "$unified")
     if ! merged=$(ensure_root_rw "$merged"); then
       log_error "Skipping $conf line $ln: cannot ensure root= — left untouched."
-      ((skipped++))
+      skipped=$((skipped + 1))
       continue
     fi
-    indent=$(sudo sed -n "${ln}p" "$conf" 2>/dev/null | sed -E 's/^([[:space:]]*(kernel_)?cmdline:).*/\1/')
+    indent=$(sudo -n sed -n "${ln}p" "$conf" 2>/dev/null | sed -E 's/^([[:space:]]*(kernel_)?cmdline:).*/\1/')
     with_limine_lock _limine_replace_line "$conf" "$ln" "$indent $merged"
     log_to_file "Limine $conf line $ln cmdline: $merged"
-    ((patched++))
+    patched=$((patched + 1))
   done
   log_success "Patched $patched base cmdline line(s) ($skipped refused, $snap_skipped snapshot-owned) in $conf"
 }
@@ -1518,7 +1518,7 @@ configure_limine_overlayfs() {
   fi
 
   validate_config_file "$mkconf" >/dev/null 2>&1 || true
-  if sudo sed -i "s/^\(HOOKS=.*\bfilesystems\b\)/\1 $hook/" "$mkconf" && \
+  if sudo -n sed -i "s/^\(HOOKS=.*\bfilesystems\b\)/\1 $hook/" "$mkconf" && \
      grep -q "^HOOKS=.*\b$hook\b" "$mkconf"; then
     log_success "Added $hook after filesystems in mkinitcpio (read-only snapshots can boot)"
     # Defer the (slow) full rebuild: collected once at end of step 6.
@@ -1534,12 +1534,12 @@ configure_limine_overlayfs() {
 # 1080p-secondary -> 2560x1440, single-1080p box -> 1920x1080); 2x2 on HiDPI,
 # 1x1 otherwise. Override with LIMINE_RESOLUTION=WxH.
 _limine_write_file() {
-  local src="$1" dst="$2"
-  sudo tee "$dst" >/dev/null < "$src"
+  local src="${1:-}" dst="${2:-}"
+  sudo -n tee "$dst" >/dev/null < "$src"
 }
 
 configure_limine_theme() {
-  local conf="$1"
+  local conf="${1:-}"
   if [[ -z "$conf" ]]; then
     log_warning "Limine theme: no config path, skipping"
     return 0
@@ -1549,7 +1549,7 @@ configure_limine_theme() {
   # resolves. Done first (before the idempotent early-return below) so an
   # entry regenerated by limine-update / limine-snapper-sync earlier in the
   # run — or by a kernel update since the last run — is caught too.
-  if sudo test -f "$conf" 2>/dev/null; then
+  if sudo -n test -f "$conf" 2>/dev/null; then
     local _prc
     if limine_remove_efi_fallback "$conf"; then
       _prc=0
@@ -1571,14 +1571,14 @@ configure_limine_theme() {
   # Idempotent: all signature keys + detected resolution/scale must match.
   # Resolution is part of the check so a 1080p box re-themes after a 2K image
   # (and vice versa) instead of keeping a stale interface_resolution/video=.
-  if sudo grep -q "term_palette: 05142a;" "$conf" 2>/dev/null \
-    && sudo grep -q "default_entry: Arch Linux/linux" "$conf" 2>/dev/null \
-    && sudo grep -qE "^\s*interface_branding:\s*Arch Linux" "$conf" 2>/dev/null \
-    && sudo grep -q "term_palette_bright: 45475a;" "$conf" 2>/dev/null \
-    && sudo grep -q "graphic_palette: 05142a;" "$conf" 2>/dev/null \
-    && sudo grep -q "interface_resolution: $resolution" "$conf" 2>/dev/null \
-    && sudo grep -q "term_font_scale: $font_scale" "$conf" 2>/dev/null \
-    && sudo grep -q "term_background_bright: 181825" "$conf" 2>/dev/null; then
+  if sudo -n grep -q "term_palette: 05142a;" "$conf" 2>/dev/null \
+    && sudo -n grep -q "default_entry: Arch Linux/linux" "$conf" 2>/dev/null \
+    && sudo -n grep -qE "^\s*interface_branding:\s*Arch Linux" "$conf" 2>/dev/null \
+    && sudo -n grep -q "term_palette_bright: 45475a;" "$conf" 2>/dev/null \
+    && sudo -n grep -q "graphic_palette: 05142a;" "$conf" 2>/dev/null \
+    && sudo -n grep -q "interface_resolution: $resolution" "$conf" 2>/dev/null \
+    && sudo -n grep -q "term_font_scale: $font_scale" "$conf" 2>/dev/null \
+    && sudo -n grep -q "term_background_bright: 181825" "$conf" 2>/dev/null; then
     log_info "Limine theme already present in $conf ($resolution, $font_scale)"
     return 0
   fi
@@ -1636,8 +1636,8 @@ graphic_palette: 05142a;f38ba8;a6e3a1;f9e2af;3e93af;f5c2e7;94e2d5;cdd6f4
 graphic_palette_bright: 45475a;f38ba8;a6e3a1;f9e2af;89b4fa;f5c2e7;94e2d5;a6adc8
 "
   local existing=""
-  if sudo test -f "$conf" 2>/dev/null; then
-    existing=$(sudo cat "$conf" 2>/dev/null || echo "")
+  if sudo -n test -f "$conf" 2>/dev/null; then
+    existing=$(sudo -n cat "$conf" 2>/dev/null || echo "")
     # Remove existing global theme keys + timeout + bloat, keep only kernel/snapshots entries.
     # Covers every key in the header above plus legacy wallpaper/editor keys.
     existing=$(echo "$existing" | grep -vE "^\s*(timeout:|default_entry|hash_mismatch_panic|quiet|graphics:|graphic_background|graphic_foreground|graphic_margin|graphic_palette|graphic_palette_bright|interface_branding|interface_branding_colour|interface_resolution|interface_help|wallpaper|wallpaper_style|term_palette|term_palette_bright|term_background|term_background_bright|term_foreground|term_highlight_background|term_highlight_foreground|term_font_scale|term_margin|term_margin_gradient|editor_)" || true)
@@ -1672,7 +1672,7 @@ graphic_palette_bright: 45475a;f38ba8;a6e3a1;f9e2af;89b4fa;f5c2e7;94e2d5;a6adc8
 # (output goes to the log) while stdin stays live, looking like a hang.
 # Returns 0 on success (or already installed), 1 otherwise. Never exits.
 limine_install_aur_pkg() {
-  local pkg="$1"
+  local pkg="${1:-}"
   local stdin_answer="${2:-}"
   if pacman -Qi "$pkg" &>/dev/null 2>&1; then
     log_info "$pkg already installed"
@@ -1750,7 +1750,7 @@ install_limine_mkinitcpio_hook() {
 # exact loader filename below can never match them.
 limine_prune_hook_entries() {
   local verbose_list
-  verbose_list=$(sudo efibootmgr -v 2>/dev/null || true)
+  verbose_list=$(sudo -n efibootmgr -v 2>/dev/null || true)
   if [[ -z "$verbose_list" ]]; then
     log_warning "efibootmgr unavailable — skipping NVRAM hygiene (if boot order looks wrong, pick the ${limine_dir:-Limine} entry manually in firmware)."
     return 0
@@ -1760,7 +1760,7 @@ limine_prune_hook_entries() {
     [[ "$line" =~ ^Boot([0-9A-Fa-f]{4}) ]] || continue
     num="${BASH_REMATCH[1]}"
     echo "$line" | grep -qiE '\\EFI\\limine\\limine_x64\.efi' || continue
-    if sudo efibootmgr -b "$num" -B >>"$INSTALL_LOG" 2>&1; then
+    if sudo -n efibootmgr -b "$num" -B >>"$INSTALL_LOG" 2>&1; then
       log_success "Removed hook-binary NVRAM entry Boot$num (\\EFI\\limine\\limine_x64.efi has no config — booting it shows '[config file not found]')."
       pruned=$((pruned + 1))
     else
@@ -1775,9 +1775,9 @@ limine_prune_hook_entries() {
 # Move an existing boot entry first in BootOrder, preserving the relative
 # order of everything else. Never deletes anything.
 limine_order_entry_first() {
-  local want="$1"
+  local want="${1:-}"
   local order
-  order=$(sudo efibootmgr 2>/dev/null | grep -i '^BootOrder:' | cut -d: -f2 | tr -d ' ' || true)
+  order=$(sudo -n efibootmgr 2>/dev/null | grep -i '^BootOrder:' | cut -d: -f2 | tr -d ' ' || true)
   if [[ -z "$order" ]]; then
     log_warning "Could not read BootOrder — skipping reorder."
     return 0
@@ -1794,7 +1794,7 @@ limine_order_entry_first() {
     seen+="$p_up,"
     new_order="$new_order,$p_up"
   done
-  if sudo efibootmgr -o "$new_order" >>"$INSTALL_LOG" 2>&1; then
+  if sudo -n efibootmgr -o "$new_order" >>"$INSTALL_LOG" 2>&1; then
     log_success "BootOrder set to $new_order (configured Limine first)."
   else
     log_warning "Could not set BootOrder."
@@ -1839,7 +1839,7 @@ configure_limine_snapper() {
     repo_pkgs+=(btrfs-progs snapper)
   fi
   # Full -Syu (never bare -Sy: partial upgrades break Arch).
-  if ! sudo pacman -Syu --needed --noconfirm "${repo_pkgs[@]}" >>"$INSTALL_LOG" 2>&1; then
+  if ! sudo -n pacman -Syu --needed --noconfirm "${repo_pkgs[@]}" >>"$INSTALL_LOG" 2>&1; then
     log_error "Failed to install required packages: ${repo_pkgs[*]}"
     return 1
   fi
@@ -1850,7 +1850,7 @@ configure_limine_snapper() {
     # snap-pac lives in the official repos — prefer that, AUR as fallback.
     # (Step 7 installs it too when snapper is detected; --needed keeps this idempotent.)
     if ! pacman -Qi snap-pac &>/dev/null 2>&1; then
-      sudo pacman -S --needed --noconfirm snap-pac >>"$INSTALL_LOG" 2>&1 || \
+      sudo -n pacman -S --needed --noconfirm snap-pac >>"$INSTALL_LOG" 2>&1 || \
         limine_install_aur_pkg "snap-pac" || true
     else
       log_info "snap-pac already installed"
@@ -1889,15 +1889,15 @@ configure_limine_snapper() {
     if ! mountpoint -q /.snapshots 2>/dev/null; then
       local root_dev
       root_dev=$(findmnt -n -o SOURCE / 2>/dev/null | cut -d'[' -f1)
-      if [[ -n "$root_dev" ]] && sudo btrfs subvolume list / 2>/dev/null | grep -q "path @snapshots"; then
-        sudo mount -o subvol=@snapshots "$root_dev" /.snapshots 2>/dev/null || true
+      if [[ -n "$root_dev" ]] && sudo -n btrfs subvolume list / 2>/dev/null | grep -q "path @snapshots"; then
+        sudo -n mount -o subvol=@snapshots "$root_dev" /.snapshots 2>/dev/null || true
       fi
-      mountpoint -q /.snapshots 2>/dev/null || sudo mount -a 2>/dev/null || true
+      mountpoint -q /.snapshots 2>/dev/null || sudo -n mount -a 2>/dev/null || true
     fi
 
     if mountpoint -q /.snapshots 2>/dev/null; then
       log_success "/.snapshots is mounted"
-    elif sudo snapper -c root list &>/dev/null; then
+    elif sudo -n snapper -c root list &>/dev/null; then
       # Not a separate mountpoint, but that's not actually a problem: for
       # the common single-subvolume layout, .snapshots is just a nested
       # subvolume inside the already-mounted root filesystem, with no
@@ -1910,7 +1910,7 @@ configure_limine_snapper() {
       # whether `snapper list` actually works — instead.
       log_success "Snapper is working (nested subvolume, no separate mount needed)"
     else
-      log_warning "/.snapshots could not be mounted and 'snapper -c root list' failed. Check 'sudo btrfs subvolume list /' and /etc/fstab after reboot — snapshots won't work until this is resolved."
+      log_warning "/.snapshots could not be mounted and 'snapper -c root list' failed. Check 'sudo -n btrfs subvolume list /' and /etc/fstab after reboot — snapshots won't work until this is resolved."
     fi
 
     # Shared snapper timers (timeline + cleanup + boot) + scrub.
@@ -1949,9 +1949,9 @@ configure_limine_snapper() {
   local d
   for d in "$esp_mount/EFI/arch-limine" "$esp_mount/EFI/BOOT" "$esp_mount/EFI/limine" \
            "$esp_mount/limine" /boot/limine /boot; do
-    if sudo test -f "$d/BOOTX64.EFI" 2>/dev/null || sudo test -f "$d/BOOTIA32.EFI" 2>/dev/null || \
-       sudo test -f "$d/BOOTAA64.EFI" 2>/dev/null || sudo test -f "$d/limine_x64.efi" 2>/dev/null || \
-       sudo test -f "$d/limine.conf" 2>/dev/null; then
+    if sudo -n test -f "$d/BOOTX64.EFI" 2>/dev/null || sudo -n test -f "$d/BOOTIA32.EFI" 2>/dev/null || \
+       sudo -n test -f "$d/BOOTAA64.EFI" 2>/dev/null || sudo -n test -f "$d/limine_x64.efi" 2>/dev/null || \
+       sudo -n test -f "$d/limine.conf" 2>/dev/null; then
       limine_dir="$d"
       limine_conf="$d/limine.conf"
       break
@@ -1970,16 +1970,16 @@ configure_limine_snapper() {
       efi_src_dir=$(dirname "$limine_efi_src")
       local f
       for f in BOOTX64.EFI BOOTIA32.EFI BOOTAA64.EFI; do
-        if sudo test -f "$limine_dir/$f" 2>/dev/null && [[ -f "$efi_src_dir/$f" ]]; then
-          sudo cp "$efi_src_dir/$f" "$limine_dir/$f" && \
+        if sudo -n test -f "$limine_dir/$f" 2>/dev/null && [[ -f "$efi_src_dir/$f" ]]; then
+          sudo -n cp "$efi_src_dir/$f" "$limine_dir/$f" && \
             log_success "Refreshed $limine_dir/$f"
         fi
       done
-      if sudo test -f "$limine_dir/limine_x64.efi" 2>/dev/null; then
+      if sudo -n test -f "$limine_dir/limine_x64.efi" 2>/dev/null; then
         # limine-entry-tool naming — refresh from upstream if the file exists
         for p in "$efi_src_dir/limine_x64.efi" "$limine_efi_src"; do
           if [[ -f "$p" ]]; then
-            sudo cp "$p" "$limine_dir/limine_x64.efi" && log_success "Refreshed $limine_dir/limine_x64.efi"
+            sudo -n cp "$p" "$limine_dir/limine_x64.efi" && log_success "Refreshed $limine_dir/limine_x64.efi"
             break
           fi
         done
@@ -1991,17 +1991,17 @@ configure_limine_snapper() {
     limine_dir="$esp_mount/EFI/limine"
     limine_conf="$limine_dir/limine.conf"
     step "Deploying Limine EFI binary..."
-    sudo mkdir -p "$limine_dir"
-    sudo cp "$limine_efi_src" "$limine_dir/BOOTX64.EFI"
+    sudo -n mkdir -p "$limine_dir"
+    sudo -n cp "$limine_efi_src" "$limine_dir/BOOTX64.EFI"
     log_success "Limine EFI binary deployed to $limine_dir."
 
     local hook_dir="/etc/pacman.d/hooks"
-    sudo mkdir -p "$hook_dir"
-    if ! sudo test -f "$hook_dir/99-limine.hook" 2>/dev/null; then
+    sudo -n mkdir -p "$hook_dir"
+    if ! sudo -n test -f "$hook_dir/99-limine.hook" 2>/dev/null; then
       printf '%s\n' "[Trigger]" "Operation = Install" "Operation = Upgrade" "Type = Package" \
         "Target = limine" "" "[Action]" "Description = Deploying Limine after upgrade..." \
         "When = PostTransaction" "Exec = /bin/sh -c \"/usr/bin/cp /usr/share/limine/BOOTX64.EFI $limine_dir/\"" | \
-        sudo tee "$hook_dir/99-limine.hook" >/dev/null
+        sudo -n tee "$hook_dir/99-limine.hook" >/dev/null
       log_success "Limine pacman hook installed."
     fi
 
@@ -2011,7 +2011,7 @@ configure_limine_snapper() {
     # them — same layout rule archinstall itself enforces.
     if [[ "$esp_mount" == "/boot" ]]; then
       local fresh_kernels=()
-      mapfile -t fresh_kernels < <(sudo find /boot -maxdepth 1 -name 'vmlinuz-*' 2>/dev/null | sed 's|.*/vmlinuz-||' | sort)
+      mapfile -t fresh_kernels < <(sudo -n find /boot -maxdepth 1 -name 'vmlinuz-*' 2>/dev/null | sed 's|.*/vmlinuz-||' | sort)
       if [[ ${#fresh_kernels[@]} -gt 0 ]]; then
         local full_params
         if ! full_params=$(get_kernel_params) || ! echo " $full_params " | grep -qE ' root=[^ ]+ '; then
@@ -2028,7 +2028,7 @@ configure_limine_snapper() {
             echo "    cmdline: $full_params"
             echo "    module_path: boot():/initramfs-$k.img"
           done
-        } | sudo tee "$limine_conf" >/dev/null
+        } | sudo -n tee "$limine_conf" >/dev/null
         log_success "Wrote minimal Limine config with ${#fresh_kernels[@]} kernel entries."
       else
         log_warning "No kernels in /boot — skipping initial limine.conf."
@@ -2060,7 +2060,7 @@ configure_limine_snapper() {
       [[ -n "$_lc" ]] || continue
       if [[ "$_seen" == *" $_lc "* ]]; then continue; fi
       _seen+="$_lc "
-      if sudo test -f "$_lc" 2>/dev/null; then
+      if sudo -n test -f "$_lc" 2>/dev/null; then
         configure_limine_theme "$_lc"
       fi
     done
@@ -2075,14 +2075,14 @@ configure_limine_snapper() {
 
   # ESP-relative loader path for OUR binary, e.g. /boot/EFI/BOOT -> \EFI\BOOT\BOOTX64.EFI
   local efi_bin="BOOTX64.EFI"
-  if ! sudo test -f "$limine_dir/$efi_bin" 2>/dev/null; then
-    efi_bin=$(sudo ls "$limine_dir" 2>/dev/null | grep -im1 '\.efi$' || echo "BOOTX64.EFI")
+  if ! sudo -n test -f "$limine_dir/$efi_bin" 2>/dev/null; then
+    efi_bin=$(sudo -n ls "$limine_dir" 2>/dev/null | grep -im1 '\.efi$' || echo "BOOTX64.EFI")
   fi
   local loader_path="${limine_dir#"$esp_mount"}/$efi_bin"
   loader_path=${loader_path//\//\\}
 
   local limine_bootnum
-  limine_bootnum=$(sudo efibootmgr -v 2>/dev/null | grep -iF "$loader_path" | grep -oE '^Boot[0-9A-Fa-f]{4}' | head -1 | sed 's/^Boot//' || true)
+  limine_bootnum=$(sudo -n efibootmgr -v 2>/dev/null | grep -iF "$loader_path" | grep -oE '^Boot[0-9A-Fa-f]{4}' | head -1 | sed 's/^Boot//' || true)
 
   if [[ -n "$limine_bootnum" ]]; then
     log_info "Limine EFI boot entry already exists (Boot$limine_bootnum → $loader_path)."
@@ -2105,14 +2105,14 @@ configure_limine_snapper() {
 
     if [[ -n "${esp_disk:-}" ]]; then
       log_info "Creating EFI NVRAM entry ($loader_path)..."
-      if sudo efibootmgr --create \
+      if sudo -n efibootmgr --create \
           --disk "$esp_disk" \
           --part "$esp_part" \
           --label "Limine" \
           --loader "$loader_path" \
           --unicode >>"$INSTALL_LOG" 2>&1; then
         log_success "EFI boot entry created."
-        limine_bootnum=$(sudo efibootmgr -v 2>/dev/null | grep -iF "$loader_path" | grep -oE '^Boot[0-9A-Fa-f]{4}' | head -1 | sed 's/^Boot//' || true)
+        limine_bootnum=$(sudo -n efibootmgr -v 2>/dev/null | grep -iF "$loader_path" | grep -oE '^Boot[0-9A-Fa-f]{4}' | head -1 | sed 's/^Boot//' || true)
       else
         log_warning "efibootmgr failed — you may need to create the Limine entry manually."
       fi
@@ -2127,7 +2127,7 @@ configure_limine_snapper() {
 
   # Configure limine-snapper-sync settings (btrfs only)
   local limine_defaults="/etc/default/limine"
-  sudo mkdir -p "$(dirname "$limine_defaults")"
+  sudo -n mkdir -p "$(dirname "$limine_defaults")"
 
   if [[ "$want_snapper" == true ]]; then
     local esp_path_val="$esp_mount"
@@ -2140,18 +2140,18 @@ configure_limine_snapper() {
       [[ -n "${NAME:-}" ]] && os_name="$NAME"
     fi
 
-    # Create file with sudo if missing (redirection must not run as user)
-    if ! sudo test -f "$limine_defaults" 2>/dev/null; then
+    # Create file with sudo -n if missing (redirection must not run as user)
+    if ! sudo -n test -f "$limine_defaults" 2>/dev/null; then
       printf '%s\n' "### OS Entry Targeting" "### Settings managed by archinstaller limine-snapper setup" | \
-        sudo tee "$limine_defaults" >/dev/null
+        sudo -n tee "$limine_defaults" >/dev/null
     fi
 
     limine_set_default_key() {
-      local key="$1" value="$2"
-      if sudo grep -q "^$key=" "$limine_defaults" 2>/dev/null; then
-        sudo sed -i "s|^$key=.*|$key=$value|" "$limine_defaults"
+      local key="${1:-}" value="${2:-}"
+      if sudo -n grep -q "^$key=" "$limine_defaults" 2>/dev/null; then
+        sudo -n sed -i "s|^$key=.*|$key=$value|" "$limine_defaults"
       else
-        printf '%s=%s\n' "$key" "$value" | sudo tee -a "$limine_defaults" >/dev/null
+        printf '%s=%s\n' "$key" "$value" | sudo -n tee -a "$limine_defaults" >/dev/null
       fi
     }
 
@@ -2190,15 +2190,15 @@ configure_limine_snapper() {
   # carry root= (a rootless file poisons every new snapshot entry).
   local cmdline_file="/etc/kernel/cmdline"
   local current_cmdline=""
-  if sudo test -f "$cmdline_file" 2>/dev/null; then
-    current_cmdline=$(sudo cat "$cmdline_file" 2>/dev/null || echo "")
+  if sudo -n test -f "$cmdline_file" 2>/dev/null; then
+    current_cmdline=$(sudo -n cat "$cmdline_file" 2>/dev/null || echo "")
   fi
   local merged_cmdline
   if ! merged_cmdline=$(build_file_cmdline "$current_cmdline"); then
     log_error "Refusing to write rootless $cmdline_file — leaving it untouched."
   elif [[ "$current_cmdline" != "$merged_cmdline" ]]; then
-    [[ -n "$current_cmdline" ]] && sudo cp "$cmdline_file" "${cmdline_file}.backup.$(date +%Y%m%d_%H%M%S)"
-    echo "$merged_cmdline" | sudo tee "$cmdline_file" >/dev/null
+    [[ -n "$current_cmdline" ]] && sudo -n cp "$cmdline_file" "${cmdline_file}.backup.$(date +%Y%m%d_%H%M%S)"
+    echo "$merged_cmdline" | sudo -n tee "$cmdline_file" >/dev/null
     log_success "Updated $cmdline_file"
   else
     log_info "$cmdline_file already up to date"
@@ -2210,7 +2210,7 @@ configure_limine_snapper() {
   # above are unaffected.
   local skip_conf_edit=false
   if is_secureboot_active; then
-    if sudo grep -q "^ENABLE_ENROLL_LIMINE_CONFIG=yes" /etc/default/limine 2>/dev/null; then
+    if sudo -n grep -q "^ENABLE_ENROLL_LIMINE_CONFIG=yes" /etc/default/limine 2>/dev/null; then
       log_warning "Secure Boot + enrolled Limine config detected — skipping limine.conf edits (re-enroll with limine-enroll-config after changing params)."
       skip_conf_edit=true
     else
@@ -2220,7 +2220,7 @@ configure_limine_snapper() {
 
   if command -v limine-update &>/dev/null; then
     log_info "Regenerating entries with limine-update (reads $cmdline_file)..."
-    if sudo limine-update >>"$INSTALL_LOG" 2>&1; then
+    if sudo -n limine-update >>"$INSTALL_LOG" 2>&1; then
       log_success "limine-update completed."
     else
       log_warning "limine-update returned an error."
@@ -2237,8 +2237,8 @@ configure_limine_snapper() {
   # real root". Lines that can't be rooted are LEFT UNTOUCHED, never blanked.
   if [[ "$skip_conf_edit" == true ]]; then
     : # warned above (Secure Boot enrolled config)
-  elif sudo test -f "$limine_conf" 2>/dev/null; then
-    if sudo grep -qE '^[[:space:]]*(kernel_)?cmdline:' "$limine_conf" 2>/dev/null; then
+  elif sudo -n test -f "$limine_conf" 2>/dev/null; then
+    if sudo -n grep -qE '^[[:space:]]*(kernel_)?cmdline:' "$limine_conf" 2>/dev/null; then
       patch_limine_cmdlines "$limine_conf" "$unified_cmdline"
     else
       log_warning "No cmdline entries in $limine_conf — leaving it untouched."
@@ -2259,19 +2259,19 @@ configure_limine_snapper() {
   # single config via $limine_conf. On ANY doubt, abort and keep the old
   # deep-config behavior rather than risk a config-less boot.
   if [[ "$esp_mount" == "/boot" && -n "${limine_conf:-}" && "$limine_conf" != "/boot/limine.conf" ]] \
-      && sudo test -f /boot/limine.conf 2>/dev/null \
-      && sudo grep -qE '^[[:space:]]*protocol:' /boot/limine.conf 2>/dev/null; then
+      && sudo -n test -f /boot/limine.conf 2>/dev/null \
+      && sudo -n grep -qE '^[[:space:]]*protocol:' /boot/limine.conf 2>/dev/null; then
     local _seen=" " _migrated_any=false deep bts
     bts="/var/tmp/archinstaller_backups"
-    sudo mkdir -p "$bts" 2>/dev/null || true
+    sudo -n mkdir -p "$bts" 2>/dev/null || true
     for deep in "$limine_conf" "$esp_mount/EFI/BOOT/limine.conf" "$esp_mount/EFI/arch-limine/limine.conf" "$esp_mount/EFI/limine/limine.conf"; do
       [[ -n "$deep" && "$deep" != "/boot/limine.conf" ]] || continue
       [[ "$_seen" == *" $deep "* ]] && continue
       _seen+=" $deep "
-      sudo test -f "$deep" 2>/dev/null || continue
+      sudo -n test -f "$deep" 2>/dev/null || continue
       bts_name="$(basename "$(dirname "$deep")")_limine.conf.backup.$(date +%Y%m%d_%H%M%S)"
-      sudo cp "$deep" "$bts/$bts_name" 2>/dev/null || true
-      sudo cp "$deep" "$deep.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
+      sudo -n cp "$deep" "$bts/$bts_name" 2>/dev/null || true
+      sudo -n cp "$deep" "$deep.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
       if with_limine_lock _limine_remove_file "$deep"; then
         log_success "Removed shadowing deep config $deep (backed up to $bts/$bts_name)."
         _migrated_any=true
@@ -2303,17 +2303,17 @@ configure_limine_snapper() {
     # children): on a flat archinstall entry it would convert the bootable
     # entry itself into an empty directory node. Sync only manages the
     # entry-tool file anyway, so skipping the marker elsewhere loses nothing.
-    if sudo test -f "$limine_conf" 2>/dev/null && ! sudo grep -q 'Snapshots' "$limine_conf" 2>/dev/null \
-        && sudo grep -qE '^[[:space:]]*//' "$limine_conf" 2>/dev/null; then
+    if sudo -n test -f "$limine_conf" 2>/dev/null && ! sudo -n grep -q 'Snapshots' "$limine_conf" 2>/dev/null \
+        && sudo -n grep -qE '^[[:space:]]*//' "$limine_conf" 2>/dev/null; then
       with_limine_lock _limine_append_snapshots_marker "$limine_conf"
       log_success "Added //Snapshots marker to $limine_conf."
-    elif sudo test -f "$limine_conf" 2>/dev/null && ! sudo grep -q 'Snapshots' "$limine_conf" 2>/dev/null; then
+    elif sudo -n test -f "$limine_conf" 2>/dev/null && ! sudo -n grep -q 'Snapshots' "$limine_conf" 2>/dev/null; then
       log_info "Skipping //Snapshots marker for $limine_conf (flat entry format — the snapshot boot menu needs entry-tool //Kernel leaves)."
     fi
 
     if command -v limine-snapper-sync &>/dev/null; then
       log_info "Running limine-snapper-sync (also heals stale snapshot cmdlines from the fixed base)..."
-      if sudo limine-snapper-sync >>"$INSTALL_LOG" 2>&1; then
+      if sudo -n limine-snapper-sync >>"$INSTALL_LOG" 2>&1; then
         log_success "limine-snapper-sync completed."
       else
         log_warning "limine-snapper-sync returned an error (normal on first run)."
@@ -2321,7 +2321,7 @@ configure_limine_snapper() {
     fi
 
     if systemctl list-unit-files 2>/dev/null | grep -q limine-snapper-sync; then
-      sudo systemctl enable --now limine-snapper-sync.service 2>/dev/null || true
+      sudo -n systemctl enable --now limine-snapper-sync.service 2>/dev/null || true
       log_success "limine-snapper-sync.service enabled."
     fi
   fi
@@ -2329,9 +2329,9 @@ configure_limine_snapper() {
   # Final verification AFTER the sync above: every cmdline must name a root
   # device. Anything still rootless is NOT safe to boot. Both key spellings
   # (archinstall `cmdline:`, entry-tool `kernel_cmdline:`) are checked.
-  if sudo test -f "$limine_conf" 2>/dev/null; then
+  if sudo -n test -f "$limine_conf" 2>/dev/null; then
     local bad_lines
-    bad_lines=$(sudo grep -E '^[[:space:]]*(kernel_)?cmdline:' "$limine_conf" 2>/dev/null | grep -vE 'root=[^ ]+' || true)
+    bad_lines=$(sudo -n grep -E '^[[:space:]]*(kernel_)?cmdline:' "$limine_conf" 2>/dev/null | grep -vE 'root=[^ ]+' || true)
     if [[ -n "$bad_lines" ]]; then
       log_error "Rootless cmdline lines remain in $limine_conf — DO NOT boot these entries:"
       echo "$bad_lines" | while IFS= read -r bl; do log_error "  $bl"; done
@@ -2340,7 +2340,7 @@ configure_limine_snapper() {
     fi
     # A menu with no protocol-bearing leaf panics at boot time with "Boot
     # protocol not specified for this entry" — fail loudly here instead.
-    if ! sudo grep -qE '^[[:space:]]*protocol:' "$limine_conf" 2>/dev/null; then
+    if ! sudo -n grep -qE '^[[:space:]]*protocol:' "$limine_conf" 2>/dev/null; then
       log_error "No protocol: entries in $limine_conf — the menu would show but nothing in it can boot."
     else
       log_success "Bootable (protocol-bearing) entries present in $limine_conf."
@@ -2349,9 +2349,9 @@ configure_limine_snapper() {
 
   # Same check for a separate /boot/limine.conf (abort path: entry-tool's own
   # file beside a deep config; a rootless entry there breaks that menu only).
-  if [[ "${limine_conf:-}" != "/boot/limine.conf" ]] && sudo test -f /boot/limine.conf 2>/dev/null; then
+  if [[ "${limine_conf:-}" != "/boot/limine.conf" ]] && sudo -n test -f /boot/limine.conf 2>/dev/null; then
     local fallback_bad
-    fallback_bad=$(sudo grep -E '^[[:space:]]*(kernel_)?cmdline:' /boot/limine.conf 2>/dev/null | grep -vE 'root=[^ ]+' || true)
+    fallback_bad=$(sudo -n grep -E '^[[:space:]]*(kernel_)?cmdline:' /boot/limine.conf 2>/dev/null | grep -vE 'root=[^ ]+' || true)
     if [[ -n "$fallback_bad" ]]; then
       log_warning "Rootless cmdline lines in /boot/limine.conf fallback:"
       echo "$fallback_bad" | while IFS= read -r bl; do log_warning "  $bl"; done
@@ -2362,7 +2362,7 @@ configure_limine_snapper() {
 
   # Final theme pass - re-apply after limine-update/snapper-sync regenerated bloat (### comments)
   # Ensures Arch Linux branding + wallpaper + 700 handling, idempotent
-  if sudo test -f "$limine_conf" 2>/dev/null; then
+  if sudo -n test -f "$limine_conf" 2>/dev/null; then
     configure_limine_theme "$limine_conf"
   fi
 
@@ -2370,7 +2370,7 @@ configure_limine_snapper() {
   if [[ "$want_snapper" == true ]]; then
   step "Installing snapshot manager helper..."
 
-  sudo tee /usr/local/bin/snap-manager >/dev/null << 'HELPER_EOF'
+  sudo -n tee /usr/local/bin/snap-manager >/dev/null << 'HELPER_EOF'
 #!/usr/bin/env bash
 #
 # snap-manager - Manage Btrfs snapshots with Limine integration (Arch)
@@ -2411,7 +2411,7 @@ case "${1:-help}" in
         ;;
     restore|r)
         echo -e "${YELLOW}Boot into a snapshot from the Limine menu first, then restore.${NC}"
-        echo "  sudo limine-snapper-restore    # guided restore (recommended)"
+        echo "  sudo -n limine-snapper-restore    # guided restore (recommended)"
         echo "  (snapper rollback only works on OpenSUSE-style layouts)"
         ;;
     fix)
@@ -2441,7 +2441,7 @@ case "${1:-help}" in
 esac
 HELPER_EOF
 
-  sudo chmod +x /usr/local/bin/snap-manager
+  sudo -n chmod +x /usr/local/bin/snap-manager
   log_success "Helper script installed: /usr/local/bin/snap-manager"
   fi
 
@@ -2449,7 +2449,7 @@ HELPER_EOF
   # files remain (each readable by any Limine binary on the ESP).
   if [[ "${limine_conf:-}" == "/boot/limine.conf" ]]; then
     log_info "Single Limine config in effect: /boot/limine.conf (deep backups in /var/tmp/archinstaller_backups)."
-  elif sudo test -f /boot/limine.conf 2>/dev/null; then
+  elif sudo -n test -f /boot/limine.conf 2>/dev/null; then
     log_info "Two Limine configs remain ($limine_conf + /boot/limine.conf) — either boots."
   fi
 
@@ -2472,12 +2472,12 @@ report_boot_access() {
   esp=$(detect_esp_mount || echo "unknown")
   log_info "ESP mountpoint: $esp"
   local perms
-  perms=$(sudo stat -c '%a %U:%G' /boot 2>/dev/null || echo "unreadable")
+  perms=$(sudo -n stat -c '%a %U:%G' /boot 2>/dev/null || echo "unreadable")
   log_info "/boot perms: $perms"
-  if sudo ls /boot >/dev/null 2>&1; then
-    log_info "/boot readable via sudo — privileged reads enabled."
+  if sudo -n ls /boot >/dev/null 2>&1; then
+    log_info "/boot readable via sudo -n — privileged reads enabled."
   else
-    log_error "/boot NOT readable even via sudo — bootloader tuning will be skipped."
+    log_error "/boot NOT readable even via sudo -n — bootloader tuning will be skipped."
   fi
 }
 
@@ -2525,14 +2525,14 @@ fi
 if [[ "$NEEDS_INITRAMFS_REBUILD" == true ]]; then
   if [[ -d /etc/mkinitcpio.d ]] && command -v mkinitcpio &>/dev/null; then
     ui_info "Regenerating initramfs (all pending step-6 changes)..."
-    if printf 'n\n' | sudo mkinitcpio -P 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
+    if printf 'n\n' | sudo -n mkinitcpio -P 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
       log_success "Initramfs regenerated"
     else
       log_warning "Initramfs regeneration had issues — check mkinitcpio presets"
     fi
   elif command -v dracut &>/dev/null && [[ -d /etc/dracut.conf.d || -f /etc/dracut.conf ]]; then
     ui_info "Regenerating initramfs with dracut..."
-    if sudo dracut --regenerate-all --force >>"$INSTALL_LOG" 2>&1; then
+    if sudo -n dracut --regenerate-all --force >>"$INSTALL_LOG" 2>&1; then
       log_success "Initramfs regenerated with dracut"
     else
       log_warning "Dracut regeneration had issues — check dracut configuration"

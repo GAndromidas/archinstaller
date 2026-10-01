@@ -72,7 +72,7 @@ setup_shell() {
 
   # Change default shell to ZSH
   log_info "Setting ZSH as default shell..."
-  if sudo chsh -s "$(command -v zsh)" "$USER" 2>/dev/null; then
+  if sudo -n chsh -s "$(command -v zsh)" "$USER" 2>/dev/null; then
     log_success "Default shell changed to ZSH"
   else
     log_warning "Failed to change default shell. You may need to do this manually."

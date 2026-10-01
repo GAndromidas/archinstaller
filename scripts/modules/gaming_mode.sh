@@ -32,7 +32,7 @@ check_and_enable_multilib() {
 		# Sync-only (no -u): the repo is brand-new so databases must refresh
 		# before installs, but a second full system upgrade mid-run is waste.
 		# This is the one legitimate bare -Sy — do not "fix" into -Syu.
-		sudo pacman -Sy --noconfirm >>"$INSTALL_LOG" 2>&1
+		sudo -n pacman -Sy --noconfirm >>"$INSTALL_LOG" 2>&1
 	fi
 }
 
@@ -73,7 +73,7 @@ install_pacman_packages() {
 	printf '%b' "${THEME_TEXT}Attempting batch installation...${RESET}\n"
 	# Capture output so batch failures are logged with context on fallback.
 	local batch_output=""
-	if batch_output=$(sudo pacman -S --noconfirm --needed "${pacman_gaming_programs[@]}" 2>&1); then
+	if batch_output=$(sudo -n pacman -S --noconfirm --needed "${pacman_gaming_programs[@]}" 2>&1); then
 		printf '%b' "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
 		GAMING_INSTALLED+=("${pacman_gaming_programs[@]}")
 		return
@@ -170,10 +170,10 @@ enable_ananicy() {
 		return 0
 	fi
 	step "Enabling Ananicy-Cpp daemon (auto NICe)"
-	if sudo systemctl enable --now ananicy-cpp.service >>"$INSTALL_LOG" 2>&1; then
+	if sudo -n systemctl enable --now ananicy-cpp.service >>"$INSTALL_LOG" 2>&1; then
 		log_success "ananicy-cpp enabled — process priorities are now managed automatically (CachyOS rules)."
 	else
-		log_warning "Failed to enable ananicy-cpp.service. Enable manually with: sudo systemctl enable --now ananicy-cpp.service"
+		log_warning "Failed to enable ananicy-cpp.service. Enable manually with: sudo -n systemctl enable --now ananicy-cpp.service"
 	fi
 	return 0
 }
@@ -206,10 +206,10 @@ enable_lact() {
 		return 0
 	fi
 	step "Enabling LACT daemon (AMD GPU control)"
-	if sudo systemctl enable --now lactd >>"$INSTALL_LOG" 2>&1; then
+	if sudo -n systemctl enable --now lactd >>"$INSTALL_LOG" 2>&1; then
 		log_success "lactd enabled — open LACT to manage fan curves, clocks and power limits."
 	else
-		log_warning "Failed to enable lactd. Enable manually with: sudo systemctl enable --now lactd"
+		log_warning "Failed to enable lactd. Enable manually with: sudo -n systemctl enable --now lactd"
 	fi
 }
 

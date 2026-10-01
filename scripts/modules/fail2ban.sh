@@ -31,7 +31,7 @@ install_fail2ban() {
 detect_firewall_action() {
   if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld 2>/dev/null; then
     echo "firewalld"
-  elif command -v ufw >/dev/null 2>&1 && { sudo ufw status 2>/dev/null | grep -q "Status: active"; }; then
+  elif command -v ufw >/dev/null 2>&1 && { sudo -n ufw status 2>/dev/null | grep -q "Status: active"; }; then
     echo "ufw"
   else
     echo "systemd"
@@ -50,7 +50,7 @@ detect_firewall_action() {
 # existing line for that key within the section, then insert a fresh one
 # right after the section header — works whether the key existed or not.
 _f2b_set_option() {
-  local jail_local="$1" section="$2" key="$3" value="$4"
+  local jail_local="${1:-}" section="${2:-}" key="${3:-}" value="${4:-}"
   # Range must end at the NEXT section header, not the next blank line —
   # confirmed against the actual installed jail.conf (not a hand-written
   # guess) that [sshd] has a blank line immediately after its own header,
@@ -64,8 +64,8 @@ _f2b_set_option() {
   # 'sshd' already exists" — meaning the ENTIRE config failed to load, not
   # just this one setting. This is the real, complete, verified root
   # cause of every prior "Active jails: none" across four real installs.
-  sudo sed -i "/^\\[${section}\\]/,/^\\[/ { /^${key}[[:space:]]*=/d }" "$jail_local"
-  sudo sed -i "/^\\[${section}\\]/a ${key} = ${value}" "$jail_local"
+  sudo -n sed -i "/^\\[${section}\\]/,/^\\[/ { /^${key}[[:space:]]*=/d }" "$jail_local"
+  sudo -n sed -i "/^\\[${section}\\]/a ${key} = ${value}" "$jail_local"
 }
 
 # Configure fail2ban jail.local based on detected firewall
@@ -82,7 +82,7 @@ configure_fail2ban() {
 
   # Create jail.local from jail.conf as base
   if [ ! -f "$jail_local" ]; then
-    sudo cp /etc/fail2ban/jail.conf "$jail_local"
+    sudo -n cp /etc/fail2ban/jail.conf "$jail_local"
   fi
 
   # The 'backend' setting is the LOG-PARSING backend (valid values: auto,
@@ -100,7 +100,7 @@ configure_fail2ban() {
   # unscoped substitution below also touches other (disabled, irrelevant)
   # jails' own backend= lines, but since those jails stay disabled that
   # has no functional effect.
-  sudo sed -i "s/^backend = .*/backend = systemd/" "$jail_local"
+  sudo -n sed -i "s/^backend = .*/backend = systemd/" "$jail_local"
 
   # Configure SSH jail. With backend=systemd, fail2ban matches SSH events
   # via the sshd filter's built-in journalmatch (_SYSTEMD_UNIT=sshd.service
@@ -126,23 +126,23 @@ configure_fail2ban() {
   # - ufw: use ufw action
   # - default: use the default iptables/nftables action from jail.conf
   if [ "$firewall" = "firewalld" ]; then
-    sudo sed -i '/^\[sshd\]/,/^\[/ {
+    sudo -n sed -i '/^\[sshd\]/,/^\[/ {
       /^action[[:space:]]*=/d
       /^ *blocktype=.*/d
       /^\[sshd\]/a action = firewallcmd-rich-rules[actiontype=<multiport>]
       /^\[sshd\]/a          blocktype=drop
     }' "$jail_local"
   elif [ "$firewall" = "ufw" ]; then
-    sudo sed -i '/^\[sshd\]/,/^\[/ {
+    sudo -n sed -i '/^\[sshd\]/,/^\[/ {
       /^action[[:space:]]*=/d
       /^\[sshd\]/a action = ufw
     }' "$jail_local"
   fi
 
   # Set default ban parameters globally if not already set
-  sudo sed -i 's/^bantime  = .*/bantime  = 1h/' "$jail_local"
-  sudo sed -i 's/^findtime  = .*/findtime  = 10m/' "$jail_local"
-  sudo sed -i 's/^maxretry = .*/maxretry = 3/' "$jail_local"
+  sudo -n sed -i 's/^bantime  = .*/bantime  = 1h/' "$jail_local"
+  sudo -n sed -i 's/^findtime  = .*/findtime  = 10m/' "$jail_local"
+  sudo -n sed -i 's/^maxretry = .*/maxretry = 3/' "$jail_local"
 
   configure_recidive_jail "$jail_local" "$firewall"
 
@@ -153,8 +153,8 @@ configure_fail2ban() {
 # instead of the standard 1h — closes the "just wait an hour and retry"
 # gap that a flat SSH-jail bantime alone leaves open.
 configure_recidive_jail() {
-  local jail_local="$1"
-  local firewall="$2"
+  local jail_local="${1:-}"
+  local firewall="${2:-}"
 
   # Same issue as the sshd jail above: jail.conf's stock [recidive]
   # section only has logpath/banaction/bantime/findtime explicitly —
@@ -167,14 +167,14 @@ configure_recidive_jail() {
   _f2b_set_option "$jail_local" recidive maxretry 5
 
   if [ "$firewall" = "firewalld" ]; then
-    sudo sed -i '/^\[recidive\]/,/^\[/ {
+    sudo -n sed -i '/^\[recidive\]/,/^\[/ {
       /^action[[:space:]]*=/d
       /^ *blocktype=.*/d
       /^\[recidive\]/a action = firewallcmd-rich-rules[actiontype=<multiport>]
       /^\[recidive\]/a          blocktype=drop
     }' "$jail_local"
   elif [ "$firewall" = "ufw" ]; then
-    sudo sed -i '/^\[recidive\]/,/^\[/ {
+    sudo -n sed -i '/^\[recidive\]/,/^\[/ {
       /^action[[:space:]]*=/d
       /^\[recidive\]/a action = ufw
     }' "$jail_local"
@@ -188,9 +188,9 @@ enable_and_start_fail2ban() {
   ui_info "Enabling and starting fail2ban service..."
 
   # Reload systemd in case fail2ban was just installed
-  sudo systemctl daemon-reload >/dev/null 2>&1
+  sudo -n systemctl daemon-reload >/dev/null 2>&1
 
-  if sudo systemctl enable --now fail2ban >>"$INSTALL_LOG" 2>&1; then
+  if sudo -n systemctl enable --now fail2ban >>"$INSTALL_LOG" 2>&1; then
     log_success "fail2ban service enabled and started"
     return 0
   else
@@ -202,7 +202,7 @@ enable_and_start_fail2ban() {
 # Verify fail2ban is running and SSH jail is active
 status_fail2ban() {
   # Check service status
-  if ! sudo systemctl is-active --quiet fail2ban 2>/dev/null; then
+  if ! sudo -n systemctl is-active --quiet fail2ban 2>/dev/null; then
     log_error "fail2ban service is not running"
     return 1
   fi
@@ -218,7 +218,7 @@ status_fail2ban() {
   local jails=""
   local attempt
   for attempt in 1 2 3 4 5; do
-    jails=$(sudo fail2ban-client status 2>/dev/null | grep "Jail list" | sed 's/.*://;s/,/ /g; s/^[[:space:]]*//')
+    jails=$(sudo -n fail2ban-client status 2>/dev/null | grep "Jail list" | sed 's/.*://;s/,/ /g; s/^[[:space:]]*//')
     echo "$jails" | grep -q "sshd" && break
     log_debug "fail2ban jail check attempt $attempt/5"
     sleep 1

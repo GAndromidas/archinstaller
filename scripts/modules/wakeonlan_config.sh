@@ -537,7 +537,7 @@ configure_wakeonlan() {
         else
             ui_info "Container environment detected - Wake-on-LAN skipped (bare-metal only)"
             log_info "Container detected - WoL configuration skipped"
-            return 2
+            return 3
         fi
     fi
 
@@ -549,7 +549,7 @@ configure_wakeonlan() {
             ui_info "Virtual machine ($(wol_virt_name)) detected - Wake-on-LAN skipped (bare-metal only)"
             ui_info "Wake-on-LAN requires physical NIC firmware support unavailable in VMs"
             log_info "VM detected ($(wol_virt_name)) - WoL configuration skipped"
-            return 2
+            return 3
         fi
     fi
 
@@ -595,7 +595,7 @@ configure_wakeonlan() {
         ui_info "No wired ethernet interfaces found - Wake-on-LAN configuration skipped"
         ui_info "(Wi-Fi-only system: WoL over wireless is not supported by this step)"
         log_info "No ethernet interfaces found - WoL configuration skipped"
-        return 2
+        return 3
     fi
 
     ui_info "Found ${#interfaces[@]} ethernet interface(s): ${interfaces[*]}"
@@ -621,7 +621,7 @@ configure_wakeonlan() {
         ui_warn "No interfaces support Wake-on-LAN (magic-packet mode 'g' not advertised)"
         ui_info "This is expected in VMs or with drivers lacking WoL firmware support"
         log_info "No WoL-capable interfaces among: ${interfaces[*]}"
-        return 2
+        return 3
     fi
 
     # --- Explicit opt-in (Gum, default No) ------------------------------------
@@ -716,7 +716,7 @@ configure_wakeonlan() {
         return 1
     else
         ui_warn "No interfaces support Wake-on-LAN"
-        return 2
+        return 3
     fi
 }
 
@@ -768,9 +768,10 @@ export -f show_wol_status
 
 # Main execution — runs on source like every other step script, so the
 # installer can execute this step via dashboard_run (output hidden in the
-# log, interactive prompts on /dev/tty). Exit codes: 0 ok, 2 graceful
-# skip/warning (VM, container, laptop declined, no ethernet, no WoL-capable
-# NIC), anything else = failure.
+# log, interactive prompts on /dev/tty). Exit codes: 0 ok, 2 user-declined
+# (opt-in No / SKIP selection — persisted as SKIPPED), 3 no WoL hardware
+# here (container, VM, no ethernet, not WoL-capable — NOT persisted so a
+# later run with different hardware retries), anything else = failure.
 if [[ "${DRY_RUN:-false}" == true ]]; then
     ui_info "Dry-run: Wake-on-LAN configuration would be evaluated here."
     exit 0

@@ -136,6 +136,8 @@ source "$SCRIPTS_DIR/lib/system.sh"
 source "$SCRIPTS_DIR/lib/package.sh"
 source "$SCRIPTS_DIR/lib/config.sh"
 source "$SCRIPTS_DIR/lib/state.sh"
+source "$SCRIPTS_DIR/lib/boot/kernel_params.sh"
+source "$SCRIPTS_DIR/lib/hw/guest_agents.sh"
 source "$SCRIPTS_DIR/common.sh"
 source "$SCRIPTS_DIR/lib/dashboard.sh"
 
@@ -283,8 +285,13 @@ check_system_requirements() {
   log_to_file "System requirements and hardware compatibility checks passed"
 }
 
-# Run system checks — stdout goes to log, interactive prompts use /dev/tty
-check_system_requirements >> "$INSTALL_LOG" 2>&1
+# Run system checks — stdout goes to log, interactive prompts use /dev/tty.
+# Skipped in dry-run: preview mode must not probe hardware or prompt.
+if [[ "${DRY_RUN:-false}" == true ]]; then
+  log_to_file "Dry-run: skipping system requirements and hardware checks"
+else
+  check_system_requirements >> "$INSTALL_LOG" 2>&1
+fi
 
 if [[ "$AUTO_MODE" == true ]]; then
   if is_headless_system; then
@@ -487,7 +494,11 @@ else
   wol_exit=$?
   case "$wol_exit" in
     0) mark_step_complete_with_progress wakeonlan_config completed; dashboard_ok ;;
-    2) mark_step_complete_with_progress wakeonlan_config skipped; dashboard_skip "Skipped — no WoL-capable NIC" ;;
+    2) mark_step_complete_with_progress wakeonlan_config skipped; dashboard_skip "Skipped by user" ;;
+    # Exit 3 = no WoL hardware here (container/VM/no-eth/not-capable).
+    # Deliberately NOT persisted: adding a NIC later must retry next run,
+    # while a user decline (exit 2) stays skipped.
+    3) dashboard_skip "No WoL hardware — will retry next run" ;;
     *) mark_step_complete_with_progress wakeonlan_config failed; dashboard_fail; log_error "Wake-on-LAN configuration failed"; ui_warn "Wake-on-LAN configuration failed but continuing installation" ;;
   esac
 fi

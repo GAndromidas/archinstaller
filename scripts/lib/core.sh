@@ -153,7 +153,11 @@ log_error() {
     if [ -n "$hint" ]; then
         echo -e "${THEME_MUTED}  Tip: $hint${RESET}"
     fi
-    ERRORS+=("$message")
+    # NOTE: no ERRORS+= here. Step scripts run in dashboard_run subshells,
+    # so a parent-shell array would never see them; STATE_FILE FAILED: lines
+    # are the single source of truth (see install.sh cleanup_on_error).
+    # Module-local *_ERRORS arrays (e.g. PROGRAMS_ERRORS) still work for a
+    # module's own in-subshell summary.
     log_to_file "ERROR: $message"
 }
 fi

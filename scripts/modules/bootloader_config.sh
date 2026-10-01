@@ -226,151 +226,18 @@ get_kernel_params() {
   fi
 }
 
-# KERNEL CMDLINE MERGE
-# Official archinstall writes installer-chosen params (root=, cryptdevice=,
-# rd.luks.uuid=, resume=, zswap.*, ...) into bootloader configs. Replacing
-# those lines wholesale would drop them and render encrypted/hibernating
-# systems unbootable. So this installer OWNS only the keys below and MERGES:
-# existing unmanaged params are preserved verbatim, managed keys are replaced.
-# NOTE: `video` and `nowatchdog` stay in this list as cleanup-only:
-# get_kernel_params() no longer generates video=WxH or nowatchdog, so keeping
-# the keys here strips those stale tokens from existing entries on the next
-# run instead of preserving them.
-MANAGED_PARAM_KEYS="quiet loglevel nowatchdog splash vt.global_cursor_default nvidia_drm.modeset nvidia_drm.fbdev NVreg_DynamicPowerManagement NVreg_PreserveVideoMemoryAllocations NVreg_TemporaryFilePath radeon.si_support amdgpu.si_support radeon.cik_support amdgpu.cik_support amd_pstate i915.enable_guc rootflags video"
+# KERNEL CMDLINE MERGE — pure helpers (MANAGED_PARAM_KEYS, merge/strip,
+# root UUID, encrypted/SecureBoot probes) live in the single source
+# scripts/lib/boot/kernel_params.sh (unit-tested, no mirrors).
+if [[ -f "$SCRIPT_DIR/../lib/boot/kernel_params.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "$SCRIPT_DIR/../lib/boot/kernel_params.sh"
+fi
+if ! declare -f merge_kernel_params >/dev/null 2>&1; then
+  log_error "Missing lib/boot/kernel_params.sh — cannot configure kernel cmdline"
+  exit 1
+fi
 
-_merge_param_key() {
-  local tok="${1:-}"
-  if [[ "$tok" == *=* ]]; then
-    echo "${tok%%=*}"
-  else
-    echo "$tok"
-  fi
-}
-
-# merge_kernel_params <existing> <managed> — echo merged cmdline.
-# Tokens are space-separated (kernel cmdline convention).
-merge_kernel_params() {
-  local existing="${1:-}" managed="${2:-}"
-  local out=()
-  local tok key seen m
-  # shellcheck disable=SC2086
-  for tok in $existing; do
-    [[ -z "$tok" ]] && continue
-    key=$(_merge_param_key "$tok")
-    # Drop tokens whose key we manage (they get re-added from $managed)
-    # shellcheck disable=SC2076
-    if [[ " $MANAGED_PARAM_KEYS " =~ " $key " ]]; then
-      continue
-    fi
-    # Dedupe exact repeats
-    seen=false
-    for m in ${out[@]+"${out[@]}"}; do
-      [[ "$m" == "$tok" ]] && seen=true && break
-    done
-    [[ "$seen" == false ]] && out+=("$tok")
-  done
-  # shellcheck disable=SC2086
-  for tok in $managed; do
-    [[ -z "$tok" ]] && continue
-    out+=("$tok")
-  done
-  echo "${out[*]}"
-}
-
-# strip_managed_dupes <line> <reference> — drop tokens from <line> whose
-# managed key also appears in <reference>. GRUB boots with CMDLINE_LINUX +
-# CMDLINE_LINUX_DEFAULT concatenated, so a managed key (quiet, rootflags,
-# ...) present in both lands on /proc/cmdline twice. Unmanaged tokens
-# (cryptdevice, resume, ...) are always kept.
-strip_managed_dupes() {
-  local line="${1:-}" reference="${2:-}"
-  local ref_keys=() out=()
-  local tok key m managed seen
-  # shellcheck disable=SC2086
-  for m in $reference; do
-    [[ -z "$m" ]] && continue
-    ref_keys+=("$(_merge_param_key "$m")")
-  done
-  # shellcheck disable=SC2086
-  for tok in $line; do
-    [[ -z "$tok" ]] && continue
-    key=$(_merge_param_key "$tok")
-    managed=false
-    # shellcheck disable=SC2076
-    if [[ " $MANAGED_PARAM_KEYS " =~ " $key " ]]; then
-      managed=true
-    fi
-    if [[ "$managed" == true && " ${ref_keys[*]} " == *" $key "* ]]; then
-      continue
-    fi
-    seen=false
-    for m in ${out[@]+"${out[@]}"}; do
-      [[ "$m" == "$tok" ]] && seen=true && break
-    done
-    [[ "$seen" == false ]] && out+=("$tok")
-  done
-  echo "${out[*]}"
-}
-
-# detect_root_uuid — echo the live root filesystem UUID for root=UUID=.
-# Fallback chain: findmnt, then blkid on the backing device (covers odd
-# btrfs-subvolume and mapper layouts). Fails loudly when undetectable.
-detect_root_uuid() {
-  local uuid src
-  uuid=$(findmnt -n -o UUID / 2>/dev/null || true)
-  if [[ -n "$uuid" ]]; then
-    echo "$uuid"
-    return 0
-  fi
-  src=$(findmnt -n -o SOURCE / 2>/dev/null | cut -d'[' -f1 || true)
-  if [[ -n "$src" ]]; then
-    uuid=$(sudo -n blkid -s UUID -o value "$src" 2>/dev/null || true)
-    if [[ -n "$uuid" ]]; then
-      echo "$uuid"
-      return 0
-    fi
-  fi
-  return 1
-}
-
-# ensure_root_rw <cmdline> — echo cmdline with root= and rw present (added from
-# live system only when missing; existing values always win).
-# FAILS (return 1, no output) when no root= exists and none is detectable:
-# writing a rootless entry cmdline boots into "Failed to mount '' on real
-# root", so callers must skip the write instead.
-ensure_root_rw() {
-  local merged="${1:-}"
-  if ! echo " $merged " | grep -qE ' root=[^ ]+ '; then
-    local root_uuid
-    if root_uuid=$(detect_root_uuid); then
-      merged="root=UUID=$root_uuid${merged:+ $merged}"
-    else
-      log_error "Cannot determine root filesystem UUID — refusing to write a rootless cmdline."
-      return 1
-    fi
-  fi
-  if ! echo " $merged " | grep -qE '(^| )rw( |$)'; then
-    merged="$merged rw"
-  fi
-  echo "$merged"
-}
-
-# True when the root filesystem sits on an encrypted device (archinstall LUKS).
-is_encrypted_root() {
-  local src
-  src=$(findmnt -n -o SOURCE / 2>/dev/null | cut -d'[' -f1 || echo "")
-  [[ "$src" == /dev/mapper/* || "$src" == /dev/dm-* ]] && return 0
-  lsblk -n -o NAME,FSTYPE 2>/dev/null | grep -q crypto_LUKS && \
-    lsblk -n -o MOUNTPOINT 2>/dev/null | grep -qx "/" && return 0
-  return 1
-}
-
-# True when UEFI Secure Boot is active (binaries are signature-checked).
-is_secureboot_active() {
-  local last
-  last=$(od -An -tu1 /sys/firmware/efi/efivars/SecureBoot-* 2>/dev/null | awk '{print $NF}')
-  [[ "$last" == "1" ]]
-}
 
 # build_file_cmdline <current-file-content> — echo the merged ROOTFUL cmdline
 # for /etc/kernel/cmdline. That file feeds mkinitcpio UKI, limine-entry-tool

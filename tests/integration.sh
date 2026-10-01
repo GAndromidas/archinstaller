@@ -52,10 +52,16 @@ else
   fail "bootloader cmdline unit tests"
 fi
 
+if bash "$ROOT_DIR/tests/unit_libs.sh"; then
+  pass "lib contract unit tests"
+else
+  fail "lib contract unit tests"
+fi
+
 if command -v shellcheck &>/dev/null; then
   # Error severity only: warning-level findings predate this harness.
   if shellcheck --severity=error -x "$ROOT_DIR/install.sh" "$ROOT_DIR"/scripts/common.sh \
-    "$ROOT_DIR"/scripts/verify.sh "$ROOT_DIR"/scripts/lib/*.sh \
+    "$ROOT_DIR"/scripts/verify.sh "$ROOT_DIR"/scripts/lib/*.sh "$ROOT_DIR"/scripts/lib/*/*.sh \
     "$ROOT_DIR"/scripts/modules/*.sh "$ROOT_DIR"/tests/*.sh; then
     pass "shellcheck (error severity)"
   else

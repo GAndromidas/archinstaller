@@ -833,7 +833,7 @@ install_vm_guest_agents() {
     oracle)
       log_info "VirtualBox guest detected — installing guest utils"
       install_packages_quietly virtualbox-guest-utils
-      if sudo systemctl enable --now vboxservice.service >>"$INSTALL_LOG" 2>&1; then
+      if timeout 30 sudo -n systemctl enable --now vboxservice.service >>"$INSTALL_LOG" 2>&1; then
         log_success "vboxservice enabled (clipboard + shared folders)"
       else
         log_warning "Failed to enable vboxservice"
@@ -842,7 +842,7 @@ install_vm_guest_agents() {
     vmware)
       log_info "VMware guest detected — installing open-vm-tools"
       install_packages_quietly open-vm-tools
-      if sudo systemctl enable --now vmtoolsd.service >>"$INSTALL_LOG" 2>&1; then
+      if timeout 30 sudo -n systemctl enable --now vmtoolsd.service >>"$INSTALL_LOG" 2>&1; then
         log_success "vmtoolsd enabled (clipboard + dynamic resolution)"
       else
         log_warning "Failed to enable vmtoolsd"
@@ -859,19 +859,17 @@ install_vm_guest_agents() {
       else
         install_packages_quietly spice-vdagent qemu-guest-agent
       fi
-      # Arch ships qemu-guest-agent without an [Install] section, and the
-      # service additionally needs a virtio guest-agent channel from the
-      # host (GNOME Boxes doesn't add one by default). Best effort only:
-      # SPICE clipboard/resolution works through spice-vdagentd regardless.
-      if sudo systemctl enable --now qemu-guest-agent.service >>"$INSTALL_LOG" 2>&1; then
-        log_success "qemu-guest-agent enabled"
-      elif sudo systemctl start qemu-guest-agent.service >>"$INSTALL_LOG" 2>&1; then
+      # Arch ships qemu-guest-agent without an [Install] section (enable
+      # always fails), and start blocks ~90s per attempt when the host
+      # provides no virtio channel (GNOME Boxes default). Start-only,
+      # time-boxed: rc=124 means channel-less, which is harmless.
+      if timeout 20 sudo -n systemctl start qemu-guest-agent.service >>"$INSTALL_LOG" 2>&1; then
         log_success "qemu-guest-agent started (no [Install] section — runs without enablement)"
       else
         log_info "qemu-guest-agent installed but not started (no guest-agent channel in this VM — add a virtio serial channel on the host if you need it; SPICE copy-paste is unaffected)"
       fi
       if [[ "${INSTALL_MODE:-}" != "server" ]]; then
-        if sudo systemctl enable --now spice-vdagentd.service >>"$INSTALL_LOG" 2>&1; then
+        if timeout 30 sudo -n systemctl enable --now spice-vdagentd.service >>"$INSTALL_LOG" 2>&1; then
           log_success "spice-vdagentd enabled (seamless clipboard + dynamic resolution)"
         else
           log_warning "Failed to enable spice-vdagentd"

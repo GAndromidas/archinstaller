@@ -22,12 +22,14 @@ validate_state_file() {
 }
 
 state_write() {
-  local line="$1"
+  local line="${1:-}"
+  [[ -n "$line" ]] || return 1
   mkdir -p "$(dirname "$STATE_FILE")" 2>/dev/null || return 1
+  touch "$STATE_FILE" 2>/dev/null || return 1
   (
-    flock -x 200
-    printf '%s\n' "$line" >> "$STATE_FILE"
-  ) 200>>"$STATE_FILE" 2>/dev/null
+    flock -x 200 || exit 1
+    printf '%s\n' "$line" >&200
+  ) 200>>"$STATE_FILE" 2>/dev/null || return 1
 }
 
 mark_step_complete_with_progress() {
@@ -46,18 +48,24 @@ mark_step_complete_with_progress() {
 }
 
 is_step_complete() {
-  [[ -f "$STATE_FILE" ]] && grep -qFx "COMPLETED: $1" "$STATE_FILE"
+  local _name="${1:-}"
+  [[ -n "$_name" ]] || return 1
+  [[ -f "$STATE_FILE" ]] && grep -qFx "COMPLETED: $_name" "$STATE_FILE"
 }
 
 is_step_skipped() {
-  [[ -f "$STATE_FILE" ]] && grep -qFx "SKIPPED: $1" "$STATE_FILE"
+  local _name="${1:-}"
+  [[ -n "$_name" ]] || return 1
+  [[ -f "$STATE_FILE" ]] && grep -qFx "SKIPPED: $_name" "$STATE_FILE"
 }
 
 # COMPLETED or SKIPPED both mean "don't re-run this step on resume".
 # Use is_step_complete / is_step_skipped when the distinction matters
 # (e.g. gaming re-offers when skipped, wake-on-lan does not).
 is_step_done() {
-  is_step_complete "$1" || is_step_skipped "$1"
+  local _name="${1:-}"
+  [[ -n "$_name" ]] || return 1
+  is_step_complete "$_name" || is_step_skipped "$_name"
 }
 
 state_has_failure() {
@@ -75,9 +83,13 @@ state_clear_failures() {
   [[ -f "$STATE_FILE" ]] || return 0
   local tmp
   tmp=$(mktemp "${STATE_FILE}.tmp.XXXXXX") || return 1
+  # shellcheck disable=SC2064
+  trap "rm -f '$tmp'" RETURN
   grep -v '^FAILED:' "$STATE_FILE" > "$tmp" || true
   if ! mv -f "$tmp" "$STATE_FILE"; then
     rm -f "$tmp"
+    trap - RETURN
     return 1
   fi
+  trap - RETURN
 }

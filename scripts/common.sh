@@ -185,20 +185,24 @@ check_system_compatibility() {
 
 # Atomic file write with validation
 atomic_write() {
-    local content="$1"
-    local target_file="$2"
+    local content="${1:-}"
+    local target_file="${2:-}"
+    [[ -n "$target_file" ]] || { log_error "atomic_write: missing target file"; return 1; }
     local temp_file="${target_file}.tmp.$$"
+    # shellcheck disable=SC2064
+    trap "rm -f '$temp_file' /tmp/archinstaller.$$.tmp" RETURN
     local backup_dir="/var/tmp/archinstaller_backups"
     
-    # Validate target directory exists (sudo: /boot is 700)
+    # Validate target directory exists (sudo -n: /boot is 700)
     local target_dir=$(dirname "$target_file")
-    if ! sudo test -d "$target_dir" 2>/dev/null && [ ! -d "$target_dir" ]; then
+    if ! sudo -n test -d "$target_dir" 2>/dev/null && [ ! -d "$target_dir" ]; then
         log_error "Target directory $target_dir does not exist"
+        trap - RETURN
         return 1
     fi
     
-    # Create backup if target exists (sudo: /boot is 700)
-    if sudo test -f "$target_file" 2>/dev/null || [ -f "$target_file" ]; then
+    # Create backup if target exists (sudo -n: /boot is 700)
+    if sudo -n test -f "$target_file" 2>/dev/null || [ -f "$target_file" ]; then
         validate_config_file "$target_file" "$backup_dir"
     fi
     
@@ -211,6 +215,7 @@ atomic_write() {
         if ! echo "$content" > "$temp_file" 2>/dev/null; then
             log_error "Failed to write to temporary file $temp_file"
             rm -f "$temp_file"
+            trap - RETURN
             return 1
         fi
     fi
@@ -219,19 +224,22 @@ atomic_write() {
     if [ ! -s "$temp_file" ]; then
         log_error "Temporary file $temp_file is empty"
         rm -f "$temp_file"
+        trap - RETURN
         return 1
     fi
     
-    # Atomic move to target (always via sudo for consistency, preserves 700)
-    if ! sudo mv "$temp_file" "$target_file" 2>/dev/null; then
+    # Atomic move to target (always via sudo -n for consistency, preserves 700)
+    if ! sudo -n mv "$temp_file" "$target_file" 2>/dev/null; then
         # Fallback for non-privileged targets without sudo
         if ! mv "$temp_file" "$target_file" 2>/dev/null; then
             log_error "Failed to move $temp_file to $target_file"
             rm -f "$temp_file"
+            trap - RETURN
             return 1
         fi
     fi
     
+    trap - RETURN
     log_success "Successfully wrote configuration to $target_file"
     return 0
 }
@@ -244,9 +252,9 @@ atomic_write() {
 # need to revert permissions and never break boot on failure.
 
 is_boot_privileged() {
-    # True if /boot is locked to root-only (700 or fmask=0077) - sudo for 700
+    # True if /boot is locked to root-only (700 or fmask=0077) - sudo -n for 700
     local perms
-    perms=$(sudo stat -c %a /boot 2>/dev/null || stat -c %a /boot 2>/dev/null || echo 755)
+    perms=$(sudo -n stat -c %a /boot 2>/dev/null || stat -c %a /boot 2>/dev/null || echo 755)
     if [[ "$perms" == "700" ]]; then
         return 0
     fi
@@ -257,10 +265,11 @@ is_boot_privileged() {
 }
 
 privileged_read() {
-    # Robust read: tries sudo cat first (700), falls back to bare cat
-    local file="$1"
-    if sudo test -r "$file" 2>/dev/null; then
-        sudo cat "$file" 2>/dev/null
+    # Robust read: tries sudo -n cat first (700), falls back to bare cat
+    local file="${1:-}"
+    [[ -n "$file" ]] || return 1
+    if sudo -n test -r "$file" 2>/dev/null; then
+        sudo -n cat "$file" 2>/dev/null
         return $?
     fi
     cat "$file" 2>/dev/null
@@ -269,17 +278,19 @@ privileged_read() {
 privileged_write() {
     # Robust atomic write for privileged paths (never chmods /boot)
     # Usage: privileged_write "$content" /boot/loader/loader.conf
-    local content="$1"
-    local target="$2"
+    local content="${1:-}"
+    local target="${2:-}"
+    [[ -n "$target" ]] || { log_error "privileged_write: missing target"; return 1; }
     atomic_write "$content" "$target"
 }
 
 # Wrapper to run a function with verified /boot access, no perms change
 # Fails gracefully (logs, returns 1) instead of breaking boot
 with_privileged_boot() {
+    [[ $# -ge 1 ]] || { log_error "with_privileged_boot: missing command"; return 1; }
     # Verify sudo can actually access /boot before attempting
     if is_boot_privileged; then
-        if ! sudo test -d /boot 2>/dev/null; then
+        if ! sudo -n test -d /boot 2>/dev/null; then
             log_warning "/boot is privileged (700) but sudo cannot access it — skipping $* (run with passwordless sudo or as root)"
             return 1
         fi

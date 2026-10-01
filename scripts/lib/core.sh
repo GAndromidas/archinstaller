@@ -54,9 +54,11 @@ fi
 # demonstrably took minutes). /proc/uptime is monotonic and immune.
 export INSTALL_LOG="${INSTALL_LOG:-/var/tmp/archinstaller.log}"
 STATE_FILE="${STATE_FILE:-/var/tmp/archinstaller.state}"
-ERRORS=()
-INSTALLED_PACKAGES=()
-FAILED_PACKAGES=()
+# Do not wipe parent-shell tracking arrays on re-source (modules are sourced
+# in subshells; core may be sourced twice in one process).
+if ! declare -p ERRORS &>/dev/null; then ERRORS=(); fi
+if ! declare -p INSTALLED_PACKAGES &>/dev/null; then INSTALLED_PACKAGES=(); fi
+if ! declare -p FAILED_PACKAGES &>/dev/null; then FAILED_PACKAGES=(); fi
 
 # Keep last 3 log backups
 if ! declare -f rotate_logs >/dev/null 2>&1; then
@@ -94,7 +96,8 @@ fi
 
 if ! declare -f log_to_file >/dev/null 2>&1; then
 log_to_file() {
-    local message="$1"
+    local message="${1:-}"
+    [[ -n "$message" ]] || return 0
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     echo "[$timestamp] $message" >> "$INSTALL_LOG"
 }
@@ -102,7 +105,8 @@ fi
 
 if ! declare -f log_info >/dev/null 2>&1; then
 log_info() {
-    local message="$1"
+    local message="${1:-}"
+    [[ -n "$message" ]] || return 0
     local detail="${2:-}"
     echo -e "${THEME_TEXT}$message${RESET}"
     log_to_file "INFO: $message"
@@ -114,7 +118,8 @@ fi
 
 if ! declare -f log_success >/dev/null 2>&1; then
 log_success() {
-    local message="$1"
+    local message="${1:-}"
+    [[ -n "$message" ]] || return 0
     local detail="${2:-}"
     echo -e "${THEME_SUCCESS}$message${RESET}"
     log_to_file "SUCCESS: $message"
@@ -127,7 +132,8 @@ fi
 
 if ! declare -f log_warning >/dev/null 2>&1; then
 log_warning() {
-    local message="$1"
+    local message="${1:-}"
+    [[ -n "$message" ]] || return 0
     local detail="${2:-}"
     echo -e "${THEME_WARN}⚠ $message${RESET}"
     log_to_file "WARNING: $message"
@@ -140,7 +146,8 @@ fi
 
 if ! declare -f log_error >/dev/null 2>&1; then
 log_error() {
-    local message="$1"
+    local message="${1:-}"
+    [[ -n "$message" ]] || return 0
     local hint="${2:-}"
     echo -e "${THEME_ERROR}✗ $message${RESET}"
     if [ -n "$hint" ]; then
@@ -153,7 +160,8 @@ fi
 
 if ! declare -f log_debug >/dev/null 2>&1; then
 log_debug() {
-    local message="$1"
+    local message="${1:-}"
+    [[ -n "$message" ]] || return 0
     local detail="${2:-}"
     if [ "${VERBOSE:-false}" = true ]; then
         echo -e "${THEME_MUTED}[DEBUG] $message${RESET}"
@@ -168,6 +176,7 @@ fi
 # Run a step with error handling
 if ! declare -f run_step >/dev/null 2>&1; then
 run_step() {
+    [[ $# -ge 2 ]] || { log_error "run_step: usage: run_step <description> <cmd> [args...]"; return 1; }
     local description="$1"
     shift
 
@@ -187,6 +196,7 @@ fi
 
 if ! declare -f command_exists >/dev/null 2>&1; then
 command_exists() {
+    [[ $# -ge 1 ]] || return 1
     command -v "$1" &>/dev/null
 }
 fi

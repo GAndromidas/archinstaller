@@ -20,7 +20,7 @@ __print_bottom_border() {
 }
 
 __print_border_line() {
-    local content="$1"
+    local content="${1:-}"
     local w=$(__term_width)
     local pad=$((w - ${#content} - 4))
     (( pad < 1 )) && pad=1
@@ -38,7 +38,7 @@ __print_thick_bottom_border() {
 }
 
 __print_thick_border_line() {
-    local content="$1"
+    local content="${1:-}"
     local w=$(__term_width)
     local pad=$((w - ${#content} - 4))
     (( pad < 1 )) && pad=1
@@ -48,7 +48,7 @@ __print_thick_border_line() {
 # Check if gum is available (cached after first call)
 __supports_gum_cache=""
 supports_gum() {
-    if [ -z "$__supports_gum_cache" ]; then
+    if [ -z "${__supports_gum_cache:-}" ]; then
         if command -v gum &>/dev/null; then
             __supports_gum_cache="true"
         else
@@ -61,9 +61,10 @@ supports_gum() {
 # Unified menu function with arrow navigation
 # Usage: ui_menu "Title" "Description" "Option1" "Option2" ...
 ui_menu() {
-    local title="$1"
+    local title="${1:-}"
+    [[ -n "$title" ]] || return 1
     local description="${2:-}"
-    shift 2
+    shift 2 || shift $#
     local options=("$@")
 
     if supports_gum; then
@@ -87,7 +88,10 @@ ui_menu() {
         echo ""
         local selection
         while true; do
-            read -r -p "$(echo -e "${THEME_SECONDARY}Select option [1-$((i-1))]: ${RESET}")" selection
+            if ! read -r -p "$(echo -e "${THEME_SECONDARY}Select option [1-$((i-1))]: ${RESET}")" selection; then
+                echo ""
+                return 1
+            fi
             if [[ "$selection" =~ ^[0-9]+$ ]] && [ "$selection" -ge 1 ] && [ "$selection" -le "$((i-1))" ]; then
                 echo "${options[$((selection-1))]}"
                 return 0
@@ -100,8 +104,9 @@ ui_menu() {
 # Multi-select menu for custom packages
 # Usage: ui_multiselect "Title" "Option1" "Option2" ...
 ui_multiselect() {
-    local title="$1"
-    shift
+    local title="${1:-}"
+    [[ -n "$title" ]] || return 1
+    shift || true
     local options=("$@")
 
     if supports_gum; then
@@ -131,7 +136,8 @@ ui_multiselect() {
 # for the handful of prompts (e.g. bootloader kernel-entry sync) where
 # silently accepting the default in unattended mode is the wrong call.
 ui_confirm_destructive() {
-    local question="$1"
+    local question="${1:-}"
+    [[ -n "$question" ]] || return 1
     local description="${2:-}"
     local default_yes="${3:-false}"
 
@@ -145,7 +151,8 @@ ui_confirm_destructive() {
 
 # Usage: ui_confirm "Question?" "Optional description"
 ui_confirm() {
-    local question="$1"
+    local question="${1:-}"
+    [[ -n "$question" ]] || return 1
     local description="${2:-}"
     local default_yes="${3:-true}"
 
@@ -156,7 +163,7 @@ ui_confirm() {
         [[ "$default_yes" == true ]] && return 0 || return 1
     fi
 
-    if supports_gum; then
+    if supports_gum && [[ -c /dev/tty ]]; then
         # Use subshell to temporarily restore stdio to terminal for gum display.
         # Must restore stdin too: dashboard_run redirects stdout/stderr to the
         # log, and without stdin on /dev/tty gum's key reader hangs until an
@@ -184,23 +191,29 @@ ui_confirm() {
 
         return $result
     else
-        # Fallback when gum is unavailable. Interactive prompts are written to
-        # /dev/tty so they remain visible even when called from a step subshell
-        # whose stdout/stderr are redirected to the install log.
-        local tty="/dev/tty"
-        echo "" > "$tty"
+        # Fallback when gum is unavailable (or no /dev/tty for gum).
+        # Interactive prompts go to /dev/tty when available so they remain
+        # visible even when called from a step subshell whose stdout/stderr
+        # are redirected to the install log; otherwise use stdio.
+        local tty="/dev/stdout"
+        [[ -c /dev/tty ]] && tty="/dev/tty"
+        echo "" > "$tty" 2>/dev/null || true
         if [ -n "$description" ]; then
-            echo -e "${THEME_WARN}${description}${RESET}" > "$tty"
+            echo -e "${THEME_WARN}${description}${RESET}" > "$tty" 2>/dev/null || true
         fi
         local response
         while true; do
-            printf '%b' "${THEME_SECONDARY}${question} [Y/n]: ${RESET}" > "$tty"
-            read -r response < "$tty" || response=""
+            printf '%b' "${THEME_SECONDARY}${question} [Y/n]: ${RESET}" > "$tty" 2>/dev/null || printf '%b' "${THEME_SECONDARY}${question} [Y/n]: ${RESET}"
+            if [[ "$tty" == "/dev/tty" ]]; then
+                read -r response < "$tty" || return 1
+            else
+                read -r response || return 1
+            fi
             response=${response,,}
             case "$response" in
                 ""|y|yes) return 0 ;;
                 n|no) return 1 ;;
-                *) printf '\n%b\n' "${THEME_ERROR}Please answer Y (yes) or N (no).${RESET}" > "$tty" ;;
+                *) printf '\n%b\n' "${THEME_ERROR}Please answer Y (yes) or N (no).${RESET}" > "$tty" 2>/dev/null || true ;;
             esac
         done
     fi
@@ -209,8 +222,9 @@ ui_confirm() {
 # Progress spinner for long operations
 # Usage: ui_spinner "Message" command arg1 arg2 ...
 ui_spinner() {
-    local message="$1"
-    shift
+    local message="${1:-}"
+    [[ -n "$message" ]] || return 1
+    shift || true
     local command=("$@")
 
     if supports_gum; then
@@ -224,7 +238,8 @@ ui_spinner() {
 # Styled header with bordered box
 # Usage: ui_header "Title"
 ui_header() {
-    local title="$1"
+    local title="${1:-}"
+    [[ -n "$title" ]] || return 1
 
     echo ""
     if supports_gum; then
@@ -240,7 +255,8 @@ ui_header() {
 # Info message (white)
 # Usage: ui_info "Message"
 ui_info() {
-    local message="$1"
+    local message="${1:-}"
+    [[ -n "$message" ]] || return 0
     if supports_gum; then
         gum style --foreground "$GUM_TEXT" "$message"
     else
@@ -251,7 +267,8 @@ ui_info() {
 # Success message (green)
 # Usage: ui_success "Message"
 ui_success() {
-    local message="$1"
+    local message="${1:-}"
+    [[ -n "$message" ]] || return 0
     if supports_gum; then
         gum style --foreground "$GUM_SUCCESS" "✓ $message"
     else
@@ -262,7 +279,8 @@ ui_success() {
 # Warning message (yellow)
 # Usage: ui_warn "Message"
 ui_warn() {
-    local message="$1"
+    local message="${1:-}"
+    [[ -n "$message" ]] || return 0
     if supports_gum; then
         gum style --foreground "$GUM_WARN" "⚠ $message"
     else
@@ -273,7 +291,8 @@ ui_warn() {
 # Error message (red)
 # Usage: ui_error "Message"
 ui_error() {
-    local message="$1"
+    local message="${1:-}"
+    [[ -n "$message" ]] || return 0
     if supports_gum; then
         gum style --foreground "$GUM_ERROR" "✗ $message"
     else
@@ -284,7 +303,8 @@ ui_error() {
 # Input prompt
 # Usage: ui_input "Prompt" "default_value"
 ui_input() {
-    local prompt="$1"
+    local prompt="${1:-}"
+    [[ -n "$prompt" ]] || return 1
     local default="${2:-}"
 
     if supports_gum; then
@@ -299,7 +319,8 @@ ui_input() {
 # Password input
 # Usage: ui_password "Prompt"
 ui_password() {
-    local prompt="$1"
+    local prompt="${1:-}"
+    [[ -n "$prompt" ]] || return 1
 
     if supports_gum; then
         gum input --password --prompt="$prompt" --prompt.foreground "$GUM_PRIMARY"
@@ -314,7 +335,8 @@ ui_password() {
 # Simple banner with double-line box
 # Usage: simple_banner "Title"
 simple_banner() {
-    local title="$1"
+    local title="${1:-}"
+    [[ -n "$title" ]] || return 1
 
     echo ""
     if supports_gum; then
@@ -331,7 +353,8 @@ simple_banner() {
 # Usage: step "Step description"
 if ! declare -f step >/dev/null 2>&1; then
 step() {
-    local message="$1"
+    local message="${1:-}"
+    [[ -n "$message" ]] || return 0
     if supports_gum; then
         gum style --foreground "$GUM_PRIMARY" "▶ $message"
     else

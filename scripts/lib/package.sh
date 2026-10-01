@@ -25,10 +25,17 @@ run_with_retry() {
 
         # Only retry errors that are actually transient.
         if [[ "$output" != *"could not lock database"* ]] && \
+           [[ "$output" != *"unable to lock database"* ]] && \
            [[ "$output" != *"failed to synchronize"* ]] && \
            [[ "$output" != *"failed retrieving file"* ]] && \
            [[ "$output" != *"Could not resolve host"* ]] && \
-           [[ "$output" != *"Connection timed out"* ]]; then
+           [[ "$output" != *"Temporary failure"* ]] && \
+           [[ "$output" != *"Connection timed out"* ]] && \
+           [[ "$output" != *"Connection reset"* ]] && \
+           [[ "$output" != *"Timeout"* ]] && \
+           [[ "$output" != *"GPGME error"* ]] && \
+           [[ "$output" != *"signature from"* ]] && \
+           [[ "$output" != *"invalid or corrupted package"* ]]; then
             printf '%s' "$output"
             return "$rc"
         fi
@@ -63,8 +70,9 @@ fi
 
 if ! declare -f is_package_installed >/dev/null 2>&1; then
 is_package_installed() {
-    local manager="$1"
-    local pkg="$2"
+    local manager="${1:-}"
+    local pkg="${2:-}"
+    [[ -n "$manager" && -n "$pkg" ]] || return 1
 
     case "$manager" in
         pacman|aur)
@@ -73,13 +81,18 @@ is_package_installed() {
         flatpak)
             flatpak list --app --columns=application 2>/dev/null | grep -qxF "$pkg"
             ;;
+        *)
+            log_error "Unknown package manager: $manager"
+            return 1
+            ;;
     esac
 }
 fi
 
 if ! declare -f pacman_install_single >/dev/null 2>&1; then
 pacman_install_single() {
-    local pkg="$1"
+    local pkg="${1:-}"
+    [[ -n "$pkg" ]] || { log_error "pacman_install_single: missing package name"; return 1; }
     local verbose="${2:-false}"
 
     if [ "$verbose" = true ]; then
@@ -87,7 +100,7 @@ pacman_install_single() {
     fi
 
     local output
-    if output=$(run_with_retry sudo pacman -S --noconfirm --needed "$pkg"); then
+    if output=$(run_with_retry sudo -n pacman -S --noconfirm --needed "$pkg"); then
         [ "$verbose" = true ] && printf '%b' "${THEME_SUCCESS} ✓ Success${RESET}\n"
         INSTALLED_PACKAGES+=("$pkg")
         return 0
@@ -104,7 +117,8 @@ fi
 
 if ! declare -f yay_install_single >/dev/null 2>&1; then
 yay_install_single() {
-    local pkg="$1"
+    local pkg="${1:-}"
+    [[ -n "$pkg" ]] || { log_error "yay_install_single: missing package name"; return 1; }
     local verbose="${2:-false}"
     local helper
     helper=$(aur_helper)
@@ -136,7 +150,8 @@ fi
 
 if ! declare -f flatpak_install_single >/dev/null 2>&1; then
 flatpak_install_single() {
-    local pkg="$1"
+    local pkg="${1:-}"
+    [[ -n "$pkg" ]] || { log_error "flatpak_install_single: missing package name"; return 1; }
     local verbose="${2:-false}"
 
     if ! command -v flatpak &>/dev/null; then
@@ -149,7 +164,7 @@ flatpak_install_single() {
     fi
 
     local output
-    if output=$(sudo flatpak install -y --noninteractive flathub "$pkg" 2>&1); then
+    if output=$(run_with_retry sudo -n flatpak install -y --noninteractive flathub "$pkg" 2>&1); then
         [ "$verbose" = true ] && printf '%b' "${THEME_SUCCESS} ✓ Success${RESET}\n"
         INSTALLED_PACKAGES+=("$pkg")
         return 0
@@ -190,7 +205,7 @@ flatpak_install_batch() {
 
     # Try batch install first (flatpak supports multiple app IDs)
     local output
-    if output=$(sudo flatpak install -y --noninteractive flathub "${packages[@]}" 2>&1); then
+    if output=$(run_with_retry sudo -n flatpak install -y --noninteractive flathub "${packages[@]}" 2>&1); then
         ui_success "Flatpak batch installation successful ($total apps)"
         INSTALLED_PACKAGES+=("${packages[@]}")
         return 0
@@ -203,7 +218,7 @@ flatpak_install_batch() {
         if flatpak_install_single "$pkg" true; then
             : # flatpak_install_single already records successful packages.
         else
-            ((failed++))
+            failed=$((failed + 1))
         fi
     done
 
@@ -217,7 +232,8 @@ fi
 
 if ! declare -f install_package_generic >/dev/null 2>&1; then
 install_package_generic() {
-    local manager="$1"
+    local manager="${1:-}"
+    [[ -n "$manager" ]] || { log_error "install_package_generic: missing manager"; return 1; }
     shift
     local packages=("$@")
     local failed=0
@@ -235,6 +251,10 @@ install_package_generic() {
             flatpak)
                 manager_name="Flatpak"
                 ;;
+            *)
+                log_error "Unknown package manager: $manager"
+                return 1
+                ;;
         esac
 
         if [ "${DRY_RUN:-false}" = true ]; then
@@ -244,13 +264,13 @@ install_package_generic() {
             local error_output install_result=1
             case "$manager" in
                 pacman)
-                    error_output=$(run_with_retry sudo pacman -S --noconfirm --needed "$pkg") && install_result=0
+                    error_output=$(run_with_retry sudo -n pacman -S --noconfirm --needed "$pkg") && install_result=0
                     ;;
                 aur)
                     error_output=$(run_with_retry "$(aur_helper)" -S --noconfirm --needed "$pkg") && install_result=0
                     ;;
                 flatpak)
-                    error_output=$(sudo flatpak install -y --noninteractive flathub "$pkg" 2>&1) && install_result=0
+                    error_output=$(run_with_retry sudo -n flatpak install -y --noninteractive flathub "$pkg" 2>&1) && install_result=0
                     ;;
             esac
 
@@ -261,7 +281,7 @@ install_package_generic() {
                 FAILED_PACKAGES+=("$pkg")
                 log_error "Failed to install $pkg via $manager_name"
                 echo "$error_output" >> "$INSTALL_LOG"
-                ((failed++))
+                failed=$((failed + 1))
             fi
         fi
     done
@@ -278,7 +298,8 @@ fi
 
 if ! declare -f install_packages_batch >/dev/null 2>&1; then
 install_packages_batch() {
-    local manager="$1"
+    local manager="${1:-}"
+    [[ -n "$manager" ]] || { log_error "install_packages_batch: missing manager"; return 1; }
     shift
     local packages=("$@")
     local total=${#packages[@]}
@@ -310,15 +331,20 @@ fi
 
 if ! declare -f remove_package >/dev/null 2>&1; then
 remove_package() {
-    local pkg="$1"
+    local pkg="${1:-}"
+    [[ -n "$pkg" ]] || { log_error "remove_package: missing package name"; return 1; }
     local manager="${2:-pacman}"
 
     case "$manager" in
         pacman)
-            sudo pacman -Rns --noconfirm "$pkg"
+            sudo -n pacman -Rns --noconfirm "$pkg"
             ;;
         flatpak)
-            sudo flatpak uninstall -y "$pkg"
+            sudo -n flatpak uninstall -y "$pkg"
+            ;;
+        *)
+            log_error "Unknown package manager: $manager"
+            return 1
             ;;
     esac
 }
@@ -330,10 +356,10 @@ update_system() {
     # Refresh the keyring first: on stale ISOs/installs the bundled
     # archlinux-keyring is older than the signatures on current packages,
     # which fails the whole -Syu with signature errors. Cheap, idempotent.
-    if ! sudo pacman -Sy --noconfirm --needed archlinux-keyring >/dev/null 2>&1; then
+    if ! sudo -n pacman -Sy --noconfirm --needed archlinux-keyring >/dev/null 2>&1; then
         log_warning "Could not refresh archlinux-keyring, continuing anyway"
     fi
-    if sudo pacman -Syu --noconfirm; then
+    if sudo -n pacman -Syu --noconfirm; then
         ui_success "System updated successfully"
     else
         ui_error "System update failed"

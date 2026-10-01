@@ -123,7 +123,8 @@ dashboard_init() {
 }
 
 dashboard_step() {
-    local name=$1 num=$2
+    local name="${1:-}" num="${2:-}"
+    [[ -n "$name" && -n "$num" ]] || return 1
     if [[ "$DASHBOARD_PLAIN" == true ]]; then
       DASHBOARD_CURRENT_STEP=$num
       DASHBOARD_STEP_NAMES[$num]="$name"
@@ -188,10 +189,14 @@ dashboard_step() {
 }
 
 dashboard_run() {
-    local script_path=$1
+    local script_path="${1:-}"
+    [[ -n "$script_path" ]] || { log_error "dashboard_run: missing script path"; return 1; }
+    [[ -f "$script_path" && -r "$script_path" ]] || { log_error "dashboard_run: script not found: $script_path"; return 1; }
 
-    # Position cursor below dashboard frame for interactive prompts
-    tput cup $((DASHBOARD_ROW_OFFSET + DASHBOARD_FRAME_END + 1)) 0
+    # Position cursor below dashboard frame for interactive prompts (TTY only)
+    if dashboard_is_tty; then
+        tput cup $((DASHBOARD_ROW_OFFSET + DASHBOARD_FRAME_END + 1)) 0 2>/dev/null || true
+    fi
 
     # Run in a subshell so exit/return in the step script doesn't kill the installer
     # stdout/stderr go to the log; interactive prompts (gum, read) use /dev/tty directly
@@ -211,13 +216,16 @@ dashboard_ok() {
       DASHBOARD_STEP_STATUSES[$num]="ok"
       DASHBOARD_STEP_TIMES[$num]=$elapsed
       echo "✓ Step $num done (${elapsed}s)"
+      if declare -f log_to_file >/dev/null 2>&1; then
+        log_to_file "STEP_TIMING: Step $num (${DASHBOARD_STEP_NAMES[$num]:-unknown}) completed in ${elapsed}s"
+      fi
       return 0
     fi
     local w=$DASHBOARD_INNER_W
     DASHBOARD_STEP_STATUSES[$num]="ok"
     DASHBOARD_STEP_TIMES[$num]=$elapsed
 
-    local time_str="$(format_time $elapsed)"
+    local time_str="$(format_time "$elapsed")"
     local step_row="${DASHBOARD_STEP_ROWS[$num]}"
     local name="${DASHBOARD_STEP_NAMES[$num]}"
 
@@ -228,13 +236,20 @@ dashboard_ok() {
         "$num" "$name" "$time_str"
 
     tput cup $((DASHBOARD_ROW_OFFSET + DASHBOARD_FRAME_END + 1)) 0
+    if declare -f log_to_file >/dev/null 2>&1; then
+      log_to_file "STEP_TIMING: Step $num ($name) completed in ${elapsed}s"
+    fi
 }
 
 dashboard_fail() {
     local num=$DASHBOARD_CURRENT_STEP
     if [[ "$DASHBOARD_PLAIN" == true ]]; then
       DASHBOARD_STEP_STATUSES[$num]="fail"
+      DASHBOARD_STEP_TIMES[$num]=0
       echo "✗ Step $num failed"
+      if declare -f log_to_file >/dev/null 2>&1; then
+        log_to_file "STEP_TIMING: Step $num (${DASHBOARD_STEP_NAMES[$num]:-unknown}) failed"
+      fi
       return 0
     fi
     local elapsed=0
@@ -244,7 +259,7 @@ dashboard_fail() {
     DASHBOARD_STEP_STATUSES[$num]="fail"
     DASHBOARD_STEP_TIMES[$num]=$elapsed
 
-    local time_str="$(format_time $elapsed)"
+    local time_str="$(format_time "$elapsed")"
     local step_row="${DASHBOARD_STEP_ROWS[$num]}"
     local name="${DASHBOARD_STEP_NAMES[$num]}"
 
@@ -255,6 +270,9 @@ dashboard_fail() {
         "$num" "$name" "$time_str"
 
     tput cup $((DASHBOARD_ROW_OFFSET + DASHBOARD_FRAME_END + 1)) 0
+    if declare -f log_to_file >/dev/null 2>&1; then
+      log_to_file "STEP_TIMING: Step $num ($name) failed after ${elapsed}s"
+    fi
 }
 
 dashboard_skip() {
@@ -262,7 +280,11 @@ dashboard_skip() {
     local num=$DASHBOARD_CURRENT_STEP
     if [[ "$DASHBOARD_PLAIN" == true ]]; then
       DASHBOARD_STEP_STATUSES[$num]="skip"
+      DASHBOARD_STEP_TIMES[$num]=0
       echo "◇ Step $num skipped — $msg"
+      if declare -f log_to_file >/dev/null 2>&1; then
+        log_to_file "STEP_TIMING: Step $num (${DASHBOARD_STEP_NAMES[$num]:-unknown}) skipped — $msg"
+      fi
       return 0
     fi
     local w=$DASHBOARD_INNER_W
@@ -281,6 +303,9 @@ dashboard_skip() {
         "$num" "$disp_msg"
 
     tput cup $((DASHBOARD_ROW_OFFSET + DASHBOARD_FRAME_END + 1)) 0
+    if declare -f log_to_file >/dev/null 2>&1; then
+      log_to_file "STEP_TIMING: Step $num (${DASHBOARD_STEP_NAMES[$num]:-unknown}) skipped — $msg"
+    fi
 }
 
 dashboard_warn() {
@@ -294,12 +319,11 @@ dashboard_warn() {
     local elapsed=0
     [ "$DASHBOARD_STEP_SEC" -ge 0 ] && elapsed=$(( $(mono_now) - DASHBOARD_STEP_SEC ))
     (( elapsed < 0 )) && elapsed=0
-    local num=$DASHBOARD_CURRENT_STEP
     local w=$DASHBOARD_INNER_W
     DASHBOARD_STEP_STATUSES[$num]="warn"
     DASHBOARD_STEP_TIMES[$num]=$elapsed
 
-    local time_str="$(format_time $elapsed)"
+    local time_str="$(format_time "$elapsed")"
     local step_row="${DASHBOARD_STEP_ROWS[$num]}"
     local name="${DASHBOARD_STEP_NAMES[$num]}"
 
@@ -356,9 +380,9 @@ dashboard_finish() {
 
     for ((i = 1; i <= total; i++)); do
         [[ -v DASHBOARD_STEP_STATUSES[$i] ]] || continue
-        local name="${DASHBOARD_STEP_NAMES[$i]}"
+        local name="${DASHBOARD_STEP_NAMES[$i]:-Step $i}"
         local st="${DASHBOARD_STEP_STATUSES[$i]}"
-        local tm="${DASHBOARD_STEP_TIMES[$i]}"
+        local tm="${DASHBOARD_STEP_TIMES[$i]:-0}"
         local icon color
         case "$st" in
             ok)   icon="✓"; color="$THEME_SUCCESS" ;;
@@ -385,4 +409,8 @@ dashboard_finish() {
     echo ""
 
     log_to_file "Installation finished. $success completed, $fail failed, $warn warnings, $skip skipped in $(format_time $wall_time)"
+    for ((i = 1; i <= total; i++)); do
+        [[ -v DASHBOARD_STEP_STATUSES[$i] ]] || continue
+        log_to_file "STEP_SUMMARY: Step $i (${DASHBOARD_STEP_NAMES[$i]:-unknown}) = ${DASHBOARD_STEP_STATUSES[$i]} in ${DASHBOARD_STEP_TIMES[$i]:-0}s"
+    done
 }

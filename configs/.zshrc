@@ -119,7 +119,7 @@ alias jctl='journalctl -p 3 -xb'                                                
 alias sr='echo "Rebooting the system...\n" && sudo reboot'                          # Reboot system
 alias ss='echo "Shutting down the system...\n" && sudo poweroff'                    # Shutdown system
 alias bios='systemctl reboot --firmware-setup'                                      # Reboot to UEFI
-alias windows='sudo grub-reboot "Windows 11" && systemctl reboot'                   # Reboot to Windows Grub
+alias windows='sudo bootctl set-oneshot windows.conf && systemctl reboot'           # Reboot to Windows
 alias suspend='systemctl suspend'                                                   # Suspend system
 alias hibernate='systemctl hibernate'                                               # Hibernate system
 

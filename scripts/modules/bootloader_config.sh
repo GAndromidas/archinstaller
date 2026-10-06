@@ -334,6 +334,305 @@ configure_uki_cmdline_note_only() {
 
 # BOOTLOADER-SPECIFIC KERNEL PARAMETERS
 
+# --- systemd-boot completeness (install, fallback, entries, verify) ---
+# Mirrors the guarantees of switch-bootloader.sh: the identified loader must
+# end up INSTALLED (ESP binaries + NVRAM + boot order), with a fallback
+# initramfs, microcode loading, complete entries (kernels + Windows +
+# sort-keys), and a final verification gate. No other stacks are touched —
+# this installer configures the detected loader, it never migrates.
+
+# Order our NVRAM entry first, keep the rest untouched (same algorithm as
+# limine_order_entry_first, generalized beyond Limine).
+order_boot_entry_first() {
+  local want="${1:-}" label="${2:-bootloader}"
+  local order
+  order=$(sudo -n efibootmgr 2>/dev/null | grep -i '^BootOrder:' | cut -d: -f2 | tr -d ' ' || true)
+  if [[ -z "$order" ]]; then
+    log_warning "Could not read BootOrder — skipping reorder."
+    return 0
+  fi
+  local want_up new_order seen p p_up
+  want_up=$(echo "$want" | tr 'a-f' 'A-F')
+  new_order="$want_up"; seen=",$want_up,"
+  local IFS=','
+  for p in $order; do
+    [[ -n "$p" ]] || continue
+    p_up=$(echo "$p" | tr 'a-f' 'A-F')
+    [[ "$seen" == *",$p_up,"* ]] && continue
+    seen+="$p_up,"; new_order="$new_order,$p_up"
+  done
+  if sudo -n efibootmgr -o "$new_order" >>"$INSTALL_LOG" 2>&1; then
+    log_success "BootOrder set to $new_order ($label first)."
+  else
+    log_warning "Could not set BootOrder."
+  fi
+}
+
+# systemd-boot NVRAM ids (Linux Boot Manager label or systemd loader path).
+systemd_boot_nvram_ids() {
+  command -v efibootmgr &>/dev/null || return 0
+  sudo -n efibootmgr -v 2>/dev/null | grep -iE 'Linux Boot Manager|systemd-boot|\\EFI\\systemd\\'     | grep -oE '^Boot[0-9A-Fa-f]{4}' | sed 's/^Boot//' || true
+}
+
+ensure_systemd_boot_installed() {
+  local esp="${1:-}"
+  [[ -n "$esp" ]] || { log_warning "No ESP — skipping loader install."; return 0; }
+  if ! command -v bootctl &>/dev/null; then
+    log_warning "bootctl not found — skipping loader install."
+    return 0
+  fi
+  # sudo (not -n check): bootctl cannot assess the ESP unprivileged and would
+  # falsely report "not installed" (observed live: install ok, check failed).
+  if [[ "$(sudo -n bootctl is-installed 2>/dev/null || echo no)" != "yes" ]]; then
+    log_info "Installing systemd-boot to $esp..."
+    if sudo -n bootctl install --esp-path="$esp" >>"$INSTALL_LOG" 2>&1; then
+      log_success "systemd-boot installed to $esp"
+    else
+      log_error "bootctl install failed — entries below may never boot."
+      return 1
+    fi
+  else
+    log_info "systemd-boot already installed in ESP"
+  fi
+  # Fallback must BE the deployed binary (installers skip identical copies,
+  # so only content-compare; any deployed variant matches).
+  local main="$esp/EFI/systemd/systemd-bootx64.efi"
+  if ! sudo -n test -f "$main" 2>/dev/null; then
+    main=$(sudo -n find "$esp/EFI/systemd" -maxdepth 1 -name 'systemd-boot*.efi' 2>/dev/null | head -1 || true)
+  fi
+  if [[ -n "$main" ]] && ! sudo -n cmp -s "$esp/EFI/BOOT/BOOTX64.EFI" "$main" 2>/dev/null; then
+    sudo -n cp -a "$main" "$esp/EFI/BOOT/BOOTX64.EFI" 2>/dev/null       && log_success "Refreshed fallback BOOTX64.EFI"       || log_warning "Could not refresh fallback BOOTX64.EFI"
+  fi
+  local ids first
+  ids=$(systemd_boot_nvram_ids || true)
+  first=$(echo "$ids" | head -1 || true)
+  if [[ -n "$first" ]]; then
+    order_boot_entry_first "$first" "systemd-boot"
+  else
+    log_warning "No systemd-boot NVRAM entry found — firmware may not list it (fallback BOOTX64.EFI still boots)."
+  fi
+}
+
+# Fallback initramfs preset (PRESETS array AND image lines — -P builds only
+# listed presets; image lines alone silently build nothing). Defers the slow
+# rebuild via NEEDS_INITRAMFS_REBUILD like the rest of this step.
+ensure_fallback_preset() {
+  local kpkg suffix preset
+  for kpkg in linux linux-zen linux-lts linux-hardened; do
+    pacman -Q "$kpkg" &>/dev/null 2>&1 || continue
+    if [[ "$kpkg" == "linux" ]]; then suffix="linux"; else suffix="${kpkg#linux-}"; fi
+    if sudo -n test -f "/boot/initramfs-$suffix-fallback.img" 2>/dev/null; then
+      log_info "Fallback image present for $kpkg"
+      continue
+    fi
+    preset="/etc/mkinitcpio.d/${kpkg}.preset"
+    if ! sudo -n test -f "$preset" 2>/dev/null; then
+      log_warning "No preset $preset for installed $kpkg — skipping fallback"
+      continue
+    fi
+    sudo -n cp "$preset" "${preset}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
+    if sudo -n grep -qE "^PRESETS=.*fallback" "$preset" 2>/dev/null; then
+      log_info "Fallback already listed in PRESETS ($preset)"
+    elif sudo -n grep -qE "^#PRESETS=\('default' 'fallback'\)" "$preset" 2>/dev/null; then
+      sudo -n sed -i -E "s/^#PRESETS=\('default' 'fallback'\)/PRESETS=('default' 'fallback')/" "$preset" 2>/dev/null         && log_success "Enabled fallback PRESETS in $preset"         || log_warning "Could not update PRESETS in $preset"
+      sudo -n sed -i -E "s/^PRESETS=\('default'\)$/#PRESETS=('default')/" "$preset" 2>/dev/null || true
+    elif sudo -n grep -qE "^PRESETS=" "$preset" 2>/dev/null; then
+      sudo -n sed -i -E "/^PRESETS=/ s/\)$/ 'fallback')/" "$preset" 2>/dev/null         && log_success "Appended fallback to PRESETS in $preset"         || log_warning "Could not update PRESETS in $preset"
+    else
+      printf "\nPRESETS=('default' 'fallback')\n" | sudo -n tee -a "$preset" >/dev/null         && log_success "Added fallback PRESETS to $preset"         || log_warning "Could not update $preset"
+    fi
+    if sudo -n grep -qE '^#fallback_image=' "$preset" 2>/dev/null; then
+      sudo -n sed -i -E 's/^#(fallback_image|fallback_options)=/\1=/' "$preset" 2>/dev/null         && log_success "Enabled fallback image lines in $preset"         || log_warning "Could not enable fallback image in $preset"
+    elif ! sudo -n grep -qE '^fallback_image=' "$preset" 2>/dev/null; then
+      printf '\nfallback_image="/boot/initramfs-%s-fallback.img"\nfallback_options="-S autodetect"\n' "$suffix"         | sudo -n tee -a "$preset" >/dev/null         && log_success "Appended fallback image lines to $preset"         || log_warning "Could not update $preset"
+    fi
+    NEEDS_INITRAMFS_REBUILD=true
+  done
+}
+
+# Microcode package so loader entries can load it via an early initrd line
+# (systemd-boot entries have no GRUB early-initrd mechanism).
+ensure_microcode_pkg() {
+  local want=""
+  if grep -qi 'AuthenticAMD' /proc/cpuinfo 2>/dev/null; then want="amd-ucode";
+  elif grep -qi 'GenuineIntel' /proc/cpuinfo 2>/dev/null; then want="intel-ucode"; fi
+  [[ -n "$want" ]] || { log_info "Unknown CPU vendor — skipping microcode check"; return 0; }
+  if pacman -Q "$want" &>/dev/null 2>&1; then log_info "Microcode package present ($want)"; return 0; fi
+  log_info "Installing microcode package $want..."
+  install_packages_quietly "$want" 2>>"$INSTALL_LOG"     || log_warning "Microcode install failed — entries will boot without early microcode"
+}
+
+# Kernel entry files carrying a linux line (excludes chainload entries like
+# windows.conf, which have efi but no linux and must never get options).
+kernel_entry_files() {
+  local dir="${1:-}"
+  [[ -n "$dir" ]] || return 0
+  local f
+  while IFS= read -r -d '' f; do
+    sudo -n grep -qE '^linux[[:space:]]' "$f" 2>/dev/null && printf '%s\0' "$f"
+  done < <(sudo -n find "$dir" -maxdepth 1 -name '*.conf' -print0 2>/dev/null || true)
+}
+
+# Sort-key for a kernel entry file: main entries first (00-), fallbacks last
+# (zz-). Auto entries (auto-windows, firmware) sort between — deterministic
+# Arch-first, fallback-last menu without touching anything else.
+entry_sort_key() {
+  local base
+  base=$(basename "${1:-}" .conf)
+  if [[ "$base" == *fallback* ]]; then echo "zz-$base";
+  else echo "00-$base"; fi
+}
+
+# Backfill missing sort-key lines on existing entries (never overwrites set keys).
+ensure_entry_sort_keys() {
+  local dir="${1:-}" f key
+  [[ -n "$dir" ]] || return 0
+  while IFS= read -r -d '' f; do
+    sudo -n grep -qE '^sort-key[[:space:]]' "$f" 2>/dev/null && continue
+    key=$(entry_sort_key "$f")
+    if sudo -n grep -qE '^title[[:space:]]' "$f" 2>/dev/null; then
+      sudo -n sed -i "0,/^title[[:space:]]/s//&\nsort-key $key/" "$f" 2>/dev/null         && log_info "Added sort-key $key to $(basename "$f")"         || log_warning "Could not add sort-key to $(basename "$f")"
+    else
+      printf 'sort-key %s\n' "$key" | sudo -n tee -a "$f" >/dev/null 2>/dev/null         && log_info "Added sort-key $key to $(basename "$f")" || true
+    fi
+  done < <(kernel_entry_files "$dir" || true)
+}
+
+# Windows chainload entry (explicit beats auto-detection: auto rows proved
+# unreliable and unorderable). Written only when Windows is detected (ESP
+# file, case-insensitive locate, or NVRAM label).
+write_windows_boot_entry() {
+  local entries_dir="${1:-}" esp="${2:-}" entry
+  [[ -n "$entries_dir" && -n "$esp" ]] || return 0
+  entry="$entries_dir/windows.conf"
+  local win_src=""
+  win_src=$(sudo -n find "$esp/EFI" -ipath '*microsoft*boot*bootmgfw.efi' 2>/dev/null | head -1 || true)
+  if [[ -z "$win_src" ]]; then
+    if detect_second_os_evidence 2>/dev/null || sudo -n efibootmgr -v 2>/dev/null | grep -qi 'Windows Boot Manager'; then
+      log_warning "Windows detected (NVRAM) but bootmgfw.efi not found on ESP — skipping Windows entry"
+    else
+      log_info "No Windows detected — skipping Windows boot entry"
+    fi
+    return 0
+  fi
+  local rel="${win_src#$esp}"
+  {
+    echo "title   Windows 11"
+    echo "sort-key 01-windows"
+    echo "efi     $rel"
+  } | sudo -n tee "$entry" >/dev/null     && log_success "Wrote Windows boot entry ($entry → $rel)"     || log_warning "Could not write Windows boot entry"
+  # Our explicit row replaces the auto one: without this the auto-detected
+  # duplicate appears next to it. Firmware row is separate (auto-firmware).
+  set_loader_config "auto-entries" "no" || true
+}
+
+# Create arch.conf (+fallback) from scratch when NO kernel entries exist
+# (fresh ESP / never-configured loader). Existing entries are maintained,
+# never overwritten.
+create_systemd_boot_entries() {
+  local entries_dir="${1:-}" esp="${2:-}"
+  [[ -n "$entries_dir" && -n "$esp" ]] || return 0
+  local existing=0
+  existing=$(kernel_entry_files "$entries_dir" | tr '\0' '\n' | grep -c . || true)
+  if ((existing > 0)); then
+    log_info "Kernel entries already present ($existing) — maintaining, not recreating"
+    return 0
+  fi
+  local full
+  if ! full=$(get_kernel_params) || ! echo " $full " | grep -qE ' root=[^ ]+ '; then
+    log_error "Cannot build a rooted cmdline — refusing to write rootless entries."
+    return 1
+  fi
+  local ucode_line=""
+  if pacman -Q amd-ucode &>/dev/null 2>&1 && sudo -n test -f /boot/amd-ucode.img 2>/dev/null; then
+    ucode_line="initrd  /amd-ucode.img"
+  elif pacman -Q intel-ucode &>/dev/null 2>&1 && sudo -n test -f /boot/intel-ucode.img 2>/dev/null; then
+    ucode_line="initrd  /intel-ucode.img"
+  fi
+  local kpkg suffix created=0
+  for kpkg in linux linux-zen linux-lts linux-hardened; do
+    pacman -Q "$kpkg" &>/dev/null 2>&1 || continue
+    if [[ "$kpkg" == "linux" ]]; then suffix="linux"; else suffix="${kpkg#linux-}"; fi
+    sudo -n test -f "/boot/vmlinuz-$suffix" 2>/dev/null || continue
+    {
+      if [[ "$suffix" == "linux" ]]; then
+        printf 'title   Arch Linux\nsort-key 00-arch\nlinux   /vmlinuz-linux\n'
+      else
+        printf 'title   Arch Linux (%s)\nsort-key 00-arch-%s\nlinux   /vmlinuz-%s\n' "$suffix" "$suffix" "$suffix"
+      fi
+      [[ -n "$ucode_line" ]] && printf '%s\n' "$ucode_line"
+      printf 'initrd  /initramfs-%s.img\noptions %s\n' "$suffix" "$full"
+    } | sudo -n tee "$entries_dir/arch${suffix:+$([ "$suffix" = linux ] && echo "" || echo "-$suffix")}.conf" >/dev/null       && created=$((created + 1)) || log_warning "Could not write entry for $kpkg"
+    if sudo -n test -f "/boot/initramfs-$suffix-fallback.img" 2>/dev/null; then
+      {
+        if [[ "$suffix" == "linux" ]]; then
+          printf 'title   Arch Linux (fallback)\nsort-key zz-00-arch-fallback\nlinux   /vmlinuz-linux\n'
+        else
+          printf 'title   Arch Linux (%s fallback)\nsort-key zz-00-arch-%s-fallback\nlinux   /vmlinuz-%s\n' "$suffix" "$suffix" "$suffix"
+        fi
+        [[ -n "$ucode_line" ]] && printf '%s\n' "$ucode_line"
+        printf 'initrd  /initramfs-%s-fallback.img\noptions %s\n' "$suffix" "$full"
+      } | sudo -n tee "$entries_dir/arch${suffix:+$([ "$suffix" = linux ] && echo "" || echo "-$suffix")}-fallback.conf" >/dev/null         && log_info "Wrote fallback entry for $kpkg" || true
+    fi
+  done
+  if ((created > 0)); then
+    log_success "Created $created systemd-boot kernel entries"
+    if ! sudo -n grep -qE '^default[[:space:]]' "$entries_dir/../loader.conf" 2>/dev/null; then
+      set_loader_config "default" "arch.conf" || true
+    fi
+  else
+    log_warning "No entries created (no vmlinuz for installed kernel packages)"
+  fi
+  write_windows_boot_entry "$entries_dir" "$esp"
+}
+
+# Final gate: the configured loader must actually boot (mirrors
+# switch-bootloader.sh final_boot_check, installer logging).
+verify_systemd_boot_entries() {
+  local esp="${1:-}" fail=0
+  local entries_dir
+  entries_dir=$(find_systemd_boot_entries_dir 2>/dev/null || true)
+  if [[ -z "$entries_dir" ]]; then
+    log_error "VERIFY FAIL: no loader entries directory."
+    return 1
+  fi
+  local count=0 f
+  while IFS= read -r -d '' f; do count=$((count + 1)); done < <(kernel_entry_files "$entries_dir" || true)
+  if ((count == 0)); then
+    log_error "VERIFY FAIL: no kernel entries in $entries_dir."
+    return 1
+  fi
+  log_info "VERIFY: $count kernel entries present"
+  local lin field ref bad=0
+  while IFS= read -r -d '' f; do
+    while IFS= read -r lin; do
+      case "$lin" in
+        linux*|initrd*|efi*)
+          field=$(echo "$lin" | awk '{print $2}')
+          [[ -n "$field" ]] || continue
+          ref="$field"
+          [[ "$ref" != /* ]] && ref="/$ref"
+          if sudo -n test -f "$esp$ref" 2>/dev/null || sudo -n test -f "$ref" 2>/dev/null; then :;
+          else log_error "VERIFY FAIL: $(basename "$f") references missing $field"; bad=$((bad + 1)); fi
+          ;;
+      esac
+    done < <(sudo -n cat "$f" 2>/dev/null || true)
+  done < <(sudo -n find "$entries_dir" -maxdepth 1 -name '*.conf' -print0 2>/dev/null || true)
+  ((bad > 0)) && fail=1
+  if [[ "$(sudo -n bootctl is-installed 2>/dev/null || echo no)" != "yes" ]]; then
+    log_error "VERIFY FAIL: systemd-boot not installed in ESP."
+    fail=1
+  fi
+  if [[ -z "$(systemd_boot_nvram_ids || true)" ]]; then
+    log_warning "VERIFY: no systemd-boot NVRAM entry (firmware fallback still boots)."
+  fi
+  if ((fail != 0)); then
+    log_error "systemd-boot verification FAILED — do not assume the new config boots."
+    return 1
+  fi
+  log_success "systemd-boot verification passed ($count entries resolve, loader installed)."
+}
+
 # --- systemd-boot ---
 configure_boot() {
   # Detect UKI system: either already has UKI .efi files, or mkinitcpio presets configure UKI output
@@ -352,15 +651,35 @@ configure_boot() {
     return 0
   fi
 
+  # Completeness chain (mirrors switch-bootloader.sh): install the loader,
+  # microcode, fallback preset, then entries — then maintain + verify.
+  local esp_mount=""
+  esp_mount=$(detect_esp_mount 2>/dev/null || true)
+  if [[ -z "$esp_mount" ]]; then
+    log_warning "No ESP mountpoint detected — loader install/entry creation skipped (entry maintenance continues)."
+  else
+    run_step "Ensuring systemd-boot is installed" ensure_systemd_boot_installed "$esp_mount"
+  fi
+  run_step "Ensuring microcode package" ensure_microcode_pkg
+  run_step "Ensuring fallback initramfs preset" ensure_fallback_preset
+
   # Get unified kernel parameters for non-UKI systemd-boot
   local kernel_params
   kernel_params=$(get_kernel_params --cmdline-only)
 
   local entries_dir
-  entries_dir=$(find_systemd_boot_entries_dir)
+  entries_dir=$(find_systemd_boot_entries_dir 2>/dev/null || true)
+  if [[ -z "$entries_dir" && -n "$esp_mount" ]]; then
+    entries_dir="$esp_mount/loader/entries"
+    sudo -n mkdir -p "$entries_dir" 2>/dev/null || true
+  fi
   local loader_conf=""
   if [ -n "$entries_dir" ]; then
     loader_conf="$(dirname "$entries_dir")/loader.conf"
+  fi
+
+  if [[ -n "$entries_dir" && -n "$esp_mount" ]]; then
+    run_step "Creating missing systemd-boot entries" create_systemd_boot_entries "$entries_dir" "$esp_mount"
   fi
 
   run_step "Renaming dated kernel entries to simple format" rename_dated_kernel_entries
@@ -379,8 +698,16 @@ configure_boot() {
     fi
   fi
 
-  # Update kernel options in all entries with unified params
+  # Update kernel options in all entries with unified params (fallback
+  # entries included — same kernel, same options; the initrd lines differ
+  # and are never touched)
   run_step "Updating kernel options with unified parameters" update_systemd_boot_options "$kernel_params"
+
+  # Deterministic menu order Arch-first/fallback-last on existing entries
+  # (never overwrites keys the user or a previous run set).
+  if [[ -n "${entries_dir:-}" ]]; then
+    run_step "Ensuring entry sort-keys" ensure_entry_sort_keys "$entries_dir"
+  fi
 
   run_step "Checking kernel options consistency" check_kernel_options_consistency
 
@@ -390,6 +717,17 @@ configure_boot() {
     run_step "Configuring Btrfs-Assistant snapshot limits" ensure_snapper_aux_universal
   elif is_btrfs_system 2>/dev/null; then
     run_step "Configuring Btrfs-Assistant snapshot limits" apply_btrfs_assistant_profile
+  fi
+
+  # Final gate: the configured loader must actually boot (entries resolve,
+  # loader owns the ESP, NVRAM entry present).
+  if [[ -n "${esp_mount:-}" ]]; then
+    if ! verify_systemd_boot_entries "$esp_mount"; then
+      log_error "systemd-boot configuration did not verify — review before rebooting."
+      return 1
+    fi
+  else
+    log_warning "No ESP — skipping systemd-boot verification."
   fi
 }
 
@@ -409,7 +747,7 @@ update_systemd_boot_options() {
   local entries=()
   while IFS= read -r -d '' entry; do
     entries+=("$entry")
-  done < <(sudo -n find "$entries_dir" -maxdepth 1 -name "*.conf" ! -name "*fallback*" -print0 2>/dev/null)
+  done < <(sudo -n find "$entries_dir" -maxdepth 1 -name "*.conf" ! -name 'windows.conf' -print0 2>/dev/null)
 
   if [[ ${#entries[@]} -eq 0 ]]; then
     log_warning "No systemd-boot entries found in $entries_dir"
@@ -425,6 +763,10 @@ update_systemd_boot_options() {
   local entry
   for entry in "${entries[@]}"; do
     local entry_name=$(basename "$entry")
+    if ! sudo -n grep -qE '^linux[[:space:]]' "$entry" 2>/dev/null; then
+      log_info "Skipping non-kernel entry $entry_name (no linux line — chainload entries keep no options)"
+      continue
+    fi
     # Smart detection: dated archinstall entry (2026-09-04_10-49-12_linux.conf) vs simple (linux.conf)
     if [[ "$entry_name" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}_(.*)\.conf$ ]]; then
       log_info "Dated archinstall entry detected: $entry_name -> will patch options in-place (e.g. add amd_pstate=active)"
@@ -475,7 +817,7 @@ check_kernel_options_consistency() {
   local kernel_entries=()
   while IFS= read -r -d $'\0' entry; do
     kernel_entries+=("$entry")
-  done < <(sudo -n find "$entries_dir" -name "*.conf" ! -name "*fallback*" -print0 2>/dev/null)
+  done < <(sudo -n find "$entries_dir" -name "*.conf" ! -name 'windows.conf' -print0 2>/dev/null)
 
   if [[ ${#kernel_entries[@]} -eq 0 ]]; then
     log_warning "No kernel entries found to check"
@@ -539,7 +881,7 @@ sync_all_kernel_options() {
   local kernel_entries=()
   while IFS= read -r -d $'\0' entry; do
     kernel_entries+=("$entry")
-  done < <(sudo -n find "$entries_dir" -name "*.conf" ! -name "*fallback*" -print0 2>/dev/null)
+  done < <(sudo -n find "$entries_dir" -name "*.conf" ! -name 'windows.conf' -print0 2>/dev/null)
 
   if [[ ${#kernel_entries[@]} -eq 0 ]]; then
     log_warning "No kernel entries found to sync"
@@ -864,6 +1206,13 @@ configure_grub() {
         ui_info "Regenerating GRUB configuration..."
         if sudo -n grub-mkconfig -o "$grub_cfg" 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then
             log_success "GRUB configuration regenerated successfully"
+            if ! sudo -n grep -qE 'menuentry |blscfg' "$grub_cfg" 2>/dev/null; then
+                log_error "grub.cfg has no boot entries — investigate before rebooting."
+                if [ -f "$backup_grub_config" ]; then
+                    sudo -n mv "$backup_grub_config" "$grub_config" || true
+                fi
+                return 1
+            fi
         else
             log_error "grub-mkconfig failed"
             if [ -f "$backup_grub_config" ]; then
@@ -991,6 +1340,20 @@ _esp_has_foreign_loader() {
 # NVRAM utilities → snapshots. Every change below is idempotent and
 # re-applied on each run (a grub/grub-btrfs package update can restore stock
 # script permissions).
+find_grub_snapshot_src() {
+    # Echoes the installed grub-btrfs menu script. grub-customizer renames
+    # /etc/grub.d entries, so match by suffix, not number. Skips proxies and
+    # our own reorder destination.
+    local f b
+    for f in /etc/grub.d/41_snapshots-btrfs /etc/grub.d/*snapshots-btrfs; do
+        b=$(basename "$f")
+        [[ "$b" == *proxy* ]] && continue
+        [[ "$b" == "15_snapshots-btrfs" ]] && continue
+        if [[ -f "$f" ]] 2>/dev/null || sudo -n test -f "$f" 2>/dev/null; then echo "$f"; return 0; fi
+    done
+    return 1
+}
+
 configure_grub_menu_order() {
     step "Configuring GRUB menu order (kernels, snapshots, other OSes)"
 
@@ -1073,8 +1436,8 @@ configure_grub_menu_order() {
         log_info "Neither snapper nor timeshift installed — skipping snapshot menu entries"
         return 0
     fi
-    local snap_src="/etc/grub.d/41_snapshots-btrfs"
-    local snap_dst="/etc/grub.d/15_snapshots-btrfs"
+    local snap_src snap_dst="/etc/grub.d/15_snapshots-btrfs"
+    snap_src=$(find_grub_snapshot_src || true)
     if ! pacman -Q grub-btrfs &>/dev/null 2>&1; then
         log_info "Installing grub-btrfs for snapshot boot entries..."
         if ! install_packages_quietly grub-btrfs 2>>"$INSTALL_LOG"; then
@@ -1084,8 +1447,8 @@ configure_grub_menu_order() {
             return 0
         fi
     fi
-    if [[ -f "$snap_src" ]]; then
-        if [[ ! -f "$snap_dst" ]] || [[ "$snap_src" -nt "$snap_dst" ]]; then
+    if [[ -n "$snap_src" && "$snap_src" != "$snap_dst" ]]; then
+        if ! sudo -n test -f "$snap_dst" 2>/dev/null || [[ "$snap_src" -nt "$snap_dst" ]]; then
             if sudo -n cp "$snap_src" "$snap_dst" 2>/dev/null \
                 && echo "# Managed by archinstaller — runs snapshot entries ahead of os-prober" \
                     | sudo -n tee -a "$snap_dst" >/dev/null; then
@@ -1099,8 +1462,11 @@ configure_grub_menu_order() {
         fi
         sudo -n chmod +x "$snap_dst" 2>/dev/null || true
         sudo -n chmod -x "$snap_src" 2>/dev/null || true
+    elif [[ -n "$snap_src" ]]; then
+        log_info "Snapshot menu order already in place ($snap_dst)"
+        sudo -n chmod +x "$snap_dst" 2>/dev/null || true
     else
-        log_warning "grub-btrfs installed but $snap_src missing — snapshot entries unavailable"
+        log_warning "grub-btrfs installed but no *snapshots-btrfs script in /etc/grub.d — snapshot entries unavailable"
         return 0
     fi
     if sudo -n systemctl enable --now grub-btrfsd.service >>"$INSTALL_LOG" 2>&1; then

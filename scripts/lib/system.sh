@@ -195,16 +195,20 @@ is_uki_system() {
 
     # Method 2: systemd-boot entries reference .efi files (not vmlinuz).
     # sudo: entry files live under /boot, which archinstall may lock to 700.
+    # Chainload entries (windows.conf: efi + no linux line) are NOT UKIs —
+    # without the exclusion, adding a Windows menu row flips the whole
+    # system to "UKI" and entry maintenance gets skipped.
     local entries_dir
     if [[ "$result" == "false" ]]; then
         entries_dir=$(find_systemd_boot_entries_dir)
         if [[ -n "$entries_dir" ]]; then
             while IFS= read -r -d '' entry; do
-                if sudo -n grep -qE "^\s*efi\s+/" "$entry" 2>/dev/null; then
+                if sudo -n grep -qE "^\s*efi\s+/" "$entry" 2>/dev/null \
+                    && ! sudo -n grep -qE "^\s*linux\s+/" "$entry" 2>/dev/null; then
                     result="true"
                     break
                 fi
-            done < <(sudo -n find "$entries_dir" -name "*.conf" -print0 2>/dev/null)
+            done < <(sudo -n find "$entries_dir" -name "*.conf" ! -name 'windows.conf' -print0 2>/dev/null)
         fi
     fi
 

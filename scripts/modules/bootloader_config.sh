@@ -498,7 +498,61 @@ ensure_entry_sort_keys() {
   done < <(kernel_entry_files "$dir" || true)
 }
 
-# Windows chainload entry (explicit beats auto-detection: auto rows proved
+# Canonical menu titles: every kernel entry displays "Arch Linux"
+# (main kernel) or "Arch Linux (<suffix>[ ]fallback)" — never a filename,
+# date stamp, or kernel version. archinstall entries often carry NO title
+# line at all, in which case the loader shows the raw filename
+# (2026-10-06_07-48-52_linux.conf). Existing titles are replaced only when
+# they look auto-generated (missing, dated, or filename-derived); a
+# genuinely custom title is left alone.
+canonical_entry_title() {
+  local entry="${1:-}" suffix="${2:-linux}" title=""
+  local base
+  base=$(basename "$entry" .conf)
+  if [[ "$base" == *fallback* ]]; then
+    if [[ "$suffix" == "linux" ]]; then title="Arch Linux (fallback)";
+    else title="Arch Linux ($suffix fallback)"; fi
+  else
+    if [[ "$suffix" == "linux" ]]; then title="Arch Linux";
+    else title="Arch Linux ($suffix)"; fi
+  fi
+  echo "$title"
+}
+
+ensure_entry_titles() {
+  local dir="${1:-}" f current suffix want body new_content
+  [[ -n "$dir" ]] || return 0
+  while IFS= read -r -d '' f; do
+    suffix=$(sudo -n grep -E '^linux[[:space:]]' "$f" 2>/dev/null | head -1       | grep -oE '/vmlinuz-[^[:space:]]+' | sed 's|.*/vmlinuz-||' || true)
+    [[ -n "$suffix" ]] || suffix="linux"
+    want=$(canonical_entry_title "$f" "$suffix")
+    current=$(sudo -n grep -E '^title[[:space:]]' "$f" 2>/dev/null | head -1       | sed -E 's/^title[[:space:]]+//' || true)
+    if [[ "$current" == "$want" ]]; then
+      log_info "Title already canonical in $(basename "$f")"
+      continue
+    fi
+    local base
+    base=$(basename "$f" .conf)
+    if [[ -n "$current" ]]       && ! echo "$current" | grep -qE '[0-9]{4}-[0-9]{2}-[0-9]{2}'       && [[ "$current" != "$base" && "$current" != "${base//_/ }" ]]; then
+      log_info "Keeping custom title in $(basename "$f"): '$current'"
+      continue
+    fi
+    body=$(sudo -n grep -vE '^title[[:space:]]' "$f" 2>/dev/null || true)
+    body=$(printf '%s' "$body" | sed '/./,$!d' || true)
+    new_content=$(printf 'title   %s\n%s\n' "$want" "$body")
+    if [[ "${DRY_RUN:-false}" == true ]]; then
+      log_info "Dry-run: would set title '$want' in $(basename "$f")"
+      continue
+    fi
+    if privileged_write "$new_content" "$f" 2>/dev/null; then
+      log_success "Set title '$want' in $(basename "$f")"
+    else
+      log_warning "Could not set title in $(basename "$f")"
+    fi
+  done < <(kernel_entry_files "$dir" || true)
+}
+
+# Windows chainload entry (explicit beats auto-detection: auto rows proved# Windows chainload entry (explicit beats auto-detection: auto rows proved
 # unreliable and unorderable). Written only when Windows is detected (ESP
 # file, case-insensitive locate, or NVRAM label).
 write_windows_boot_entry() {
@@ -707,6 +761,7 @@ configure_boot() {
   # (never overwrites keys the user or a previous run set).
   if [[ -n "${entries_dir:-}" ]]; then
     run_step "Ensuring entry sort-keys" ensure_entry_sort_keys "$entries_dir"
+    run_step "Ensuring canonical entry titles" ensure_entry_titles "$entries_dir"
   fi
 
   run_step "Checking kernel options consistency" check_kernel_options_consistency
@@ -775,8 +830,8 @@ update_systemd_boot_options() {
     # root= (PARTUUID c9862f4f-c053-4124-a6a3-55be71016782), zswap.enabled=0, rw, rootfstype etc.
     # Only managed keys (quiet, amd_pstate, etc.) are replaced - example file keeps PARTUUID
     local existing=""
-    if sudo -n grep -q "^options " "$entry" 2>/dev/null; then
-      existing=$(sudo -n grep "^options " "$entry" 2>/dev/null | sed 's/^options //')
+    if sudo -n grep -q "^options[[:space:]]" "$entry" 2>/dev/null; then
+      existing=$(sudo -n grep "^options[[:space:]]" "$entry" 2>/dev/null | sed 's/^options[[:space:]]//')
     fi
 
     # Build new options line (refuse rootless: a missing root= boots into
@@ -790,8 +845,8 @@ update_systemd_boot_options() {
     log_to_file "Entry $(basename "$entry") options: $new_options"
 
     # Update or add options line - handles files with header comments (# Created by archinstall)
-    if sudo -n grep -q "^options " "$entry" 2>/dev/null; then
-      sudo -n sed -i "s|^options .*|options $new_options|" "$entry"
+    if sudo -n grep -q "^options[[:space:]]" "$entry" 2>/dev/null; then
+      sudo -n sed -i "s|^options[[:space:]].*|options $new_options|" "$entry"
       log_info "Patched $entry_name options (added managed params like amd_pstate=active if needed)"
     else
       echo "options $new_options" | sudo -n tee -a "$entry" >/dev/null
@@ -834,7 +889,7 @@ check_kernel_options_consistency() {
 
   for entry in "${kernel_entries[@]}"; do
     local entry_name=$(basename "$entry")
-    local current_options=$(sudo -n grep "^options " "$entry" 2>/dev/null | sed 's/^options //' || echo "")
+    local current_options=$(sudo -n grep "^options[[:space:]]" "$entry" 2>/dev/null | sed 's/^options[[:space:]]//' || echo "")
     options_list+=("$current_options")
     entry_names+=("$entry_name")
   done
@@ -889,7 +944,7 @@ sync_all_kernel_options() {
   fi
 
   local standard_entry="${kernel_entries[0]}"
-  local standard_options=$(sudo -n grep "^options " "$standard_entry" 2>/dev/null | sed 's/^options //' || echo "")
+  local standard_options=$(sudo -n grep "^options[[:space:]]" "$standard_entry" 2>/dev/null | sed 's/^options[[:space:]]//' || echo "")
 
   if [[ -z "$standard_options" ]]; then
     log_warning "No options found in standard entry: $(basename "$standard_entry")"
@@ -908,12 +963,12 @@ sync_all_kernel_options() {
       continue
     fi
 
-    local current_options=$(sudo -n grep "^options " "$entry" 2>/dev/null | sed 's/^options //' || echo "")
+    local current_options=$(sudo -n grep "^options[[:space:]]" "$entry" 2>/dev/null | sed 's/^options[[:space:]]//' || echo "")
 
     if [[ "$current_options" != "$standard_options" ]]; then
       local temp_file=$(mktemp)
       trap 'rm -f "$temp_file"' RETURN
-      sudo -n grep -v "^options " "$entry" 2>/dev/null > "$temp_file" || grep -v "^options " "$entry" 2>/dev/null > "$temp_file" || true
+      sudo -n grep -v "^options[[:space:]]" "$entry" 2>/dev/null > "$temp_file" || grep -v "^options[[:space:]]" "$entry" 2>/dev/null > "$temp_file" || true
       echo "options $standard_options" >> "$temp_file"
       sudo -n mv "$temp_file" "$entry"
       log_success "Synced options in $entry_name"
@@ -1039,17 +1094,17 @@ validate_kernel_entry() {
   # Only check for essential fields: linux and initrd.
   # sudo: entries live under /boot, which archinstall may lock to 700 —
   # bare grep would fail and wrongly reject every entry.
-  if ! sudo -n grep -q "^linux " "$entry" 2>/dev/null; then
+  if ! sudo -n grep -q "^linux[[:space:]]" "$entry" 2>/dev/null; then
     log_warning "Entry $(basename "$entry") missing linux field"
     return 1
   fi
 
-  if ! sudo -n grep -q "^initrd " "$entry" 2>/dev/null; then
+  if ! sudo -n grep -q "^initrd[[:space:]]" "$entry" 2>/dev/null; then
     log_warning "Entry $(basename "$entry") missing initrd field"
     return 1
   fi
 
-  if ! sudo -n grep -q "^options " "$entry" 2>/dev/null; then
+  if ! sudo -n grep -q "^options[[:space:]]" "$entry" 2>/dev/null; then
     log_warning "Entry $(basename "$entry") missing options field"
     return 1
   fi

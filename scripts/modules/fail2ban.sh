@@ -38,34 +38,75 @@ detect_firewall_action() {
   fi
 }
 
-# Set `key = value` within a jail.conf/.local section, regardless of
-# whether that key already has a line to substitute. jail.conf's stock
-# sections are minimal — [sshd] doesn't even have an `enabled =` line,
-# it inherits `enabled = false` from [DEFAULT] — so a plain `sed
-# s/^key = .*/.../ ` silently does nothing when the key isn't already
-# present, and the jail stays disabled no matter what else gets
-# "configured". Confirmed against the real, complete upstream jail.conf,
-# not a guess: this is why every previous fix here still showed
-# "Active jails: none" across three separate real installs. Delete any
-# existing line for that key within the section, then insert a fresh one
-# right after the section header — works whether the key existed or not.
-_f2b_set_option() {
-  local jail_local="${1:-}" section="${2:-}" key="${3:-}" value="${4:-}"
-  # Range must end at the NEXT section header, not the next blank line —
-  # confirmed against the actual installed jail.conf (not a hand-written
-  # guess) that [sshd] has a blank line immediately after its own header,
-  # before the real settings. Ranging to the first blank line closed the
-  # range almost immediately, so the delete step never reached the real
-  # `port    = ssh` line (aligned with extra spaces — also confirmed
-  # against the real file, another thing a hand-written test fixture
-  # missed) further down. That left a genuine duplicate key in the
-  # section, which fail2ban's own parser hard-rejects outright — verified
-  # directly with `fail2ban-client --test`: "option 'port' in section
-  # 'sshd' already exists" — meaning the ENTIRE config failed to load, not
-  # just this one setting. This is the real, complete, verified root
-  # cause of every prior "Active jails: none" across four real installs.
-  sudo -n sed -i "/^\\[${section}\\]/,/^\\[/ { /^${key}[[:space:]]*=/d }" "$jail_local"
-  sudo -n sed -i "/^\\[${section}\\]/a ${key} = ${value}" "$jail_local"
+# Set multiple `key = value` pairs within one jail.conf/.local section in
+# a SINGLE pass (one awk invocation per section instead of two seds per
+# key — 3 file rewrites total instead of ~20). Semantics are the per-key
+# setter's, proven across real installs: jail.conf's stock sections are
+# minimal ([sshd] doesn't even have an `enabled =` line, it inherits
+# `enabled = false` from [DEFAULT]), so plain `s/^key = .../` substitution
+# silently does nothing when the key has no line yet and the jail stays
+# disabled ("Active jails: none"). Instead, every existing line for a
+# managed key inside the section — from `[section]` to the NEXT section
+# header, blank lines included (stock [sshd] has a blank line right after
+# its header, before the real aligned `port    = ssh` line; ranging to the
+# first blank line missed it and left a duplicate key, which fail2ban's
+# parser hard-rejects: "option 'port' in section 'sshd' already exists") —
+# is deleted, then fresh `key = value` lines are written right after the
+# section header. Idempotent: re-runs delete what the previous run inserted
+# and write it back identically. Usage:
+#   _f2b_set_options file section "key=value" ["key=value" ...]
+_f2b_set_options() {
+  local jail_local="${1:-}" section="${2:-}"
+  [[ -n "$jail_local" && -n "$section" && $# -ge 3 ]] || return 1
+  shift 2
+  local joined="" pair
+  for pair in "$@"; do
+    [[ "$pair" == *=* ]] || return 1
+    joined+="${joined:+$'\n'}$pair"
+  done
+  local tmp
+  tmp=$(mktemp /tmp/f2b_set.XXXXXX) || return 1
+  # tmp + cp (not a direct rewrite): cp into the existing file truncates in
+  # place, preserving mode/ownership; the -s guard means a failed/empty awk
+  # pass can never blank the jail config.
+  sudo -n awk -v section="$section" -v joined="$joined" '
+    BEGIN {
+      n = split(joined, kv, "\n")
+      for (i = 1; i <= n; i++) {
+        eq = index(kv[i], "=")  # first = splits key from value
+        k[i] = substr(kv[i], 1, eq - 1)
+        v[i] = substr(kv[i], eq + 1)
+      }
+      in_sec = 0
+    }
+    /^\[.*\]/ {
+      hdr = $0
+      sub(/^\[/, "", hdr); sub(/\].*$/, "", hdr)
+      if (hdr == section) {
+        in_sec = 1
+        print
+        for (i = 1; i <= n; i++) print k[i] " = " v[i]
+      } else {
+        in_sec = 0
+        print
+      }
+      next
+    }
+    {
+      if (!in_sec) { print; next }
+      line = $0
+      sub(/^[ \t]+/, "", line)
+      managed = 0
+      for (i = 1; i <= n; i++) {
+        if (substr(line, 1, length(k[i])) == k[i] && \
+            substr(line, length(k[i]) + 1) ~ /^[ \t]*=/) { managed = 1; break }
+      }
+      if (!managed) print
+    }
+  ' "$jail_local" > "$tmp" || { rm -f "$tmp"; return 1; }
+  [[ -s "$tmp" ]] || { rm -f "$tmp"; return 1; }
+  sudo -n cp "$tmp" "$jail_local" || { rm -f "$tmp"; return 1; }
+  rm -f "$tmp"
 }
 
 # Configure fail2ban jail.local based on detected firewall
@@ -89,17 +130,12 @@ configure_fail2ban() {
   # pyinotify, gamin, polling, systemd). Arch uses journald by default, so use
   # 'systemd' to read logs from the journal. The firewall-integrating
   # 'action' is what must match the active firewall below.
-  # Deliberately a plain global substitution, not _f2b_set_option: unlike
+  # Deliberately a plain global substitution, not _f2b_set_options: unlike
   # [sshd]/[recidive], [DEFAULT] already has a real `backend = auto` line
-  # to match (confirmed against the real jail.conf), and [DEFAULT] is long
-  # enough to likely contain internal blank lines between comment blocks —
-  # tested this exact scenario and confirmed _f2b_set_option's delete-range
-  # would stop at the first internal blank line, missing the original line
-  # entirely and leaving both present. Under INI parsing the later
-  # (untouched, unwanted) line wins, silently undoing the fix. The
-  # unscoped substitution below also touches other (disabled, irrelevant)
-  # jails' own backend= lines, but since those jails stay disabled that
-  # has no functional effect.
+  # to match (confirmed against the real jail.conf), so substitution works
+  # here in one pass for the whole file. The unscoped substitution also
+  # touches other (disabled, irrelevant) jails' own backend= lines, but
+  # since those jails stay disabled that has no functional effect.
   sudo -n sed -i "s/^backend = .*/backend = systemd/" "$jail_local"
 
   # Configure SSH jail. With backend=systemd, fail2ban matches SSH events
@@ -107,36 +143,26 @@ configure_fail2ban() {
   # + _COMM=sshd) — logpath is not used for journal-backed jails and is
   # deliberately left untouched here.
   #
-  # Every one of these goes through _f2b_set_option, not a plain sed
+  # Every one of these goes through _f2b_set_options, not a plain sed
   # substitution: jail.conf's stock [sshd] section only has `port`,
   # `logpath`, and `backend` explicitly — enabled/filter/maxretry/bantime/
   # findtime are all inherited from [DEFAULT] and simply don't exist as
   # lines to substitute within [sshd]. A substitution-only approach
   # silently does nothing for any of those, which is exactly why `enabled`
   # was never actually being set to true across three real installs.
-  _f2b_set_option "$jail_local" sshd enabled true
-  _f2b_set_option "$jail_local" sshd port ssh
-  _f2b_set_option "$jail_local" sshd filter sshd
-  _f2b_set_option "$jail_local" sshd maxretry 3
-  _f2b_set_option "$jail_local" sshd bantime 1h
-  _f2b_set_option "$jail_local" sshd findtime 10m
+  _f2b_set_options "$jail_local" sshd \
+    "enabled=true" "port=ssh" "filter=sshd" \
+    "maxretry=3" "bantime=1h" "findtime=10m"
 
   # Select the ban action to match the active firewall.
   # - firewalld: use firewallcmd-rich-rules
   # - ufw: use ufw action
   # - default: use the default iptables/nftables action from jail.conf
   if [ "$firewall" = "firewalld" ]; then
-    sudo -n sed -i '/^\[sshd\]/,/^\[/ {
-      /^action[[:space:]]*=/d
-      /^ *blocktype=.*/d
-      /^\[sshd\]/a action = firewallcmd-rich-rules[actiontype=<multiport>]
-      /^\[sshd\]/a          blocktype=drop
-    }' "$jail_local"
+    _f2b_set_options "$jail_local" sshd \
+      "action=firewallcmd-rich-rules[actiontype=<multiport>]" "blocktype=drop"
   elif [ "$firewall" = "ufw" ]; then
-    sudo -n sed -i '/^\[sshd\]/,/^\[/ {
-      /^action[[:space:]]*=/d
-      /^\[sshd\]/a action = ufw
-    }' "$jail_local"
+    _f2b_set_options "$jail_local" sshd "action=ufw"
   fi
 
   # Set default ban parameters globally if not already set
@@ -159,25 +185,16 @@ configure_recidive_jail() {
   # Same issue as the sshd jail above: jail.conf's stock [recidive]
   # section only has logpath/banaction/bantime/findtime explicitly —
   # `enabled` isn't one of them, inherited (as false) from [DEFAULT] — so
-  # this needs _f2b_set_option too, not a substitution that silently does
+  # this needs _f2b_set_options too, not a substitution that silently does
   # nothing when there's no existing line to match.
-  _f2b_set_option "$jail_local" recidive enabled true
-  _f2b_set_option "$jail_local" recidive bantime 1w
-  _f2b_set_option "$jail_local" recidive findtime 1d
-  _f2b_set_option "$jail_local" recidive maxretry 5
+  _f2b_set_options "$jail_local" recidive \
+    "enabled=true" "bantime=1w" "findtime=1d" "maxretry=5"
 
   if [ "$firewall" = "firewalld" ]; then
-    sudo -n sed -i '/^\[recidive\]/,/^\[/ {
-      /^action[[:space:]]*=/d
-      /^ *blocktype=.*/d
-      /^\[recidive\]/a action = firewallcmd-rich-rules[actiontype=<multiport>]
-      /^\[recidive\]/a          blocktype=drop
-    }' "$jail_local"
+    _f2b_set_options "$jail_local" recidive \
+      "action=firewallcmd-rich-rules[actiontype=<multiport>]" "blocktype=drop"
   elif [ "$firewall" = "ufw" ]; then
-    sudo -n sed -i '/^\[recidive\]/,/^\[/ {
-      /^action[[:space:]]*=/d
-      /^\[recidive\]/a action = ufw
-    }' "$jail_local"
+    _f2b_set_options "$jail_local" recidive "action=ufw"
   fi
 
   log_success "fail2ban recidive jail configured (repeat offenders: 1w ban)"

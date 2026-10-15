@@ -37,7 +37,24 @@ enable_trim_timer() {
     log_warning "Could not enable fstrim.timer; leaving existing TRIM configuration unchanged"
     return 1
   fi
-  sudo -n systemctl start fstrim.service >>"$INSTALL_LOG" 2>&1 || true
+  # One immediate trim so the benefit isn't delayed a full week — but only
+  # on flash storage. A full-device trim is heavy I/O (minutes on large
+  # disks) and a no-op on HDDs, so HDD-only systems skip it and let the
+  # weekly timer handle everything.
+  local has_flash=false blk
+  for blk in /sys/block/*; do
+    case "$(basename "$blk")" in loop*|ram*|dm-*|md*|zram*|sr*) continue ;; esac
+    [[ -r "$blk/queue/rotational" ]] || continue
+    if [[ "$(cat "$blk/queue/rotational" 2>/dev/null)" == "0" ]]; then
+      has_flash=true
+      break
+    fi
+  done
+  if [[ "$has_flash" == true ]]; then
+    sudo -n systemctl start fstrim.service >>"$INSTALL_LOG" 2>&1 || true
+  else
+    log_info "No flash storage detected — skipping immediate trim (weekly timer still enabled)"
+  fi
   return 0
 }
 
@@ -87,17 +104,16 @@ setup_maintenance() {
 }
 
 cleanup_helpers() {
-  # yay.sh builds in /tmp/archinstaller-yay-build.* and cleans up after
-  # itself on success. This is a safety net for the one case it can't
-  # handle itself: the build process being killed (crash, power loss)
-  # before its own cleanup trap runs. Glob-scoped to our distinctive
-  # prefix, never a bare /tmp/yay (that path is never actually created —
-  # matching it against reality, not a guess) and never a bare /tmp/tmp.*
-  # (would risk deleting unrelated processes' temp dirs).
+  # yay.sh builds in /var/tmp/archinstaller-yay-build.* (disk-backed, not
+  # RAM-backed /tmp) and cleans up after itself on success. This is a
+  # safety net for the one case it can't handle itself: the build process
+  # being killed (crash, power loss) before its own cleanup trap runs.
+  # Glob-scoped to our distinctive prefix, never a bare /var/tmp/* (would
+  # risk deleting unrelated processes' temp dirs).
   # shellcheck disable=SC2016
   # single quotes intentional: expression runs in inner bash -c, not here
   run_step "Cleaning leftover yay build directories" bash -c \
-    'shopt -s nullglob; dirs=(/tmp/archinstaller-yay-build.*); [ ${#dirs[@]} -eq 0 ] || sudo -n rm -rf "${dirs[@]}"'
+    'shopt -s nullglob; dirs=(/var/tmp/archinstaller-yay-build.*); [ ${#dirs[@]} -eq 0 ] || sudo -n rm -rf "${dirs[@]}"'
 
 }
 

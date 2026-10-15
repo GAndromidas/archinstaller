@@ -58,6 +58,12 @@ else
   fail "lib contract unit tests"
 fi
 
+if bash "$ROOT_DIR/tests/unit_perf.sh"; then
+  pass "perf helper unit tests"
+else
+  fail "perf helper unit tests"
+fi
+
 if command -v shellcheck &>/dev/null; then
   # Error severity only: warning-level findings predate this harness.
   if shellcheck --severity=error -x "$ROOT_DIR/install.sh" "$ROOT_DIR"/scripts/common.sh \

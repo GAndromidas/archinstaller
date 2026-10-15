@@ -2120,16 +2120,21 @@ configure_limine_snapper() {
     want_snapper=false
   fi
 
-  # Install required packages
+  # Install required packages. Targeted -S (never a second full -Syu:
+  # step 1 already upgraded the system, so re-upgrading here just downloads
+  # everything twice). If the DB went stale (e.g. resumed days later), the
+  # targeted install fails and only then do we fall back to a full sync.
   step "Installing Limine and Snapper packages"
   local repo_pkgs=(limine efibootmgr)
   if [[ "$want_snapper" == true ]]; then
     repo_pkgs+=(btrfs-progs snapper)
   fi
-  # Full -Syu (never bare -Sy: partial upgrades break Arch).
-  if ! sudo -n pacman -Syu --needed --noconfirm "${repo_pkgs[@]}" >>"$INSTALL_LOG" 2>&1; then
-    log_error "Failed to install required packages: ${repo_pkgs[*]}"
-    return 1
+  if ! sudo -n pacman -S --needed --noconfirm "${repo_pkgs[@]}" >>"$INSTALL_LOG" 2>&1; then
+    log_warning "Targeted install failed (stale package database?) — retrying with a full sync..."
+    if ! sudo -n pacman -Syu --needed --noconfirm "${repo_pkgs[@]}" >>"$INSTALL_LOG" 2>&1; then
+      log_error "Failed to install required packages: ${repo_pkgs[*]}"
+      return 1
+    fi
   fi
 
   # AUR snapshot integration (non-fatal if helper/packages unavailable)

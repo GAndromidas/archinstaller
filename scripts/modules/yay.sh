@@ -38,13 +38,15 @@ install_yay() {
     return 1
   fi
 
-  # Create temporary directory for building. Distinctive prefix (not a bare
-  # mktemp default) so maintenance.sh can safely glob-match and clean up any
+  # Create temporary directory for building on disk-backed /var/tmp, NOT
+  # /tmp: /tmp is tmpfs (RAM-backed), so a large yay/rust build on a 2GB
+  # machine can exhaust RAM and OOM. Distinctive prefix (not a bare mktemp
+  # default) so maintenance.sh can safely glob-match and clean up any
   # leftovers if the build is ever interrupted before the trap below runs
   # (e.g. killed process, power loss) — without risking touching unrelated
-  # /tmp/tmp.* directories from other processes.
+  # /var/tmp directories from other processes.
   local temp_dir
-  temp_dir=$(mktemp -d /tmp/archinstaller-yay-build.XXXXXXXX) || { log_error "Failed to create temporary directory for yay build"; return 1; }
+  temp_dir=$(mktemp -d /var/tmp/archinstaller-yay-build.XXXXXXXX) || { log_error "Failed to create temporary directory for yay build"; return 1; }
 
   local orig_dir; orig_dir=$(pwd)
   local cleanup_tempdir

@@ -241,15 +241,21 @@ main() {
 	# LACT is AMDGPU-only — drop it on NVIDIA/Intel/VM systems
 	filter_gpu_specific_packages
 
-	# Flatpak shares no lock with pacman/yay, so it runs in parallel with
-	# the pacman+AUR installs instead of waiting behind them. The background
-	# job can't touch parent arrays — its exit code travels via a file and
-	# counts merge after wait. All output stays in the install log.
+	# Flatpak shares no lock with pacman/yay, so on machines with >=4GB RAM
+	# it runs in parallel with the pacman+AUR installs instead of waiting
+	# behind them (bounded wait: a dead mirror fails the step, it never
+	# hangs the installer). Below 4GB the triple contention thrashes —
+	# those systems install sequentially. The background job can't touch
+	# parent arrays — its exit code travels via a file and counts merge
+	# after wait. All output stays in the install log.
 	# Falls back to the sequential path when mktemp fails, flatpak is
-	# missing, or the list is empty (those cases keep their skip messages).
+	# missing, RAM is low, or the list is empty (those cases keep their
+	# skip messages).
 	local _flatpak_rc_file="" _flatpak_pid=""
-	if command -v flatpak &>/dev/null && [[ ${#flatpak_gaming_programs[@]} -gt 0 ]]; then
+	if command -v flatpak &>/dev/null && [[ ${#flatpak_gaming_programs[@]} -gt 0 ]] && flatpak_parallel_ok; then
 		_flatpak_rc_file=$(mktemp /tmp/archinstaller_gaming_flatpak.XXXXXX 2>/dev/null || echo "")
+	elif command -v flatpak &>/dev/null && [[ ${#flatpak_gaming_programs[@]} -gt 0 ]]; then
+		ui_info "Low-memory system (<4GB RAM) — gaming Flatpaks install sequentially to avoid overload"
 	fi
 	if [[ -n "$_flatpak_rc_file" ]]; then
 		( flatpak_install_batch "${flatpak_gaming_programs[@]}" >>"$INSTALL_LOG" 2>&1; echo "$?" > "$_flatpak_rc_file" ) &
@@ -258,9 +264,12 @@ main() {
 	install_pacman_packages
 	install_aur_packages
 	if [[ -n "$_flatpak_pid" ]]; then
-		wait "$_flatpak_pid"
 		local _flatpak_rc=1
-		_flatpak_rc=$(cat "$_flatpak_rc_file" 2>/dev/null || echo 1)
+		if wait_with_timeout "$_flatpak_pid" "${FLATPAK_TIMEOUT_S:-7200}"; then
+			_flatpak_rc=$(cat "$_flatpak_rc_file" 2>/dev/null || echo 1)
+		else
+			log_warning "Gaming Flatpak background install timed out after ${FLATPAK_TIMEOUT_S:-7200}s — continuing without it (it keeps running in the background; see $INSTALL_LOG)"
+		fi
 		rm -f "$_flatpak_rc_file"
 		if [[ "$_flatpak_rc" -eq 0 ]]; then
 			GAMING_INSTALLED+=("${flatpak_gaming_programs[@]}")

@@ -100,6 +100,12 @@ detect_bootloader() {
 
     local bootloader="unknown"
 
+    # One efibootmgr read per detection pass: NVRAM doesn't change mid-run,
+    # so reuse it for the limine/rEFInd probes instead of forking sudo +
+    # efibootmgr twice.
+    local efi_bootmgr_out=""
+    efi_bootmgr_out=$(sudo -n efibootmgr 2>/dev/null || true)
+
     # Tier 1: Active bootloader detection (based on actual directories/configs)
     # Use sudo for /boot checks because /boot can have restricted permissions (e.g. 700 with UKI)
     # Limine is checked first: limine.conf is distinctive and would otherwise
@@ -122,7 +128,7 @@ detect_bootloader() {
        sudo -n test -f /boot/efi/limine.conf 2>/dev/null || sudo -n test -f /efi/limine.conf 2>/dev/null || \
        sudo -n test -f /limine/limine.conf 2>/dev/null || sudo -n test -f /limine.conf 2>/dev/null || \
        sudo -n grep -q "^Target = limine" /etc/pacman.d/hooks/99-limine.hook 2>/dev/null || \
-       sudo -n efibootmgr 2>/dev/null | grep -qi "limine" || \
+       echo "$efi_bootmgr_out" | grep -qi "limine" || \
        command -v limine-snapper-sync &>/dev/null; then
         bootloader="limine"
     elif sudo -n test -d /boot/grub 2>/dev/null || sudo -n test -d /boot/grub2 2>/dev/null || \
@@ -133,7 +139,7 @@ detect_bootloader() {
        sudo -n test -f /boot/efi/EFI/refind/refind_x64.efi 2>/dev/null || \
        sudo -n test -f /efi/EFI/refind/refind_x64.efi 2>/dev/null || \
        sudo -n test -f /boot/EFI/refind/refind.conf 2>/dev/null || \
-       sudo -n efibootmgr 2>/dev/null | grep -qi "rEFInd"; then
+       echo "$efi_bootmgr_out" | grep -qi "rEFInd"; then
         bootloader="refind"
     # Check for active systemd-boot (loader entries + loader.conf)
     elif sudo -n test -d /boot/loader/entries 2>/dev/null || sudo -n test -d /efi/loader/entries 2>/dev/null || \

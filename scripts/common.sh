@@ -154,8 +154,8 @@ check_system_compatibility() {
         issues+=("Insufficient disk space (need 2GB, have $((available_space / 1024 / 1024))GB)")
     fi
     
-    # Check internet connection (robust: try DNS + IP, hint on failure)
-    if ! ping -c 1 -W 5 archlinux.org &>/dev/null && ! ping -c 1 -W 5 8.8.8.8 &>/dev/null && ! getent hosts archlinux.org &>/dev/null; then
+    # Check internet connection (parallel pings + resolver; see check_internet)
+    if ! check_internet; then
         issues+=("No internet connection (check cable/Wi-Fi and DNS - try: ping 8.8.8.8)")
     fi
     
@@ -1214,3 +1214,60 @@ install_flatpak_quietly() {
   fi
   install_package_generic "flatpak" "$@"
 }
+
+# SECTION 13: PERFORMANCE HELPERS (single source for install modules)
+
+# Internet check with the same three signals as before (DNS name, raw IP,
+# local resolver), but the two pings run concurrently so the worst case is
+# ~5s instead of ~10s. Same pass/fail semantics, just faster.
+# Returns: 0 when any signal succeeds, 1 otherwise.
+if ! declare -f check_internet >/dev/null 2>&1; then
+check_internet() {
+  local ping1=1 ping2=1 p1="" p2=""
+  ping -c 1 -W 5 archlinux.org &>/dev/null & p1=$!
+  ping -c 1 -W 5 8.8.8.8 &>/dev/null & p2=$!
+  wait "$p1" 2>/dev/null; ping1=$?
+  wait "$p2" 2>/dev/null; ping2=$?
+  if [[ "$ping1" -eq 0 || "$ping2" -eq 0 ]]; then
+    return 0
+  fi
+  getent hosts archlinux.org &>/dev/null
+}
+fi
+
+# True when the machine has enough RAM to run Flatpak in parallel with
+# pacman/yay. Below ~4GB the three-way contention (disk, network, memory)
+# thrashes and risks OOM kills; those systems install Flatpak sequentially.
+# Unknown/unreadable RAM preserves the historical parallel behavior.
+if ! declare -f flatpak_parallel_ok >/dev/null 2>&1; then
+flatpak_parallel_ok() {
+  local mem_kb
+  mem_kb=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo "")
+  if [[ ! "$mem_kb" =~ ^[0-9]+$ ]] || (( mem_kb == 0 )); then
+    return 0
+  fi
+  (( mem_kb >= 4194304 ))
+}
+fi
+
+# Bounded wait for a background job: returns 0 when the job finished in
+# time (callers read its real exit code from their own channel, e.g. an rc
+# file), 124 on timeout (job is left running; the caller records a failure
+# and moves on instead of hanging forever). Default 2h suits multi-GB
+# Flatpak runtimes on slow links; override with FLATPAK_TIMEOUT_S.
+if ! declare -f wait_with_timeout >/dev/null 2>&1; then
+wait_with_timeout() {
+  local pid="${1:-}" timeout_s="${2:-7200}" elapsed=0
+  [[ -n "$pid" ]] || return 1
+  [[ "$timeout_s" =~ ^[0-9]+$ ]] || timeout_s=7200
+  while kill -0 "$pid" 2>/dev/null; do
+    if (( elapsed >= timeout_s )); then
+      return 124
+    fi
+    sleep 5
+    elapsed=$((elapsed + 5))
+  done
+  wait "$pid" 2>/dev/null || true
+  return 0
+}
+fi

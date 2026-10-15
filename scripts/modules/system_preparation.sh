@@ -29,10 +29,9 @@ check_prerequisites() {
     return 1
   fi
 
-  # Check internet connection (robust: DNS + IP + getent, same as
-  # check_system_compatibility — single-ping checks fail behind captive
-  # portals / IPv6-only / flaky DNS and are not worth failing the run over)
-  if ! ping -c 1 -W 5 archlinux.org &>/dev/null && ! ping -c 1 -W 5 8.8.8.8 &>/dev/null && ! getent hosts archlinux.org &>/dev/null; then
+  # Check internet connection (parallel pings + resolver; see check_internet
+  # in common.sh — same signals, worst case ~5s instead of ~10s)
+  if ! check_internet; then
     log_error "No internet connection detected. Please check your network (cable/Wi-Fi and DNS - try: ping 8.8.8.8)."
     return 1
   fi

@@ -190,6 +190,10 @@ get_sshd_port() {  local port=""
 configure_firewalld() {
   local ssh_port
   ssh_port=$(get_sshd_port)
+  # Post-lockdown rule changes share one reload at the end (each
+  # firewall-cmd --reload costs ~seconds). The SSH reload above stays in
+  # place: it must apply before the default zone drops to `drop`.
+  local fw_needs_reload=false
   # Start and enable firewalld
   sudo -n systemctl start firewalld
   sudo -n systemctl enable firewalld
@@ -213,10 +217,10 @@ configure_firewalld() {
 
   # Check if KDE Connect is installed
   if pacman -Q kdeconnect &>/dev/null; then
-    # Allow specific ports for KDE Connect
+    # Allow specific ports for KDE Connect (reload shared at end of function)
     sudo -n firewall-cmd --add-port=1714-1764/udp --permanent
     sudo -n firewall-cmd --add-port=1714-1764/tcp --permanent
-    sudo -n firewall-cmd --reload
+    fw_needs_reload=true
     log_success "KDE Connect ports allowed through Firewalld."
   else
     log_warning "KDE Connect is not installed. Skipping KDE Connect service configuration."
@@ -227,10 +231,14 @@ configure_firewalld() {
     if ! sudo -n firewall-cmd --list-ports 2>/dev/null | grep -q "8000/tcp"; then
       sudo -n firewall-cmd --add-port=8000/tcp --permanent >>"$INSTALL_LOG" 2>&1 || true
       sudo -n firewall-cmd --add-port=9443/tcp --permanent >>"$INSTALL_LOG" 2>&1 || true
-      sudo -n firewall-cmd --reload >>"$INSTALL_LOG" 2>&1 || true
+      fw_needs_reload=true
       log_success "Opened ports 8000,9443/tcp in firewalld for Portainer (deferred)."
     fi
     rm -f /var/tmp/archinstaller_portainer_ports_pending 2>/dev/null || true
+  fi
+
+  if [[ "$fw_needs_reload" == true ]]; then
+    sudo -n firewall-cmd --reload >>"$INSTALL_LOG" 2>&1 || true
   fi
 }
 
@@ -794,9 +802,12 @@ verify_gpu_driver() {
   # Check which driver is in use (stderr suppressed: libkmodhelper errors
   # like "Unable to load libkmod resources" are harmless in VMs/containers
   # but clutter the log when lspci runs twice below)
-  if lspci -k 2>/dev/null | grep -A 3 -iE 'vga|3d|display' | grep -iq 'Kernel driver in use'; then
+  # Single lspci -k capture shared by both checks below (was two invocations).
+  local lspci_k
+  lspci_k=$(lspci -k 2>/dev/null || true)
+  if echo "$lspci_k" | grep -A 3 -iE 'vga|3d|display' | grep -iq 'Kernel driver in use'; then
     log_info "GPU driver status:"
-    lspci -k 2>/dev/null | grep -A 3 -iE 'vga|3d|display' | grep -E 'VGA|3D|Display|Kernel driver'
+    echo "$lspci_k" | grep -A 3 -iE 'vga|3d|display' | grep -E 'VGA|3D|Display|Kernel driver'
     log_success "GPU driver is loaded and in use"
   else
     log_warning "Could not verify GPU driver status"

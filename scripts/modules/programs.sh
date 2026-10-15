@@ -130,13 +130,21 @@ detect_normalized_de() {
 }
 
 handle_de_packages() {
+	# Optional pre-detected DE (main() detects once and shares it with
+	# handle_flatpak_packages, so the 6× `pacman -Q` probes below run once
+	# per install instead of twice). Falls back to detecting when empty.
+	local _pre_de="${1:-}"
 	if [[ "$INSTALL_MODE" == "server" ]]; then
 		ui_info "Server mode selected, skipping desktop environment packages."
 		return
 	fi
 
 	local de
-	de=$(detect_normalized_de)
+	if [[ -n "$_pre_de" ]]; then
+		de="$_pre_de"
+	else
+		de=$(detect_normalized_de)
+	fi
 
 	case "$de" in
 	kde)
@@ -168,12 +176,18 @@ handle_de_packages() {
 }
 
 handle_flatpak_packages() {
+	# Optional pre-detected DE (see handle_de_packages).
+	local _pre_de="${1:-}"
 	if [[ "$INSTALL_MODE" == "server" ]]; then
 		return
 	fi
 
 	local de
-	de=$(detect_normalized_de)
+	if [[ -n "$_pre_de" ]]; then
+		de="$_pre_de"
+	else
+		de=$(detect_normalized_de)
+	fi
 	[[ -z "$de" ]] && de="generic"
 
 	local de_flatpaks=()
@@ -387,25 +401,41 @@ configure_fastfetch() {
 main() {
 	load_package_lists_from_yaml
 	determine_package_lists
-	handle_de_packages
-	handle_flatpak_packages
+	# Detect the DE once and share it: each detection probes installed
+	# packages, so sharing halves that cost.
+	local _de
+	_de=$(detect_normalized_de)
+	handle_de_packages "$_de"
+	handle_flatpak_packages "$_de"
 	remove_pacman_packages
-	# Flatpak shares no lock with pacman/yay, so it runs in parallel with
-	# the pacman+AUR installs instead of waiting behind them. The background
-	# job can't touch parent arrays — its exit code travels via a file and
-	# counts are merged after wait. All output stays in the install log.
-	local _flatpak_rc_file="" _flatpak_pid=""
+	# Flatpak shares no lock with pacman/yay, so on machines with >=4GB RAM
+	# it runs in parallel with the pacman+AUR installs instead of waiting
+	# behind them. Below that, triple contention (disk/network/memory)
+	# thrashes and risks OOM kills — those systems install sequentially.
+	# The background job can't touch parent arrays — its exit code travels
+	# via a file and counts are merged after a bounded wait (a dead mirror
+	# must fail the step, not hang the installer forever). All output stays
+	# in the install log.
+	local _flatpak_rc_file="" _flatpak_pid="" _flatpak_bg=false
 	if command -v flatpak &>/dev/null && [[ ${#flatpak_programs[@]} -gt 0 ]]; then
-		_flatpak_rc_file=$(mktemp /tmp/archinstaller_flatpak.XXXXXX)
-		( flatpak_install_batch "${flatpak_programs[@]}" >>"$INSTALL_LOG" 2>&1; echo "$?" > "$_flatpak_rc_file" ) &
-		_flatpak_pid=$!
+		if flatpak_parallel_ok; then
+			_flatpak_rc_file=$(mktemp /tmp/archinstaller_flatpak.XXXXXX)
+			( flatpak_install_batch "${flatpak_programs[@]}" >>"$INSTALL_LOG" 2>&1; echo "$?" > "$_flatpak_rc_file" ) &
+			_flatpak_pid=$!
+			_flatpak_bg=true
+		else
+			ui_info "Low-memory system (<4GB RAM) — Flatpak installs sequentially after pacman/AUR to avoid overload"
+		fi
 	fi
 	install_pacman_packages
 	install_aur_packages
-	if [[ -n "$_flatpak_pid" ]]; then
-		wait "$_flatpak_pid"
+	if [[ "$_flatpak_bg" == true ]]; then
 		local _flatpak_rc=1
-		_flatpak_rc=$(cat "$_flatpak_rc_file" 2>/dev/null || echo 1)
+		if wait_with_timeout "$_flatpak_pid" "${FLATPAK_TIMEOUT_S:-7200}"; then
+			_flatpak_rc=$(cat "$_flatpak_rc_file" 2>/dev/null || echo 1)
+		else
+			log_warning "Flatpak background install timed out after ${FLATPAK_TIMEOUT_S:-7200}s — continuing without it (it keeps running in the background; see $INSTALL_LOG)"
+		fi
 		rm -f "$_flatpak_rc_file"
 		if [[ "$_flatpak_rc" -eq 0 ]]; then
 			PROGRAMS_INSTALLED+=("${flatpak_programs[@]}")

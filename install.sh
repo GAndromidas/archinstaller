@@ -226,11 +226,11 @@ check_system_requirements() {
     hardware_issues+=("Legacy BIOS mode detected - some features may not work optimally")
   fi
 
-  if lspci | grep -qi vga; then
-    # Report EVERY GPU (not just head -1): hybrids (AMD iGPU + NVIDIA dGPU)
-    # are common and head -1 hid the second vendor.
-    local gpu_lines
-    gpu_lines=$(lspci | grep -iE 'vga|3d controller|display controller' || true)
+  # Capture lspci once: the old code ran it twice (probe + list), and the
+  # probe only matched 'vga', so a 3D-controller-only box skipped reporting.
+  local gpu_lines
+  gpu_lines=$(lspci 2>/dev/null | grep -iE 'vga|3d controller|display controller' || true)
+  if [[ -n "$gpu_lines" ]]; then
     log_to_file "GPU(s) detected:"
     while IFS= read -r gpu_info; do
       [[ -z "$gpu_info" ]] && continue

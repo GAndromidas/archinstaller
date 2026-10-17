@@ -254,13 +254,16 @@ ui_header() {
 
 # Info message (white)
 # Usage: ui_info "Message"
+# Colored on a TTY, plain when stdout is piped/dashboard-redirected (the log
+# file must never contain ANSI escapes), and never a `gum style` fork per
+# line — gum is reserved for truly interactive widgets (menus/prompts).
 ui_info() {
     local message="${1:-}"
     [[ -n "$message" ]] || return 0
-    if supports_gum; then
-        gum style --foreground "$GUM_TEXT" "$message"
-    else
+    if [[ -t 1 ]]; then
         echo -e "${THEME_TEXT}$message${RESET}"
+    else
+        printf '%s\n' "$message"
     fi
 }
 
@@ -269,10 +272,10 @@ ui_info() {
 ui_success() {
     local message="${1:-}"
     [[ -n "$message" ]] || return 0
-    if supports_gum; then
-        gum style --foreground "$GUM_SUCCESS" "✓ $message"
-    else
+    if [[ -t 1 ]]; then
         echo -e "${THEME_SUCCESS}✓ $message${RESET}"
+    else
+        printf '%s\n' "✓ $message"
     fi
 }
 
@@ -281,10 +284,10 @@ ui_success() {
 ui_warn() {
     local message="${1:-}"
     [[ -n "$message" ]] || return 0
-    if supports_gum; then
-        gum style --foreground "$GUM_WARN" "⚠ $message"
-    else
+    if [[ -t 1 ]]; then
         echo -e "${THEME_WARN}⚠ $message${RESET}"
+    else
+        printf '%s\n' "⚠ $message"
     fi
 }
 
@@ -293,10 +296,10 @@ ui_warn() {
 ui_error() {
     local message="${1:-}"
     [[ -n "$message" ]] || return 0
-    if supports_gum; then
-        gum style --foreground "$GUM_ERROR" "✗ $message"
-    else
+    if [[ -t 1 ]]; then
         echo -e "${THEME_ERROR}✗ $message${RESET}"
+    else
+        printf '%s\n' "✗ $message"
     fi
 }
 
@@ -351,14 +354,19 @@ simple_banner() {
 
 # Step indicator
 # Usage: step "Step description"
+# Also repaints the dashboard footer row (TTY dashboard only, /dev/tty) so
+# the current sub-action stays visible while step output goes to the log.
 if ! declare -f step >/dev/null 2>&1; then
 step() {
     local message="${1:-}"
     [[ -n "$message" ]] || return 0
-    if supports_gum; then
-        gum style --foreground "$GUM_PRIMARY" "▶ $message"
-    else
+    declare -f dashboard_set_footer_action &>/dev/null && dashboard_set_footer_action "$message"
+    # Plain theme echo instead of a `gum style` fork per call — same glyph,
+    # same color family, no process spawn in every message.
+    if [[ -t 1 ]]; then
         echo -e "${THEME_SECONDARY}▶ $message${RESET}"
+    else
+        printf '%s\n' "▶ $message"
     fi
 }
 fi

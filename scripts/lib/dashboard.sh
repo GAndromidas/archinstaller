@@ -32,6 +32,7 @@ DASHBOARD_STEP_SEC=-1
 DASHBOARD_FRAME_END=0
 DASHBOARD_ROW_OFFSET=0
 DASHBOARD_PLAIN=false
+DASHBOARD_FOOTER_ROW=0
 
 # Non-TTY (piped/CI) fallback: tput cup/el emits garbage when stdout is not
 # a terminal. In plain mode every dashboard_* call degrades to simple
@@ -103,6 +104,14 @@ dashboard_init() {
 
     # Bottom separator
     echo -e "${THEME_BORDER}  ├$(printf '─%.0s' $(seq 1 $w))┤${RESET}"
+    ((row++))
+
+    # Action footer row: shows the current sub-step (updated by step() via
+    # dashboard_set_footer_action when module code calls step() from inside
+    # dashboard_run's log-redirected subshell). Blank until the first
+    # sub-step starts.
+    echo -e "${THEME_BORDER}  │${RESET}$(printf '%*s' $w '')${THEME_BORDER}│${RESET}"
+    DASHBOARD_FOOTER_ROW=$row
     ((row++))
 
     # Info line
@@ -191,6 +200,44 @@ dashboard_step() {
     tput cup $((DASHBOARD_ROW_OFFSET + DASHBOARD_FRAME_END + 1)) 0
 }
 
+# Draw into the frame's footer row on /dev/tty. Called by step() — including
+# from inside module subshells, where stdout is redirected to the log. This
+# is what keeps the screen from looking frozen during a multi-minute step:
+# every sub-action ("Installing foo...", ...) repaints one fixed row, so no
+# scrolling and never any fragile full-frame redraw.
+dashboard_set_footer_action() {
+    [[ "${DASHBOARD_PLAIN:-false}" == false && "${DASHBOARD_FOOTER_ROW:-0}" -ge 1 ]] || return 0
+    local msg="${1:-}"
+    [[ -n "$msg" ]] || msg="Working..."
+    local elapsed=0
+    if [[ "${DASHBOARD_STEP_SEC:--1}" -ge 0 ]]; then
+        elapsed=$(( $(mono_now) - DASHBOARD_STEP_SEC ))
+    fi
+    (( elapsed < 0 )) && elapsed=0
+    local w=$DASHBOARD_INNER_W
+    local max=$(( w - 12 ))
+    (( ${#msg} > max )) && msg="${msg:0:max-1}…"
+    local line="● $msg · ${elapsed}s"
+    local pad=$(( w - ${#line} - 2 ))
+    (( pad < 1 )) && pad=1
+    {
+        tput cup $((DASHBOARD_ROW_OFFSET + DASHBOARD_FOOTER_ROW)) 0 2>/dev/null
+        tput el 2>/dev/null
+        printf "${THEME_BORDER}  │${RESET} ${THEME_MUTED}%s${RESET}%*s ${THEME_BORDER}│${RESET}" \
+            "$line" "$pad" ""
+    } > /dev/tty 2>/dev/null
+}
+
+# Blank the footer row when a step completes (status lives on the step row).
+dashboard_clear_footer() {
+    [[ "${DASHBOARD_PLAIN:-false}" == false && "${DASHBOARD_FOOTER_ROW:-0}" -ge 1 ]] || return 0
+    {
+        tput cup $((DASHBOARD_ROW_OFFSET + DASHBOARD_FOOTER_ROW)) 0 2>/dev/null
+        tput el 2>/dev/null
+        printf "${THEME_BORDER}  │${RESET}$(printf '%*s' "$DASHBOARD_INNER_W" '')${THEME_BORDER}│${RESET}"
+    } > /dev/tty 2>/dev/null
+}
+
 dashboard_run() {
     local script_path="${1:-}"
     [[ -n "$script_path" ]] || { log_error "dashboard_run: missing script path"; return 1; }
@@ -202,8 +249,12 @@ dashboard_run() {
     fi
 
     # Run in a subshell so exit/return in the step script doesn't kill the installer
-    # stdout/stderr go to the log; interactive prompts (gum, read) use /dev/tty directly
+    # stdout/stderr go to the log; interactive prompts (gum, read) use /dev/tty directly.
+    # DASH_STDOUT_IS_LOG tells log_* helpers stdout already IS the log file,
+    # so echoing there would duplicate every line in the log.
     (
+      DASH_STDOUT_IS_LOG=true
+      export DASH_STDOUT_IS_LOG
       source "$script_path"
     ) >> "$INSTALL_LOG" 2>&1
     local ret=$?
@@ -242,6 +293,7 @@ dashboard_ok() {
     if declare -f log_to_file >/dev/null 2>&1; then
       log_to_file "STEP_TIMING: Step $num ($name) completed in ${elapsed}s"
     fi
+    dashboard_clear_footer
 }
 
 dashboard_fail() {
@@ -276,6 +328,7 @@ dashboard_fail() {
     if declare -f log_to_file >/dev/null 2>&1; then
       log_to_file "STEP_TIMING: Step $num ($name) failed after ${elapsed}s"
     fi
+    dashboard_clear_footer
 }
 
 dashboard_skip() {
@@ -309,6 +362,7 @@ dashboard_skip() {
     if declare -f log_to_file >/dev/null 2>&1; then
       log_to_file "STEP_TIMING: Step $num (${DASHBOARD_STEP_NAMES[$num]:-unknown}) skipped — $msg"
     fi
+    dashboard_clear_footer
 }
 
 dashboard_warn() {
@@ -337,6 +391,7 @@ dashboard_warn() {
         "$num" "$name" "$time_str"
 
     tput cup $((DASHBOARD_ROW_OFFSET + DASHBOARD_FRAME_END + 1)) 0
+    dashboard_clear_footer
 }
 
 dashboard_finish() {

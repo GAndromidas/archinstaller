@@ -108,12 +108,29 @@ log_to_file() {
 }
 fi
 
+# stdout discipline for every log_* line (see log_info & friends):
+#   - colored echo only when stdout is a real TTY;
+#   - plain text when stdout is piped/redirected (INSTALL_LOG must never
+#     contain ANSI escapes);
+#   - NO stdout echo at all when stdout already IS the log file
+#     (dashboard_run redirects module stdout to INSTALL_LOG, so echoing
+#     there duplicates every line; log_to_file still writes the
+#     timestamped one, exactly as before).
+__log_echo() {
+    [[ "${DASH_STDOUT_IS_LOG:-false}" != true ]] || return 0
+    if [[ -t 1 ]]; then
+        printf '%b\n' "$1"
+    else
+        printf '%s\n' "$2"
+    fi
+}
+
 if ! declare -f log_info >/dev/null 2>&1; then
 log_info() {
     local message="${1:-}"
     [[ -n "$message" ]] || return 0
     local detail="${2:-}"
-    echo -e "${THEME_TEXT}$message${RESET}"
+    __log_echo "${THEME_TEXT}$message${RESET}" "$message"
     log_to_file "INFO: $message"
     if [ -n "$detail" ]; then
         log_to_file "  DETAIL: $detail"
@@ -126,10 +143,10 @@ log_success() {
     local message="${1:-}"
     [[ -n "$message" ]] || return 0
     local detail="${2:-}"
-    echo -e "${THEME_SUCCESS}$message${RESET}"
+    __log_echo "${THEME_SUCCESS}$message${RESET}" "$message"
     log_to_file "SUCCESS: $message"
     if [ -n "$detail" ]; then
-        echo -e "${THEME_MUTED}  Details: $detail${RESET}"
+        __log_echo "${THEME_MUTED}  Details: $detail${RESET}" "  Details: $detail"
         log_to_file "  DETAIL: $detail"
     fi
 }
@@ -140,10 +157,10 @@ log_warning() {
     local message="${1:-}"
     [[ -n "$message" ]] || return 0
     local detail="${2:-}"
-    echo -e "${THEME_WARN}⚠ $message${RESET}"
+    __log_echo "${THEME_WARN}⚠ $message${RESET}" "⚠ $message"
     log_to_file "WARNING: $message"
     if [ -n "$detail" ]; then
-        echo -e "${THEME_MUTED}  Note: $detail${RESET}"
+        __log_echo "${THEME_MUTED}  Note: $detail${RESET}" "  Note: $detail"
         log_to_file "  DETAIL: $detail"
     fi
 }
@@ -154,9 +171,9 @@ log_error() {
     local message="${1:-}"
     [[ -n "$message" ]] || return 0
     local hint="${2:-}"
-    echo -e "${THEME_ERROR}✗ $message${RESET}"
+    __log_echo "${THEME_ERROR}✗ $message${RESET}" "✗ $message"
     if [ -n "$hint" ]; then
-        echo -e "${THEME_MUTED}  Tip: $hint${RESET}"
+        __log_echo "${THEME_MUTED}  Tip: $hint${RESET}" "  Tip: $hint"
     fi
     # NOTE: no ERRORS+= here. Step scripts run in dashboard_run subshells,
     # so a parent-shell array would never see them; STATE_FILE FAILED: lines
@@ -173,7 +190,7 @@ log_debug() {
     [[ -n "$message" ]] || return 0
     local detail="${2:-}"
     if [ "${VERBOSE:-false}" = true ]; then
-        echo -e "${THEME_MUTED}[DEBUG] $message${RESET}"
+        __log_echo "${THEME_MUTED}[DEBUG] $message${RESET}" "[DEBUG] $message"
         log_to_file "DEBUG: $message"
         if [ -n "$detail" ]; then
             log_to_file "  DETAIL: $detail"

@@ -154,7 +154,7 @@ cleanup_script_backups() {
 
   # Kernel cmdline / GRUB / limine backups (privileged, 700 /boot)
   local conf
-  for conf in /etc/kernel/cmdline.backup.* /etc/default/grub.backup.* /etc/kernel/cmdline.backup.* ; do
+  for conf in /etc/kernel/cmdline.backup.* /etc/default/grub.backup.* ; do
     for f in $conf; do
       [ -e "$f" ] || continue
       sudo -n rm -f "$f" 2>/dev/null || rm -f "$f" 2>/dev/null || true

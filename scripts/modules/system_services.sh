@@ -326,9 +326,13 @@ configure_user_groups() {
   # not enough there, and logind ACLs don't cover every consumer.
   local groups=("wheel" "video" "render" "storage" "optical" "scanner" "lp" "rfkill")
 
+  # Resolve the user's groups once instead of one `groups` call per group.
+  local user_groups
+  user_groups=$(groups "$USER" 2>/dev/null || true)
+
   for group in "${groups[@]}"; do
     if getent group "$group" >/dev/null; then
-      if ! groups "$USER" | grep -q "\b$group\b"; then
+      if ! grep -qw "$group" <<<"$user_groups"; then
         sudo -n usermod -aG "$group" "$USER"
         log_success "Added $USER to $group group"
       fi
@@ -1588,7 +1592,7 @@ check_battery_status() {
       log_info "Battery Status: $status"
       log_info "Battery Capacity: ${capacity}%"
 
-      if [ "$status" = "Discharging" ] && [ "$capacity" -lt 30 ]; then
+      if [[ "$capacity" =~ ^[0-9]+$ ]] && [ "$status" = "Discharging" ] && [ "$capacity" -lt 30 ]; then
         log_warning "Battery level is low (${capacity}%)"
         log_warning "Consider plugging in AC adapter for installation"
         log_info "Installation may take 20-30 minutes"

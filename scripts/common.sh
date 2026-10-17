@@ -763,22 +763,14 @@ is_vm() {
 
 # Function to check if system is headless (no display manager or X server)
 is_headless_system() {
-  # Check for display manager
-  if systemctl is-active --quiet gdm 2>/dev/null || \
-     systemctl is-active --quiet sddm 2>/dev/null || \
-     systemctl is-active --quiet lightdm 2>/dev/null || \
-     systemctl is-active --quiet lxdm 2>/dev/null || \
-     systemctl is-active --quiet slim 2>/dev/null; then
+  # Check for display manager — one systemctl query for all DMs instead of
+  # five sequential probes (each prints its unit status; look for "active").
+  if systemctl is-active gdm sddm lightdm lxdm slim 2>/dev/null | grep -q '^active$'; then
     return 1  # Not headless
   fi
 
-  # Check for X server
-  if pgrep -x X >/dev/null 2>&1 || pgrep -x Xorg >/dev/null 2>&1; then
-    return 1  # Not headless
-  fi
-
-  # Check for Wayland
-  if pgrep -x weston >/dev/null 2>&1 || pgrep -x gnome-shell >/dev/null 2>&1; then
+  # Check for X server or Wayland compositor (one pgrep for all four).
+  if pgrep -x 'X|Xorg|weston|gnome-shell' >/dev/null 2>&1; then
     return 1  # Not headless
   fi
 
@@ -967,10 +959,12 @@ show_traditional_menu() {
 get_installed_kernel_types() {
   local kernel_types=()
   command_exists pacman || { echo "Error: pacman not found." >&2; return 1; }
-  pacman -Q linux &>/dev/null && kernel_types+=("linux")
-  pacman -Q linux-lts &>/dev/null && kernel_types+=("linux-lts")
-  pacman -Q linux-zen &>/dev/null && kernel_types+=("linux-zen")
-  pacman -Q linux-hardened &>/dev/null && kernel_types+=("linux-hardened")
+  # One pacman query for all candidates instead of one `pacman -Q` per
+  # kernel (4 forks → 1). Output order matches the requested order.
+  local k
+  while IFS= read -r k; do
+    kernel_types+=("$k")
+  done < <(pacman -Qq linux linux-lts linux-zen linux-hardened 2>/dev/null)
   # One per line (not space-joined) so callers can safely `mapfile -t` this
   # without word-splitting assumptions.
   printf '%s\n' "${kernel_types[@]}"

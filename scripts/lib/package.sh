@@ -237,52 +237,83 @@ install_package_generic() {
     shift
     local packages=("$@")
     local failed=0
+    local manager_name=""
 
-    for pkg in "${packages[@]}"; do
-        local manager_name=""
+    case "$manager" in
+        pacman) manager_name="pacman" ;;
+        aur) manager_name="AUR" ;;
+        flatpak) manager_name="Flatpak" ;;
+        *)
+            log_error "Unknown package manager: $manager"
+            return 1
+            ;;
+    esac
 
+    # Dry-run: keep the per-package preview so callers can count them.
+    if [ "${DRY_RUN:-false}" = true ]; then
+        for pkg in "${packages[@]}"; do
+            ui_info "Dry-run: Would install $pkg via $manager_name"
+            INSTALLED_PACKAGES+=("$pkg")
+        done
+        return 0
+    fi
+
+    # Batch first: one transaction for the whole list is dramatically faster
+    # than N (each pacman/AUR/flatpak run pays DB lock, sync checks, and
+    # alpm-hook overhead). Pacman transactions are atomic and AUR helpers
+    # abort the whole set on any build failure, so on any batch failure we
+    # fall back to installing individually — one bad package can't sink the
+    # rest, and already-installed packages are skipped (--needed).
+    if [ "${#packages[@]}" -gt 1 ]; then
+        local batch_rc=0
         case "$manager" in
             pacman)
-                manager_name="pacman"
+                run_with_retry sudo -n pacman -S --noconfirm --needed "${packages[@]}" >>"$INSTALL_LOG" 2>&1 || batch_rc=1
                 ;;
             aur)
-                manager_name="AUR"
+                run_with_retry "$(aur_helper)" -S --noconfirm --needed "${packages[@]}" >>"$INSTALL_LOG" 2>&1 || batch_rc=1
                 ;;
             flatpak)
-                manager_name="Flatpak"
+                # flatpak_install_batch already falls back to individual
+                # installs and records per-package results itself.
+                flatpak_install_batch "${packages[@]}" || batch_rc=1
                 ;;
-            *)
-                log_error "Unknown package manager: $manager"
-                return 1
+        esac
+        if [ "$batch_rc" -eq 0 ]; then
+            INSTALLED_PACKAGES+=("${packages[@]}")
+            ui_success "Package installation completed"
+            return 0
+        fi
+        if [ "$manager" = "flatpak" ]; then
+            # Its fallback loop already retried each app; don't retry twice.
+            ui_warn "Package installation completed with failures"
+            return 1
+        fi
+        ui_warn "Batch install had failures, trying individually..."
+    fi
+
+    for pkg in "${packages[@]}"; do
+        local error_output install_result=1
+        case "$manager" in
+            pacman)
+                error_output=$(run_with_retry sudo -n pacman -S --noconfirm --needed "$pkg") && install_result=0
+                ;;
+            aur)
+                error_output=$(run_with_retry "$(aur_helper)" -S --noconfirm --needed "$pkg") && install_result=0
+                ;;
+            flatpak)
+                error_output=$(run_with_retry sudo -n flatpak install -y --noninteractive flathub "$pkg" 2>&1) && install_result=0
                 ;;
         esac
 
-        if [ "${DRY_RUN:-false}" = true ]; then
-            ui_info "Dry-run: Would install $pkg via $manager_name"
+        if [ "$install_result" -eq 0 ]; then
             INSTALLED_PACKAGES+=("$pkg")
         else
-            local error_output install_result=1
-            case "$manager" in
-                pacman)
-                    error_output=$(run_with_retry sudo -n pacman -S --noconfirm --needed "$pkg") && install_result=0
-                    ;;
-                aur)
-                    error_output=$(run_with_retry "$(aur_helper)" -S --noconfirm --needed "$pkg") && install_result=0
-                    ;;
-                flatpak)
-                    error_output=$(run_with_retry sudo -n flatpak install -y --noninteractive flathub "$pkg" 2>&1) && install_result=0
-                    ;;
-            esac
-
-            if [ "$install_result" -eq 0 ]; then
-                INSTALLED_PACKAGES+=("$pkg")
-            else
-                ui_error "Failed to install $pkg"
-                FAILED_PACKAGES+=("$pkg")
-                log_error "Failed to install $pkg via $manager_name"
-                echo "$error_output" >> "$INSTALL_LOG"
-                failed=$((failed + 1))
-            fi
+            ui_error "Failed to install $pkg"
+            FAILED_PACKAGES+=("$pkg")
+            log_error "Failed to install $pkg via $manager_name"
+            echo "$error_output" >> "$INSTALL_LOG"
+            failed=$((failed + 1))
         fi
     done
 
@@ -308,9 +339,16 @@ install_packages_batch() {
         return 0
     fi
 
+    # One query for the whole list instead of one `pacman -Q`/flatpak call
+    # per package (N forks → 1 fork; exact-line greps keep the old semantics).
     local packages_to_install=()
+    local installed_list=""
+    case "$manager" in
+        pacman|aur) installed_list=$(pacman -Qq 2>/dev/null || true) ;;
+        flatpak) installed_list=$(flatpak list --app --columns=application 2>/dev/null || true) ;;
+    esac
     for pkg in "${packages[@]}"; do
-        if ! is_package_installed "$manager" "$pkg"; then
+        if ! grep -qxF "$pkg" <<<"$installed_list"; then
             packages_to_install+=("$pkg")
         fi
     done

@@ -74,9 +74,13 @@ fi
 if ! declare -f mono_now >/dev/null 2>&1; then
 mono_now() {
     # Integer monotonic seconds since boot; falls back to $SECONDS where
-    # /proc/uptime is unavailable.
-    local up
-    up=$(awk '{print int($1)}' /proc/uptime 2>/dev/null || echo "")
+    # /proc/uptime is unavailable. Uses the `read` builtin — no awk fork.
+    # The -r test avoids the shell's own (unredirectable) open-error message.
+    local up=""
+    if [[ -r /proc/uptime ]]; then
+        read -r up _ < /proc/uptime || up=""
+    fi
+    up=${up%%.*}
     if [[ "$up" =~ ^[0-9]+$ ]]; then
         echo "$up"
     else
@@ -98,8 +102,9 @@ if ! declare -f log_to_file >/dev/null 2>&1; then
 log_to_file() {
     local message="${1:-}"
     [[ -n "$message" ]] || return 0
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo "[$timestamp] $message" >> "$INSTALL_LOG"
+    # printf '%(...)T' formats via the shell builtin — no `date` fork.
+    # Every log_info/log_success/... line calls this, hundreds per install.
+    printf '[%(%Y-%m-%d %H:%M:%S)T] %s\n' -1 "$message" >> "$INSTALL_LOG"
 }
 fi
 

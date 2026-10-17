@@ -8,8 +8,11 @@ set -uo pipefail
 # dashboard.sh functional if sourced standalone).
 if ! declare -f mono_now >/dev/null 2>&1; then
 mono_now() {
-    local up
-    up=$(awk '{print int($1)}' /proc/uptime 2>/dev/null || echo "")
+    local up=""
+    if [[ -r /proc/uptime ]]; then
+        read -r up _ < /proc/uptime || up=""
+    fi
+    up=${up%%.*}
     if [[ "$up" =~ ^[0-9]+$ ]]; then
         echo "$up"
     else

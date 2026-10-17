@@ -182,20 +182,34 @@ export START_TIME_SEC
 # present before any interactive menu/prompt. Dry-run never installs
 # helpers. All output goes to the log, never to the terminal. Tries fast
 # path first (-S), then with a DB sync (-Sy) for fresh archinstall systems
-# with a stale/empty pacman DB.
+# with a stale/empty pacman DB. Batched: one transaction for both helpers
+# (individual retry only if that fails, so one missing helper doesn't sink
+# the other).
 if [[ "$DRY_RUN" != true ]]; then
+  __bootstrap_missing=()
   for __bootstrap_pkg in gum yq; do
-    command -v "$__bootstrap_pkg" >/dev/null 2>&1 && continue
-    log_to_file "Installing $__bootstrap_pkg..."
-    if sudo pacman -S --noconfirm --needed "$__bootstrap_pkg" >>"$INSTALL_LOG" 2>&1; then
-      log_to_file "$__bootstrap_pkg installed successfully"
-    elif sudo pacman -Sy --noconfirm --needed "$__bootstrap_pkg" >>"$INSTALL_LOG" 2>&1; then
-      log_to_file "$__bootstrap_pkg installed successfully (after DB sync)"
-    else
-      log_to_file "Failed to install $__bootstrap_pkg, continuing without it"
-    fi
+    command -v "$__bootstrap_pkg" >/dev/null 2>&1 || __bootstrap_missing+=("$__bootstrap_pkg")
   done
-  unset __bootstrap_pkg
+  if [[ ${#__bootstrap_missing[@]} -gt 0 ]]; then
+    log_to_file "Installing ${__bootstrap_missing[*]}..."
+    if sudo pacman -S --noconfirm --needed "${__bootstrap_missing[@]}" >>"$INSTALL_LOG" 2>&1; then
+      log_to_file "${__bootstrap_missing[*]} installed successfully"
+    elif sudo pacman -Sy --noconfirm --needed "${__bootstrap_missing[@]}" >>"$INSTALL_LOG" 2>&1; then
+      log_to_file "${__bootstrap_missing[*]} installed successfully (after DB sync)"
+    else
+      for __bootstrap_pkg in "${__bootstrap_missing[@]}"; do
+        if ! command -v "$__bootstrap_pkg" >/dev/null 2>&1; then
+          if sudo pacman -Sy --noconfirm --needed "$__bootstrap_pkg" >>"$INSTALL_LOG" 2>&1; then
+            log_to_file "$__bootstrap_pkg installed successfully (retry after DB sync)"
+          else
+            log_to_file "Failed to install $__bootstrap_pkg, continuing without it"
+          fi
+        fi
+      done
+      unset __bootstrap_pkg
+    fi
+  fi
+  unset __bootstrap_missing
   # supports_gum() caches its first result — clear it so the menu and all
   # later prompts see the freshly installed binary.
   __supports_gum_cache=""

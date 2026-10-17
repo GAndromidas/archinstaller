@@ -46,7 +46,13 @@ harden_sshd() {
   fi
 
   local dropin_dir="/etc/ssh/sshd_config.d"
-  local dropin="$dropin_dir/10-archinstaller-hardening.conf"
+  # 00- prefix on purpose: sshd expands the Include wildcard in sorted
+  # order and the first-obtained value of a key wins. A higher-sorted
+  # drop-in (vendor file, legacy 10-* copy) would otherwise silently
+  # override ours even with the Include correctly at the top — observed
+  # in real runs (hardening "written but not in effect").
+  local dropin="$dropin_dir/00-archinstaller-hardening.conf"
+  local legacy_dropin="$dropin_dir/10-archinstaller-hardening.conf"
   local created_by_us=false
   [[ -f "$dropin" ]] || created_by_us=true
 
@@ -75,6 +81,12 @@ harden_sshd() {
     return 0
   fi
 
+  # Retire the pre-rename legacy drop-in so only one of ours exists.
+  if sudo -n test -f "$legacy_dropin" 2>/dev/null; then
+    sudo -n rm -f "$legacy_dropin" 2>/dev/null || true
+    log_info "Migrated legacy SSH drop-in 10-archinstaller-hardening.conf → 00-archinstaller-hardening.conf"
+  fi
+
   # Arch's sshd_config ships `Include sshd_config.d/*.conf`; on a system
   # where it was removed the drop-in is silently ignored — detect that via
   # the effective config and repair it by restoring the Include line itself
@@ -96,10 +108,16 @@ harden_sshd() {
   fi
   if [[ "${effective,,}" != "${want_permit,,}" ]]; then
     # Don't swallow the diagnosis: sshd -T stderr (hidden above) often names
-    # the real cause (unreadable host keys, bad perms, ...).
-    local _sshd_t_err
+    # the real cause (unreadable host keys, bad perms, ...), and a competing
+    # drop-in sorting first explains most Include-order mysteries. Log both
+    # so the log file pinpoints the winner without a manual session.
+    local _sshd_t_err _dir_list _prl_files
     _sshd_t_err=$(sudo -n sshd -T 2>&1 >/dev/null || true)
     [[ -n "$_sshd_t_err" ]] && log_to_file "sshd -T stderr: $_sshd_t_err"
+    _dir_list=$(sudo -n ls -1 "$dropin_dir" 2>/dev/null || true)
+    [[ -n "$_dir_list" ]] && log_to_file "sshd_config.d entries: ${_dir_list//$'\n'/ }"
+    _prl_files=$(sudo -n grep -il 'permitrootlogin' "$dropin_dir"/*.conf 2>/dev/null || true)
+    [[ -n "$_prl_files" ]] && log_to_file "Drop-ins defining PermitRootLogin: ${_prl_files//$'\n'/ }"
     log_warning "SSH hardening still not in effect — leaving $dropin in place (check Include in /etc/ssh/sshd_config)"
     return 0
   fi

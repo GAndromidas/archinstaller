@@ -235,6 +235,23 @@ else
   info "fail2ban not installed — skipping"
 fi
 
+if command -v sshd &>/dev/null; then
+  prl=$(sudo sshd -T 2>/dev/null | awk '$1=="permitrootlogin" {print $2; exit}')
+  case "${prl,,}" in
+    prohibit-password|no)
+      ok "sshd PermitRootLogin is hardened ($prl)"
+      ;;
+    "")
+      bad "sshd -T produced no config — SSH hardening state unknown (run 'sudo sshd -T' to see the error)"
+      ;;
+    *)
+      bad "sshd PermitRootLogin is '$prl' (want prohibit-password) — check sshd_config.d drop-in sort order and Include position"
+      ;;
+  esac
+else
+  info "openssh not installed — skipping sshd hardening check"
+fi
+
 section "Networking"
 
 if command -v ethtool &>/dev/null; then

@@ -96,16 +96,20 @@ pacman_install_single() {
     local verbose="${2:-false}"
 
     if [ "$verbose" = true ]; then
-        printf '%b' "${THEME_TEXT}Installing Pacman package:${RESET} %-30s" "$pkg"
+        if [[ -t 1 ]]; then
+            printf '%b' "${THEME_TEXT}Installing Pacman package:${RESET} %-30s" "$pkg"
+        else
+            printf 'Installing Pacman package: %s\n' "$pkg"
+        fi
     fi
 
     local output
     if output=$(run_with_retry sudo -n pacman -S --noconfirm --needed "$pkg"); then
-        [ "$verbose" = true ] && printf '%b' "${THEME_SUCCESS} ✓ Success${RESET}\n"
+        [ "$verbose" = true ] && ui_line "$THEME_SUCCESS" "  ✓ Success"
         INSTALLED_PACKAGES+=("$pkg")
         return 0
     else
-        [ "$verbose" = true ] && printf '%b' "${THEME_ERROR} ✗ Failed${RESET}\n"
+        [ "$verbose" = true ] && ui_line "$THEME_ERROR" "  ✗ Failed"
         if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
             while IFS= read -r line; do printf '    %s\n' "$line"; done <<<"$output"
         fi
@@ -129,16 +133,20 @@ yay_install_single() {
     fi
 
     if [ "$verbose" = true ]; then
-        printf '%b' "${THEME_TEXT}Installing AUR package:${RESET} %-30s" "$pkg"
+        if [[ -t 1 ]]; then
+            printf '%b' "${THEME_TEXT}Installing AUR package:${RESET} %-30s" "$pkg"
+        else
+            printf 'Installing AUR package: %s\n' "$pkg"
+        fi
     fi
 
     local output
     if output=$(run_with_retry "$helper" -S --noconfirm --needed "$pkg"); then
-        [ "$verbose" = true ] && printf '%b' "${THEME_SUCCESS} ✓ Success${RESET}\n"
+        [ "$verbose" = true ] && ui_line "$THEME_SUCCESS" "  ✓ Success"
         INSTALLED_PACKAGES+=("$pkg")
         return 0
     else
-        [ "$verbose" = true ] && printf '%b' "${THEME_ERROR} ✗ Failed${RESET}\n"
+        [ "$verbose" = true ] && ui_line "$THEME_ERROR" "  ✗ Failed"
         if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
             while IFS= read -r line; do printf '    %s\n' "$line"; done <<<"$output"
         fi
@@ -160,16 +168,20 @@ flatpak_install_single() {
     fi
 
     if [ "$verbose" = true ]; then
-        printf '%b' "${THEME_TEXT}Installing Flatpak app:${RESET} %-30s" "$pkg"
+        if [[ -t 1 ]]; then
+            printf '%b' "${THEME_TEXT}Installing Flatpak app:${RESET} %-30s" "$pkg"
+        else
+            printf 'Installing Flatpak app: %s\n' "$pkg"
+        fi
     fi
 
     local output
     if output=$(run_with_retry sudo -n flatpak install -y --noninteractive flathub "$pkg" 2>&1); then
-        [ "$verbose" = true ] && printf '%b' "${THEME_SUCCESS} ✓ Success${RESET}\n"
+        [ "$verbose" = true ] && ui_line "$THEME_SUCCESS" "  ✓ Success"
         INSTALLED_PACKAGES+=("$pkg")
         return 0
     else
-        [ "$verbose" = true ] && printf '%b' "${THEME_ERROR} ✗ Failed${RESET}\n"
+        [ "$verbose" = true ] && ui_line "$THEME_ERROR" "  ✗ Failed"
         if [ "$verbose" = true ] || [[ "$output" == *"error:"* ]]; then
             while IFS= read -r line; do printf '    %s\n' "$line"; done <<<"$output"
         fi

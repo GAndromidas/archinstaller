@@ -37,12 +37,16 @@ cosmic_install_programs=(); cosmic_remove_programs=()
 
 pacman_remove() {
 	local pkg="${1:-}"
-	printf '%b' "${THEME_WARN}Removing Pacman package:${RESET} %-30s" "$pkg"
+	if [[ -t 1 ]]; then
+		printf '%b' "${THEME_WARN}Removing Pacman package:${RESET} %-30s" "$pkg"
+	else
+		printf 'Removing Pacman package: %-30s\n' "$pkg"
+	fi
 	if sudo -n pacman -Rns --noconfirm "$pkg" >>"$INSTALL_LOG" 2>&1; then
-		printf '%b' "${THEME_SUCCESS} ✓ Success${RESET}\n"
+		ui_line "$THEME_SUCCESS" "  ✓ Success"
 		return 0
 	else
-		printf '%b' "${THEME_ERROR} ✗ Failed${RESET}\n"
+		ui_line "$THEME_ERROR" "  ✗ Failed"
 		return 1
 	fi
 }
@@ -89,7 +93,21 @@ determine_package_lists() {
 		yay_programs=("${yay_programs_minimal[@]}")
 		;;
 	"server")
-		essential_programs=("${essential_programs_server[@]}")
+		# Base pacman packages apply to every mode (programs.yaml says so
+		# explicitly); the server list only adds server-specific entries.
+		# It previously REPLACED the base list, silently dropping every
+		# shared tool in server mode.
+		essential_programs=("${pacman_programs[@]}" "${essential_programs_server[@]}")
+		# Dedupe: the server list repeats several base entries and pacman
+		# prefers its batch arguments unique (also keeps dry-run preview clean).
+		local -A _seen=()
+		local _dedup=() _p
+		for _p in "${essential_programs[@]}"; do
+			[[ ${_seen["$_p"]:-} ]] && continue
+			_seen["$_p"]=1
+			_dedup+=("$_p")
+		done
+		essential_programs=("${_dedup[@]}")
 		# No AUR or Flatpak packages for server mode by default
 		;;
 	*)
@@ -309,14 +327,14 @@ install_pacman_packages() {
 	fi
 
 	# Try batch install first for speed
-	printf '%b' "${THEME_TEXT}Attempting batch installation...${RESET}\n"
+	ui_info "Attempting batch installation..."
 	if sudo -n pacman -S --noconfirm --needed "${essential_programs[@]}" >>"$INSTALL_LOG" 2>&1; then
-		printf '%b' "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
+		ui_success "✓ Batch installation successful"
 		PROGRAMS_INSTALLED+=("${essential_programs[@]}")
 		return
 	fi
 
-	printf '%b' "${THEME_WARN} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
+	ui_warn "! Batch installation failed. Falling back to individual installation..."
 	for pkg in "${essential_programs[@]}"; do
 		if pacman_install_single "$pkg" true; then PROGRAMS_INSTALLED+=("$pkg"); else PROGRAMS_ERRORS+=("$pkg (pacman)"); fi
 	done
@@ -338,16 +356,16 @@ install_aur_packages() {
 	fi
 
 	# Try batch install first
-	printf '%b' "${THEME_TEXT}Attempting batch installation...${RESET}\n"
+	ui_info "Attempting batch installation..."
 	if yay -S --noconfirm --needed "${yay_programs[@]}" >>"$INSTALL_LOG" 2>&1; then
-		printf '%b' "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
+		ui_success "✓ Batch installation successful"
 		for pkg in "${yay_programs[@]}"; do
 			PROGRAMS_INSTALLED+=("$pkg (AUR)")
 		done
 		return
 	fi
 
-	printf '%b' "${THEME_WARN} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
+	ui_warn "! Batch installation failed. Falling back to individual installation..."
 	for pkg in "${yay_programs[@]}"; do
 		if yay_install_single "$pkg" true; then PROGRAMS_INSTALLED+=("$pkg (AUR)"); else PROGRAMS_ERRORS+=("$pkg (AUR)"); fi
 	done

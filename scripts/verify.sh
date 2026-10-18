@@ -33,6 +33,9 @@ ok()   { printf "  ${GREEN}✓${RESET} %s\n" "$1"; PASS=$((PASS+1)); }
 warn() { printf "  ${YELLOW}⚠${RESET} %s\n" "$1"; WARN=$((WARN+1)); }
 bad()  { printf "  ${RED}✗${RESET} %s\n" "$1"; FAIL=$((FAIL+1)); }
 info() { [[ "$VERBOSE" == true ]] && printf "  ${MUTED}·${RESET} %s\n" "$1"; }
+# Neutral, always-visible note (no bench counting): for expected no-op
+# sections so they don't render as an empty header in the report.
+note() { printf "  ${MUTED}·${RESET} %s\n" "$1"; }
 section() { printf "\n${BOLD}${BLUE}── %s ──${RESET}\n" "$1"; }
 
 section "Boot"
@@ -295,9 +298,9 @@ if command -v ethtool &>/dev/null; then
       fi
     fi
   done
-  [[ "$wol_checked" == false ]] && info "No Wake-on-LAN-capable wired interface found — expected on laptops/Wi-Fi-only systems"
+  [[ "$wol_checked" == false ]] && note "No Wake-on-LAN-capable wired interface found (expected on VMs / Wi-Fi-only systems) — nothing to verify"
 else
-  info "ethtool not available, skipping Wake-on-LAN check"
+  note "ethtool not available — skipping Wake-on-LAN check"
 fi
 
 section "Maintenance timers"

@@ -70,17 +70,17 @@ install_pacman_packages() {
 	fi
 
 	# Try batch install first
-	printf '%b' "${THEME_TEXT}Attempting batch installation...${RESET}\n"
+	ui_info "Attempting batch installation..."
 	# Capture output so batch failures are logged with context on fallback.
 	local batch_output=""
 	if batch_output=$(sudo -n pacman -S --noconfirm --needed "${pacman_gaming_programs[@]}" 2>&1); then
-		printf '%b' "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
+		ui_success "✓ Batch installation successful"
 		GAMING_INSTALLED+=("${pacman_gaming_programs[@]}")
 		return
 	fi
 	log_debug "Gaming batch install failed, falling back to per-package" "$batch_output"
 
-	printf '%b' "${THEME_WARN} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
+	ui_warn "! Batch installation failed. Falling back to individual installation..."
 
 	for pkg in "${pacman_gaming_programs[@]}"; do
 		if pacman_install_single "$pkg" true; then GAMING_INSTALLED+=("$pkg"); else GAMING_ERRORS+=("$pkg (pacman)"); fi
@@ -109,14 +109,14 @@ install_aur_packages() {
 	fi
 
 	# Try batch install first
-	printf '%b' "${THEME_TEXT}Attempting batch AUR installation...${RESET}\n"
+	ui_info "Attempting batch AUR installation..."
 	if yay -S --noconfirm --needed "${aur_gaming_programs[@]}" >>"$INSTALL_LOG" 2>&1; then
-		printf '%b' "${THEME_SUCCESS} ✓ Batch AUR installation successful${RESET}\n"
+		ui_success "✓ Batch AUR installation successful"
 		GAMING_INSTALLED+=("${aur_gaming_programs[@]}")
 		return
 	fi
 
-	printf '%b' "${THEME_WARN} ! Batch AUR installation failed. Falling back to individual installation...${RESET}\n"
+	ui_warn "! Batch AUR installation failed. Falling back to individual installation..."
 
 	for pkg in "${aur_gaming_programs[@]}"; do
 		if yay_install_single "$pkg" true; then GAMING_INSTALLED+=("$pkg"); else GAMING_ERRORS+=("$pkg (AUR)"); fi

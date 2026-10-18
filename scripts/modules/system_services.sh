@@ -187,6 +187,7 @@ harden_sshd_restore_include() {
   local main="/etc/ssh/sshd_config"
   local include_re='^[[:space:]]*Include[[:space:]].*sshd_config\.d'
   local first_include
+  local _offending=""
   first_include=$(sudo -n grep -nE "$include_re" "$main" 2>/dev/null | head -1 | cut -d: -f1 || echo "")
   if [[ -n "$first_include" ]]; then
     # Include exists — but does a managed key precede it (and therefore win)?
@@ -200,6 +201,17 @@ harden_sshd_restore_include() {
       return 0
     fi
     log_warning "Managed SSH setting precedes Include in $main (first value wins) — moving Include to the top"
+    # Forensics: on one system this path fires on EVERY rerun even after the
+    # previous run placed the Include first — something outside the installer
+    # rewrites sshd_config between runs. Log the actual offending lines so the
+    # next log settles it definitively.
+    _offending=$(sudo -n awk -v n="$first_include" '
+      NR >= n { exit }
+      /^[[:space:]]*#/ { next }
+      /^[[:space:]]*$/ { next }
+      { k = tolower($1); if (k ~ /^(permitrootlogin|maxauthtries|logingracetime|maxstartups|clientaliveinterval|clientalivecountmax)$/) print NR ": " $0 }
+    ' "$main" 2>/dev/null || true)
+    [[ -n "$_offending" ]] && log_to_file "Managed keys above Include (line $first_include): ${_offending//$'\n'/ ; }"
   else
     log_warning "No Include for sshd_config.d in $main — adding it at the top"
   fi

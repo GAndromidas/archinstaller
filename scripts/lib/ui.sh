@@ -252,6 +252,21 @@ ui_header() {
     echo ""
 }
 
+# Themed status line with the log-purity discipline: theme color on a real
+# TTY, plain text when stdout is piped/redirected (INSTALL_LOG must never
+# contain ANSI escapes). Use for direct progress prints in install loops
+# instead of bare `printf '%b' "$THEME_*..."`, which would leak color into
+# the log under dashboard_run's stdout redirect.
+ui_line() {
+    local color="${1:-}"
+    local plain="${2:-}"
+    if [[ -t 1 ]]; then
+        printf '%b\n' "${color}${plain}${RESET}"
+    else
+        printf '%s\n' "$plain"
+    fi
+}
+
 # Info message (white)
 # Usage: ui_info "Message"
 # Colored on a TTY, plain when stdout is piped/dashboard-redirected (the log

@@ -103,14 +103,14 @@ install_all_packages() {
     return 0
   fi
 
-  printf '%b' "${THEME_TEXT}Attempting batch installation...${RESET}\n"
+  ui_info "Attempting batch installation..."
   if sudo -n pacman -S --noconfirm --needed "${all_packages[@]}" >>"$INSTALL_LOG" 2>&1; then
-    printf '%b' "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
+    ui_success "✓ Batch installation successful"
     INSTALLED_PACKAGES+=("${all_packages[@]}")
     return 0
   fi
 
-  printf '%b' "${THEME_WARN} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
+  ui_warn "! Batch installation failed. Falling back to individual installation..."
 
   if [ ${#all_packages[@]} -eq 0 ]; then
     log_warning "No packages to install individually"
@@ -217,14 +217,14 @@ install_kernel_headers_for_all() {
   done
 
   # Try batch install first
-  printf '%b' "${THEME_TEXT}Attempting batch installation for headers...${RESET}\n"
+  ui_info "Attempting batch installation for headers..."
   if sudo -n pacman -S --noconfirm --needed "${header_packages[@]}" >>"$INSTALL_LOG" 2>&1; then
-    printf '%b' "${THEME_SUCCESS} ✓ Batch installation successful${RESET}\n"
+    ui_success "✓ Batch installation successful"
     INSTALLED_PACKAGES+=("${header_packages[@]}")
     return 0
   fi
 
-  printf '%b' "${THEME_WARN} ! Batch installation failed. Falling back to individual installation...${RESET}\n"
+  ui_warn "! Batch installation failed. Falling back to individual installation..."
 
   for kernel in "${kernel_types[@]}"; do
     local headers_package="${kernel}-headers"

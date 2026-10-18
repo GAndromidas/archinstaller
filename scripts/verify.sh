@@ -236,16 +236,21 @@ else
 fi
 
 if command -v sshd &>/dev/null; then
-  prl=$(sudo sshd -T 2>/dev/null | awk '$1=="permitrootlogin" {print $2; exit}')
+  ssh_t=$(sudo sshd -T 2>&1); ssh_rc=$?
+  prl=$(awk '$1=="permitrootlogin" {print $2; exit}' <<< "$ssh_t")
   case "${prl,,}" in
     prohibit-password|no)
       ok "sshd PermitRootLogin is hardened ($prl)"
       ;;
     "")
-      bad "sshd -T produced no config — SSH hardening state unknown (run 'sudo sshd -T' to see the error)"
+      if [[ "$ssh_rc" -ne 0 ]]; then
+        bad "sshd -T failed (rc=$ssh_rc): ${ssh_t:0:160}"
+      else
+        bad "sshd -T ran cleanly but has no permitrootlogin line — unexpected openssh version or output"
+      fi
       ;;
     *)
-      bad "sshd PermitRootLogin is '$prl' (want prohibit-password) — check sshd_config.d drop-in sort order and Include position"
+      bad "sshd PermitRootLogin is '$prl' (want prohibit-password or stricter) — check sshd_config.d drop-in sort order and Include position"
       ;;
   esac
 else

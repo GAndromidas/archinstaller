@@ -37,6 +37,16 @@ setup_firewall_and_services() {
 # restoring that single Include line (backup + validation + rollback).
 # Every write is validated with `sshd -t`, and the daemon is reloaded
 # (not restarted) so active sessions survive.
+# "no" is strictly stronger than prohibit-password (no root login at all,
+# not even by key) — both count as hardened. Checking belongs next to the
+# drop-in writes so harden_sshd and verify.sh agree.
+if ! declare -f sshd_hardened_enough >/dev/null 2>&1; then
+sshd_hardened_enough() {
+  local v="${1,,}"
+  [[ "$v" == "prohibit-password" || "$v" == "no" ]]
+}
+fi
+
 harden_sshd() {
   step "Applying safe SSH hardening"
 
@@ -56,10 +66,9 @@ harden_sshd() {
   local created_by_us=false
   [[ -f "$dropin" ]] || created_by_us=true
 
-  local want_permit="prohibit-password"
   local effective=""
   effective=$(sudo -n sshd -T 2>/dev/null | awk '$1=="permitrootlogin" {print $2; exit}' || true)
-  if [[ "${effective,,}" == "${want_permit,,}" ]]; then
+  if sshd_hardened_enough "$effective"; then
     log_info "SSH hardening already in effect (PermitRootLogin $effective) — nothing to do"
     return 0
   fi
@@ -100,25 +109,30 @@ harden_sshd() {
     return 0
   fi
   effective=$(sudo -n sshd -T 2>/dev/null | awk '$1=="permitrootlogin" {print $2; exit}' || true)
-  if [[ "${effective,,}" != "${want_permit,,}" ]]; then
-    log_warning "Drop-in ignored (no Include directive?) — restoring Include in sshd_config"
+  if ! sshd_hardened_enough "$effective"; then
+    log_warning "Drop-in ignored or overridden (no Include directive?) — restoring Include in sshd_config"
     if harden_sshd_restore_include; then
       effective=$(sudo -n sshd -T 2>/dev/null | awk '$1=="permitrootlogin" {print $2; exit}' || true)
     fi
   fi
-  if [[ "${effective,,}" != "${want_permit,,}" ]]; then
-    # Don't swallow the diagnosis: sshd -T stderr (hidden above) often names
-    # the real cause (unreadable host keys, bad perms, ...), and a competing
-    # drop-in sorting first explains most Include-order mysteries. Log both
-    # so the log file pinpoints the winner without a manual session.
-    local _sshd_t_err _dir_list _prl_files
-    _sshd_t_err=$(sudo -n sshd -T 2>&1 >/dev/null || true)
-    [[ -n "$_sshd_t_err" ]] && log_to_file "sshd -T stderr: $_sshd_t_err"
+  if ! sshd_hardened_enough "$effective"; then
+    # Deep-dive before warning: the observed failure mode is sshd -T
+    # succeeding (rc 0, empty stderr) while reporting a value we did not
+    # write. Log the VALUE plus rc — that identifies which directive wins —
+    # along with the drop-in directory contents for the competing-file case.
+    local _t_out="" _t_rc=0 _t_prl="" _sshd_t_err _dir_list _prl_files
+    _t_out=$(sudo -n sshd -T 2>/dev/null) || _t_rc=$?
+    _t_prl=$(awk '$1=="permitrootlogin" {print; exit}' <<< "$_t_out")
+    log_to_file "sshd -T rc=$_t_rc; ${_t_prl:-no permitrootlogin line in output}"
+    if [[ "$_t_rc" -ne 0 ]]; then
+      _sshd_t_err=$(sudo -n sshd -T 2>&1 >/dev/null || true)
+      [[ -n "$_sshd_t_err" ]] && log_to_file "sshd -T stderr: $_sshd_t_err"
+    fi
     _dir_list=$(sudo -n ls -1 "$dropin_dir" 2>/dev/null || true)
     [[ -n "$_dir_list" ]] && log_to_file "sshd_config.d entries: ${_dir_list//$'\n'/ }"
     _prl_files=$(sudo -n grep -il 'permitrootlogin' "$dropin_dir"/*.conf 2>/dev/null || true)
     [[ -n "$_prl_files" ]] && log_to_file "Drop-ins defining PermitRootLogin: ${_prl_files//$'\n'/ }"
-    log_warning "SSH hardening still not in effect — leaving $dropin in place (check Include in /etc/ssh/sshd_config)"
+    log_warning "SSH hardening still not in effect (sshd -T reports PermitRootLogin '${effective:-<none>}') — leaving $dropin in place"
     return 0
   fi
 

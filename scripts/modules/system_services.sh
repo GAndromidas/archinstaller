@@ -138,7 +138,7 @@ harden_sshd() {
   fi
   effective=$(sudo -n sshd -T 2>/dev/null | awk '$1=="permitrootlogin" {print $2; exit}' || true)
   if ! sshd_hardened_enough "$effective"; then
-    log_warning "Drop-in ignored or overridden (no Include directive?) — restoring Include in sshd_config"
+    log_warning "SSH hardening could not be confirmed via sshd -T — re-verifying the Include directive in sshd_config"
     if harden_sshd_restore_include; then
       effective=$(sudo -n sshd -T 2>/dev/null | awk '$1=="permitrootlogin" {print $2; exit}' || true)
     fi
@@ -184,14 +184,16 @@ harden_sshd() {
 # `sshd -t` validation with rollback on failure. Returns 0 when a correctly
 # positioned Include is in place afterwards, 1 otherwise.
 harden_sshd_restore_include() {
-  local main="/etc/ssh/sshd_config"
+  local main="${SSHD_MAIN_CONFIG:-/etc/ssh/sshd_config}"
   local include_re='^[[:space:]]*Include[[:space:]].*sshd_config\.d'
   local first_include
   local _offending=""
   first_include=$(sudo -n grep -nE "$include_re" "$main" 2>/dev/null | head -1 | cut -d: -f1 || echo "")
   if [[ -n "$first_include" ]]; then
-    # Include exists — but does a managed key precede it (and therefore win)?
-    if ! sudo -n awk -v n="$first_include" '
+    # Include exists — is a managed key above it (and therefore winning)?
+    # awk exits 0 when the Include is effectively first (clean), non-zero
+    # when a managed key precedes it.
+    if sudo -n awk -v n="$first_include" '
       NR >= n { exit 0 }
       /^[[:space:]]*#/ { next }
       /^[[:space:]]*$/ { next }

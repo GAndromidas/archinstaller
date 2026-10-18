@@ -58,6 +58,12 @@ else
   fail "lib contract unit tests"
 fi
 
+if bash "$ROOT_DIR/tests/unit_ssh.sh"; then
+  pass "ssh hardening unit tests"
+else
+  fail "ssh hardening unit tests"
+fi
+
 if bash "$ROOT_DIR/tests/unit_perf.sh"; then
   pass "perf helper unit tests"
 else

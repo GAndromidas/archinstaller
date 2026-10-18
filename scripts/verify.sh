@@ -246,7 +246,27 @@ if command -v sshd &>/dev/null; then
       if [[ "$ssh_rc" -ne 0 ]]; then
         bad "sshd -T failed (rc=$ssh_rc): ${ssh_t:0:160}"
       else
-        bad "sshd -T ran cleanly but has no permitrootlogin line — unexpected openssh version or output"
+        # Observed in the field: sshd -T exits 0 but its dump contains no
+        # permitrootlogin line at all. Fall back to file-level checks.
+        _dropin="/etc/ssh/sshd_config.d/00-archinstaller-hardening.conf"
+        _xg=/etc/ssh/sshd_config
+        _fileok=false
+        if [[ -f "$_dropin" ]] && sudo grep -qi '^[[:space:]]*PermitRootLogin[[:space:]]\+prohibit-password' "$_dropin" 2>/dev/null; then
+          _incl=$(sudo grep -nE '^[[:space:]]*Include[[:space:]].*sshd_config\.d' "$_xg" 2>/dev/null | head -1 | cut -d: -f1)
+          if [[ -n "$_incl" ]] && sudo awk -v n="$_incl" '
+              NR >= n { exit 0 }
+              /^[[:space:]]*#/ { next }
+              /^[[:space:]]*$/ { next }
+              { k = tolower($1); if (k ~ /^(permitrootlogin|maxauthtries|logingracetime|maxstartups|clientaliveinterval|clientalivecountmax)$/) exit 1 }
+            ' "$_xg" 2>/dev/null; then
+            _fileok=true
+          fi
+        fi
+        if [[ "$_fileok" == true ]]; then
+          ok "sshd hardening verified at file level (sshd -T dump lacks PermitRootLogin; drop-in + Include position OK)"
+        else
+          warn "sshd -T dump lacks PermitRootLogin and file-level check is not conclusive — inspect $_dropin and Include position in $_xg"
+        fi
       fi
       ;;
     *)

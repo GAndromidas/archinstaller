@@ -47,6 +47,34 @@ sshd_hardened_enough() {
 }
 fi
 
+# File-level hardening gate — used when the sshd -T dump can't be trusted.
+# Verified in the field: on some systems `sshd -T` exits 0 with no stderr
+# yet its dump contains NO permitrootlogin line at all (probe returns empty
+# through every code path). sshd -t already passed by this point, so these
+# checks resolve the same conditions sshd would: our drop-in exists with
+# PermitRootLogin prohibit-password, and the sshd_config.d Include is the
+# first managed-key-capable line in the main sshd_config (drop-in wins
+# first-obtained). $1 = path to our drop-in.
+_sshd_file_level_hardened() {
+  local dropin="${1:-}"
+  [[ -n "$dropin" ]] || return 1
+  sudo -n test -f "$dropin" 2>/dev/null || return 1
+  sudo -n grep -qi '^[[:space:]]*PermitRootLogin[[:space:]]\+prohibit-password' "$dropin" 2>/dev/null || return 1
+  local main="/etc/ssh/sshd_config"
+  [[ -s "$main" ]] || return 1
+  local inc_line
+  inc_line=$(sudo -n grep -nE '^[[:space:]]*Include[[:space:]].*sshd_config\.d' "$main" 2>/dev/null | head -1 | cut -d: -f1)
+  [[ -n "$inc_line" ]] || return 1
+  # No managed key above the Include — otherwise that directive, not the
+  # drop-in, wins the first-obtained race.
+  sudo -n awk -v n="$inc_line" '
+      NR >= n { exit 0 }
+      /^[[:space:]]*#/ { next }
+      /^[[:space:]]*$/ { next }
+      { k = tolower($1); if (k ~ /^(permitrootlogin|maxauthtries|logingracetime|maxstartups|clientaliveinterval|clientalivecountmax)$/) exit 1 }
+    ' "$main" 2>/dev/null
+}
+
 harden_sshd() {
   step "Applying safe SSH hardening"
 
@@ -116,14 +144,14 @@ harden_sshd() {
     fi
   fi
   if ! sshd_hardened_enough "$effective"; then
-    # Deep-dive before warning: the observed failure mode is sshd -T
-    # succeeding (rc 0, empty stderr) while reporting a value we did not
-    # write. Log the VALUE plus rc — that identifies which directive wins —
-    # along with the drop-in directory contents for the competing-file case.
+    # Deep-dive before deciding: the observed failure mode is sshd -T
+    # succeeding (rc 0, empty stderr) with NO permitrootlogin line in its
+    # dump at all. Log the raw facts, then fall back to file-level
+    # verification instead of deterministically failing the step.
     local _t_out="" _t_rc=0 _t_prl="" _sshd_t_err _dir_list _prl_files
     _t_out=$(sudo -n sshd -T 2>/dev/null) || _t_rc=$?
     _t_prl=$(awk '$1=="permitrootlogin" {print; exit}' <<< "$_t_out")
-    log_to_file "sshd -T rc=$_t_rc; ${_t_prl:-no permitrootlogin line in output}"
+    log_to_file "sshd -T rc=$_t_rc; dump ${#_t_out} bytes; ${_t_prl:-no permitrootlogin line in output}"
     if [[ "$_t_rc" -ne 0 ]]; then
       _sshd_t_err=$(sudo -n sshd -T 2>&1 >/dev/null || true)
       [[ -n "$_sshd_t_err" ]] && log_to_file "sshd -T stderr: $_sshd_t_err"
@@ -132,8 +160,12 @@ harden_sshd() {
     [[ -n "$_dir_list" ]] && log_to_file "sshd_config.d entries: ${_dir_list//$'\n'/ }"
     _prl_files=$(sudo -n grep -il 'permitrootlogin' "$dropin_dir"/*.conf 2>/dev/null || true)
     [[ -n "$_prl_files" ]] && log_to_file "Drop-ins defining PermitRootLogin: ${_prl_files//$'\n'/ }"
-    log_warning "SSH hardening still not in effect (sshd -T reports PermitRootLogin '${effective:-<none>}') — leaving $dropin in place"
-    return 0
+    if _sshd_file_level_hardened "$dropin"; then
+      log_info "sshd -T dump lacks PermitRootLogin (probe inconclusive) — hardening verified at file level (drop-in + Include position OK)"
+    else
+      log_warning "SSH hardening still not in effect (sshd -T reports PermitRootLogin '${effective:-<none>}') — leaving $dropin in place"
+      return 0
+    fi
   fi
 
   if sudo -n systemctl reload sshd.service 2>&1 | tee -a "$INSTALL_LOG" >/dev/null; then

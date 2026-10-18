@@ -427,8 +427,27 @@ trap on_exit EXIT
 # Keep the order and failure policy of the original installer while using one
 # runner for every normal step. This is intentionally data-driven so adding a
 # future module does not require another large copy/paste block.
+# Module-step contract — the single entry point for running a module.
+#   $1 number  : dashboard step number (1..N, display order)
+#   $2 id      : STATE_FILE key; MUST be unique and stable across releases
+#                (renaming it re-runs the step after a resume)
+#   $3 name    : human-readable name for dashboard/log
+#   $4 script  : absolute path to the module (sourced in a subshell)
+#   $5 policy  : "continue" (default) | "ask" | "stop" — what to do on failure
+# Gaming Mode and Wake-on-LAN bypass this contract (they have meaningful
+# skip semantics: exit 2 = declined) and are wired inline below.
 run_install_step() {
   local number="$1" id="$2" name="$3" script="$4" policy="${5:-continue}"
+
+  # Guard before entering the dashboard frame: a wrong/missing path must
+  # fail loudly here, not as an opaque `source: not found` inside the
+  # module subshell (which dashboard_run reports as a generic failure).
+  if [[ ! -r "$script" ]]; then
+    log_error "Step $number ($name): module script missing or unreadable: $script"
+    ui_error "$name cannot run — module script missing: $script"
+    return 1
+  fi
+
   dashboard_step "$name" "$number"
 
   if is_step_complete "$id"; then

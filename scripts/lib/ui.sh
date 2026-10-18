@@ -58,7 +58,10 @@ supports_gum() {
     [ "$__supports_gum_cache" = "true" ]
 }
 
-# Unified menu function with arrow navigation
+# Unified menu — the ONE menu implementation (gum when available, numbered
+# plain list otherwise). Interactive drawing goes to stderr; when used in
+# command substitution the stdout stream carries ONLY the selected option
+# text. Returns 1 on ESC/EOF in the plain fallback or an aborted gum choose.
 # Usage: ui_menu "Title" "Description" "Option1" "Option2" ...
 ui_menu() {
     local title="${1:-}"
@@ -66,39 +69,49 @@ ui_menu() {
     local description="${2:-}"
     shift 2 || shift $#
     local options=("$@")
+    local -i n=${#options[@]}
+    (( n > 0 )) || return 1
 
     if supports_gum; then
-        if [ -n "$description" ]; then
-            gum style --foreground "$GUM_WARN" --margin "1 0" "$description"
-            echo ""
+        if [[ -n "$description" ]]; then
+            gum style --foreground "$GUM_WARN" --margin "1 0" "$description" >&2
+            echo >&2
         fi
-        gum choose --header="$title" --cursor.foreground "$GUM_PRIMARY" --selected.foreground "$GUM_PRIMARY" "${options[@]}"
-    else
+        local choice=""
+        choice=$(gum choose --header="$title" --cursor.foreground "$GUM_PRIMARY" --selected.foreground "$GUM_PRIMARY" "${options[@]}") || return 1
+        printf '%s\n' "$choice"
+        return 0
+    fi
+
+    {
         echo ""
         echo -e "${THEME_HEADER}$title${RESET}"
-        if [ -n "$description" ]; then
+        if [[ -n "$description" ]]; then
             echo -e "${THEME_MUTED}$description${RESET}"
         fi
         echo ""
-        local i=1
+        local i=1 opt
         for opt in "${options[@]}"; do
             echo -e "  ${THEME_SECONDARY}$i)${RESET} $opt"
             ((i++))
         done
         echo ""
-        local selection
-        while true; do
-            if ! read -r -p "$(echo -e "${THEME_SECONDARY}Select option [1-$((i-1))]: ${RESET}")" selection; then
-                echo ""
-                return 1
-            fi
-            if [[ "$selection" =~ ^[0-9]+$ ]] && [ "$selection" -ge 1 ] && [ "$selection" -le "$((i-1))" ]; then
-                echo "${options[$((selection-1))]}"
-                return 0
-            fi
-            echo -e "${THEME_ERROR}Invalid selection. Try again.${RESET}"
-        done
-    fi
+    } >&2
+    local selection
+    while true; do
+        if ! read -r -p "$(echo -e "${THEME_SECONDARY}Select option [1-$n] (q to cancel): ${RESET}")" selection; then
+            echo >&2
+            return 1
+        fi
+        if [[ "$selection" == q || "$selection" == Q ]]; then
+            return 1
+        fi
+        if [[ "$selection" =~ ^[0-9]+$ ]] && (( selection >= 1 && selection <= n )); then
+            printf '%s\n' "${options[$((selection-1))]}"
+            return 0
+        fi
+        echo -e "${THEME_ERROR}Invalid selection. Try again.${RESET}" >&2
+    done
 }
 
 # Multi-select menu for custom packages

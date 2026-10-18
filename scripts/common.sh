@@ -784,32 +784,79 @@ is_headless_system() {
 
 
 # SECTION 6: DISPLAY & BANNER FUNCTIONS
-show_menu() {
-  # Display detected OS information - use /etc/os-release for EndeavourOS
-  local detected_os=""
+
+# Single source for the OS banner (previously duplicated in three menus).
+detect_os() {
   if [[ -f /etc/os-release ]] && grep -q 'ID="endeavouros"' /etc/os-release 2>/dev/null; then
-    detected_os="EndeavourOS"
+    echo "EndeavourOS"
   elif [[ -f /etc/arch-release ]]; then
-    detected_os="Arch Linux"
+    echo "Arch Linux"
   else
-    detected_os="Unknown"
+    echo "Unknown"
   fi
-  
-  # Check if system is headless and only offer server mode
+}
+
+install_mode_labels=(
+  "Standard - Complete setup with all packages (intermediate users)"
+  "Minimal - Essential tools only (recommended for new users)"
+  "Server - Headless server setup (Docker, SSH, etc.)"
+  "Exit - Cancel installation"
+)
+
+# Map a chosen menu label to INSTALL_MODE with a single validation/echo
+# path (previously duplicated in both menus). Exits on cancel/invalid,
+# matching the historic behavior of both menu variants.
+apply_mode_choice() {
+  local label="${1:-}"
+  local install_mode=""
+  case "$label" in
+    "Standard"*) install_mode="default" ;;
+    "Minimal"*)  install_mode="minimal" ;;
+    "Server"*)   install_mode="server" ;;
+    "Exit"*)
+      ui_info "Installation cancelled. You can run this script again anytime."
+      exit 0
+      ;;
+    *)
+      log_error "Unrecognized mode label: '$label'"
+      exit 1
+      ;;
+  esac
+  INSTALL_MODE="$install_mode"
+  if validate_install_mode "$INSTALL_MODE"; then
+    echo "Installation Mode: $label"
+  else
+    log_error "Failed to validate installation mode"
+    exit 1
+  fi
+}
+
+# Mode selector — the single implementation. Renders the menu through
+# ui_menu (gum when available, numbered fallback otherwise); headless
+# systems skip the menu entirely and get server mode.
+show_menu() {
+  local detected_os
+  detected_os=$(detect_os)
+
   if is_headless_system; then
     ui_warn "Headless system detected. Only Server mode is available."
-    echo -e "${THEME_TEXT}Your OS is: $detected_os${RESET}"
+    ui_info "Your OS is: $detected_os"
     INSTALL_MODE="server"
     echo "Installation Mode: Server - Headless server setup"
     return
   fi
 
-  # Check if gum is available, fallback to traditional menu if not
-  if command -v gum >/dev/null 2>&1; then
-    show_gum_menu
-  else
-    show_traditional_menu
+  ui_info "Your OS is: $detected_os"
+  ui_info "This script will transform your fresh Arch Linux installation into a"
+  ui_info "fully configured system with all the tools you need!"
+
+  local choice
+  if ! choice=$(ui_menu "Choose your installation mode" "" "${install_mode_labels[@]}"); then
+    echo ""
+    ui_info "Installation cancelled. You can run this script again anytime."
+    exit 0
   fi
+  apply_mode_choice "$choice"
 }
 
 # Function to validate INSTALL_MODE
@@ -825,134 +872,6 @@ validate_install_mode() {
       return 1
       ;;
   esac
-}
-
-show_gum_menu() {
-  # Display detected OS information - use /etc/os-release for EndeavourOS
-  local detected_os=""
-  if [[ -f /etc/os-release ]] && grep -q 'ID="endeavouros"' /etc/os-release 2>/dev/null; then
-    detected_os="EndeavourOS"
-  elif [[ -f /etc/arch-release ]]; then
-    detected_os="Arch Linux"
-  else
-    detected_os="Unknown"
-  fi
-  
-  gum style --margin "1 0" --foreground "$GUM_WARN" "Your OS is: $detected_os"
-  echo ""
-  
-  gum style --margin "1 0" --foreground "$GUM_WARN" "This script will transform your fresh Arch Linux installation into a"
-  gum style --margin "0 0 1 0" --foreground "$GUM_WARN" "fully configured system with all the tools you need!"
-
-  local choice=$(gum choose --cursor="-> " --selected.foreground "$GUM_PRIMARY" --cursor.foreground "$GUM_PRIMARY" \
-    "Standard - Complete setup with all packages (intermediate users)" \
-    "Minimal - Essential tools only (recommended for new users)" \
-    "Server - Headless server setup (Docker, SSH, etc.)" \
-    "Exit - Cancel installation")
-
-  case "$choice" in
-    "Standard"*)
-      INSTALL_MODE="default"
-      if validate_install_mode "$INSTALL_MODE"; then
-        echo "Installation Mode: Standard - Complete setup with all packages (intermediate users)"
-      else
-        log_error "Failed to validate installation mode"
-        exit 1
-      fi
-      ;;
-    "Minimal"*)
-      INSTALL_MODE="minimal"
-      if validate_install_mode "$INSTALL_MODE"; then
-        echo "Installation Mode: Minimal - Essential tools only (recommended for new users)"
-      else
-        log_error "Failed to validate installation mode"
-        exit 1
-      fi
-      ;;
-    "Server"*)
-      INSTALL_MODE="server"
-      if validate_install_mode "$INSTALL_MODE"; then
-        echo "Installation Mode: Server - Headless server setup"
-      else
-        log_error "Failed to validate installation mode"
-        exit 1
-      fi
-      ;;
-    "Exit"*)
-      gum style --foreground "$GUM_WARN" "Installation cancelled. You can run this script again anytime."
-      exit 0
-      ;;
-  esac
-}
-
-show_traditional_menu() {
-  # Display detected OS information - use /etc/os-release for EndeavourOS
-  local detected_os=""
-  if [[ -f /etc/os-release ]] && grep -q 'ID="endeavouros"' /etc/os-release 2>/dev/null; then
-    detected_os="EndeavourOS"
-  elif [[ -f /etc/arch-release ]]; then
-    detected_os="Arch Linux"
-  else
-    detected_os="Unknown"
-  fi
-  
-  echo "WELCOME TO ARCH INSTALLER"
-  echo "----------------------------------------"
-  echo "Your OS is: $detected_os"
-  echo ""
-  echo "This script will transform your fresh Arch Linux installation into a"
-  echo "fully configured system with all the tools you need!"
-  echo ""
-  echo -e "${THEME_HEADER}Choose your installation mode:${RESET}"
-  echo ""
-  printf "  1) Standard%-12s - Complete setup with all packages (intermediate users)\n" ""
-  printf "  2) Minimal%-13s - Essential tools only (recommended for new users)\n" ""
-  printf "  3) Server%-13s - Headless server setup (Docker, SSH, etc.)\n" ""
-  printf "  4) Exit%-16s - Cancel installation\n" ""
-  echo ""
-
-  while true; do
-    read -r -p "$(echo -e "${THEME_SECONDARY}Enter your choice [1-4]: ${RESET}")" menu_choice
-          case "$menu_choice" in
-        1)
-          INSTALL_MODE="default"
-          if validate_install_mode "$INSTALL_MODE"; then
-            echo "Installation Mode: Standard - Complete setup with all packages (intermediate users)"
-            break
-          else
-            log_error "Failed to validate installation mode"
-            exit 1
-          fi
-          ;;
-        2)
-          INSTALL_MODE="minimal"
-          if validate_install_mode "$INSTALL_MODE"; then
-            echo "Installation Mode: Minimal - Essential tools only (recommended for new users)"
-            break
-          else
-            log_error "Failed to validate installation mode"
-            exit 1
-          fi
-          ;;
-        3)
-          INSTALL_MODE="server"
-          if validate_install_mode "$INSTALL_MODE"; then
-            echo "Installation Mode: Server - Headless server setup"
-            break
-          else
-            log_error "Failed to validate installation mode"
-            exit 1
-          fi
-          ;;
-      4)
-        echo -e "\n${YELLOW}Installation cancelled. You can run this script again anytime.${RESET}"
-        exit 0
-        ;;
-      *)
-        echo -e "\n${RED}Invalid choice! Please enter 1, 2, 3, or 4.${RESET}\n"
-        ;;
-    esac
-  done
 }
 
 # Function to get all installed kernel types

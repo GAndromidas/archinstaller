@@ -109,7 +109,7 @@ clean() {
 }
 
 alias sync='sudo pacman -Syy'                                                                           # Sync package databases
-alias update='yay -Syyu && flatpak update'                                                              # Update all packages (Pacman, AUR, Flatpak)
+alias update='yay -Syyu && sudo flatpak update'                                                         # Update all packages (Pacman, AUR, Flatpak)
 alias mirror='sudo rate-mirrors --allow-root --save /etc/pacman.d/mirrorlist arch && sudo pacman -Syy'  # Update mirror list
 alias jctl='journalctl -p 3 -xb'                                                                        # Show boot errors
 
